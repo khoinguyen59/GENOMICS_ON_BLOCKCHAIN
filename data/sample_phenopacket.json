@@ -1,0 +1,105 @@
+{
+  "schemaVersion": "2.0.0",
+  "id": "phenopacket-SAMPLE_1000G_KHV01",
+  "subject": {
+    "id": "SAMPLE_1000G_KHV01",
+    "taxonomy": {
+      "id": "NCBITaxon:9606",
+      "label": "Homo sapiens"
+    },
+    "karyotypicSex": "46,XY",
+    "ancestry": "Vietnamese Kinh (KHV) / Southeast Asian"
+  },
+  "phenotypicFeatures": [
+    {
+      "type": {
+        "id": "HP:0034608",
+        "label": "Alcohol flush reaction"
+      },
+      "excluded": false
+    },
+    {
+      "type": {
+        "id": "HP:0000001",
+        "label": "Enhanced sprint performance"
+      },
+      "excluded": false
+    },
+    {
+      "type": {
+        "id": "HP:0012115",
+        "label": "Normal metabolic phenotype"
+      },
+      "excluded": false
+    }
+  ],
+  "diseases": [
+    {
+      "term": {
+        "id": "MONDO:0010001",
+        "label": "Alcohol flush reaction metabolic trait"
+      }
+    }
+  ],
+  "interpretations": [
+    {
+      "id": "interpretation-SAMPLE_1000G_KHV01",
+      "progressStatus": "COMPLETED",
+      "diagnosis": {
+        "disease": {
+          "id": "MONDO:0010001",
+          "label": "Alcohol flush reaction metabolic trait"
+        },
+        "genomicInterpretations": [
+          {
+            "status": "CAUSATIVE",
+            "variantInterpretation": {
+              "acmgPathogenicityClassification": "FUNCTIONAL_POLYMORPHISM",
+              "variationDescriptor": {
+                "id": "var-ALDH2-rs671",
+                "geneContext": {
+                  "valueId": "HGNC:404",
+                  "symbol": "ALDH2"
+                },
+                "expressions": [
+                  {
+                    "syntax": "hgvs",
+                    "value": "NM_000690.4:c.1510G>A"
+                  }
+                ],
+                "allelicState": {
+                  "id": "GENO:0000135",
+                  "label": "heterozygous"
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "metaData": {
+    "created": "2026-10-29T20:00:00Z",
+    "createdBy": "GenomicsBlockchainAgent",
+    "submittedBy": "1000 Genomes Project & dbSNP Molecular Variation Portal",
+    "resources": [
+      {
+        "id": "hp",
+        "name": "human phenotype ontology",
+        "url": "http://purl.obolibrary.org/obo/hp.owl",
+        "version": "2024-08",
+        "namespacePrefix": "HP",
+        "iriPrefix": "http://purl.obolibrary.org/obo/HP_"
+      },
+      {
+        "id": "mondo",
+        "name": "Mondo Disease Ontology",
+        "url": "http://purl.obolibrary.org/obo/mondo.owl",
+        "version": "2024-09",
+        "namespacePrefix": "MONDO",
+        "iriPrefix": "http://purl.obolibrary.org/obo/MONDO_"
+      }
+    ],
+    "phenopacketSchemaVersion": "2.0.0"
+  }
+}

@@ -1,0 +1,14 @@
+/* ==========================================================================
+   GENOCHAIN INSTITUTIONAL DESCI TERMINAL - MASTER STYLESHEET ORCHESTRATOR
+   Modular CSS Architecture: Tokens, Base, Components, Features
+   ========================================================================== */
+
+@import './styles/tokens.css';
+@import './styles/base.css';
+@import './styles/components/nav.css';
+@import './styles/components/buttons.css';
+@import './styles/components/tables.css';
+@import './styles/components/modals.css';
+@import './styles/features/donor.css';
+@import './styles/features/researcher.css';
+@import './styles/components/os2-shell.css';

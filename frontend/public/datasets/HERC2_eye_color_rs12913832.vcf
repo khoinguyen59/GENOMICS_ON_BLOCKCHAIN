@@ -1,0 +1,16 @@
+##fileformat=VCFv4.2
+##fileDate=20260919
+##source=NCBI_dbSNP_Build155_HERC2
+##reference=GRCh38
+##INFO=<ID=AF,Number=A,Type=Float,Description="Global Allele Frequency">
+##INFO=<ID=GENE,Number=1,Type=String,Description="HERC2 / OCA2">
+##INFO=<ID=TRAIT,Number=1,Type=String,Description="Human Eye Color and Skin Pigmentation Locus (Blue vs Brown)">
+##INFO=<ID=CATEGORY,Number=1,Type=String,Description="Pigmentation & Physical Phenotypes">
+##INFO=<ID=BLOOD_GROUP,Number=1,Type=String,Description="A+">
+##INFO=<ID=ANCESTRY,Number=1,Type=String,Description="European & Global Reference (dbSNP:rs12913832)">
+##INFO=<ID=ANN,Number=.,Type=String,Description="Functional annotations">
+##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">
+##FORMAT=<ID=DP,Number=1,Type=Integer,Description="Read Depth">
+##FORMAT=<ID=GQ,Number=1,Type=Integer,Description="Genotype Quality">
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO	FORMAT	GENOMICS_SUBJECT_02
+chr15	28120472	rs12913832	A	G	99	PASS	AF=0.210;GENE=HERC2/OCA2;TRAIT=Eye_Color_Pigmentation_Blue_Brown;CATEGORY=Pigmentation_Traits;BLOOD_GROUP=A+;ANCESTRY=European_Global;ANN=G|intron_variant|MODIFIER|HERC2|transcript|NM_017601.4|protein_coding|86/93|c.72+208A>G	GT:DP:GQ	1/1:62:99

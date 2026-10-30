@@ -1,0 +1,16 @@
+##fileformat=VCFv4.2
+##fileDate=20260919
+##source=NCBI_dbSNP_Build155_TAS2R38
+##reference=GRCh38
+##INFO=<ID=AF,Number=A,Type=Float,Description="Global Allele Frequency">
+##INFO=<ID=GENE,Number=1,Type=String,Description="TAS2R38">
+##INFO=<ID=TRAIT,Number=1,Type=String,Description="PTC Bitter Taste Perception & Gustatory Sensitivity">
+##INFO=<ID=CATEGORY,Number=1,Type=String,Description="Sensory Receptor Genetics">
+##INFO=<ID=BLOOD_GROUP,Number=1,Type=String,Description="B+">
+##INFO=<ID=ANCESTRY,Number=1,Type=String,Description="East Asian & Global (dbSNP:rs713598)">
+##INFO=<ID=ANN,Number=.,Type=String,Description="Functional annotations">
+##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">
+##FORMAT=<ID=DP,Number=1,Type=Integer,Description="Read Depth">
+##FORMAT=<ID=GQ,Number=1,Type=Integer,Description="Genotype Quality">
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO	FORMAT	GENOMICS_SUBJECT_03
+chr7	141972804	rs713598	G	C	99	PASS	AF=0.470;GENE=TAS2R38;TRAIT=Bitter_Taste_Sensitivity_PTC;CATEGORY=Sensory_Phenotypes;BLOOD_GROUP=B+;ANCESTRY=Global_Multiethnic;ANN=C|missense_variant|MODERATE|TAS2R38|transcript|NM_176817.3|protein_coding|1/1|c.145G>C|p.Pro49Ala	GT:DP:GQ	0/1:54:99

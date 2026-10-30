@@ -1,0 +1,18 @@
+##fileformat=VCFv4.2
+##fileDate=20260918
+##source=NCBI_dbSNP_GRCh38
+##reference=GRCh38
+##FILTER=<ID=PASS,Description="All filters passed">
+##INFO=<ID=AF,Number=A,Type=Float,Description="Allele Frequency in Southeast Asian Population">
+##INFO=<ID=ANN,Number=.,Type=String,Description="Functional annotations: Allele|Annotation|Impact|Gene_Name|Feature_Type|Feature_ID|Transcript_BioType|Rank|HGVS.c|HGVS.p">
+##INFO=<ID=GENE,Number=1,Type=String,Description="MCM6/LCT">
+##INFO=<ID=TRAIT,Number=.,Type=String,Description="Lactose_intolerance_in_adulthood">
+##INFO=<ID=CATEGORY,Number=1,Type=String,Description="Metabolism & Nutrition">
+##INFO=<ID=BLOOD_GROUP,Number=1,Type=String,Description="B+">
+##INFO=<ID=ANCESTRY,Number=1,Type=String,Description="Vietnamese (Kinh)">
+##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">
+##FORMAT=<ID=AD,Number=R,Type=Integer,Description="Allelic depths for ref and alt alleles">
+##FORMAT=<ID=DP,Number=1,Type=Integer,Description="Approximate read depth">
+##FORMAT=<ID=GQ,Number=1,Type=Integer,Description="Genotype Quality">
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO	FORMAT	DONOR_VN_KINH_02
+chr2	135851076	rs4988235	C	T	99	PASS	AF=0.08500;GENE=MCM6;TRAIT=Lactose_intolerance;CATEGORY=Metabolism & Nutrition;BLOOD_GROUP=B+;ANCESTRY=Vietnamese (Kinh);ANN=C|regulatory_region_variant|MODIFIER|MCM6|regulatory_feature||||c.-13910C>T||	GT:AD:DP:GQ	0/0:45,0:45:99

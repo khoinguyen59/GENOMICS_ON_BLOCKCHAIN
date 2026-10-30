@@ -1,0 +1,100 @@
+[
+  {
+    "name": "GA4GH_Phenopacket_ABCA4_PMID_10874631_II_2.json",
+    "size": 6092,
+    "category": "GA4GH Phenopacket v2 (Clinical Case)",
+    "gene": "ABCA4",
+    "url": "/datasets/GA4GH_Phenopacket_ABCA4_PMID_10874631_II_2.json"
+  },
+  {
+    "name": "GA4GH_Phenopacket_ADA_PMID_1680289_patient.json",
+    "size": 4978,
+    "category": "GA4GH Phenopacket v2 (Clinical Case)",
+    "gene": "ADA",
+    "url": "/datasets/GA4GH_Phenopacket_ADA_PMID_1680289_patient.json"
+  },
+  {
+    "name": "GA4GH_Phenopacket_FBN1_PMID_10756346_Patient_B13.json",
+    "size": 6157,
+    "category": "GA4GH Phenopacket v2 (Clinical Case)",
+    "gene": "FBN1",
+    "url": "/datasets/GA4GH_Phenopacket_FBN1_PMID_10756346_Patient_B13.json"
+  },
+  {
+    "name": "BCFtools_annotate_multi.vcf",
+    "size": 191,
+    "category": "Variant Call Format v4.2 (Multiallelic Complex Loci)",
+    "gene": "Multiallelic Reference Cohort",
+    "url": "/datasets/BCFtools_annotate_multi.vcf"
+  },
+  {
+    "name": "HTSLIB_reference_c1.fa",
+    "size": 15,
+    "category": "FASTA Genomic Reference Sequence",
+    "gene": "Consensus Sequence chr1",
+    "url": "/datasets/HTSLIB_reference_c1.fa"
+  },
+  {
+    "name": "HTSLIB_reference_auxf.fa",
+    "size": 29,
+    "category": "FASTA Exome Reference Contig",
+    "gene": "Exome Target Contig",
+    "url": "/datasets/HTSLIB_reference_auxf.fa"
+  },
+  {
+    "name": "Illumina_NGS_reads_sample.fastq",
+    "size": 618,
+    "category": "FASTQ Raw Sequencing Reads (Illumina NGS)",
+    "gene": "SRR001666 Whole Exome Reads",
+    "url": "/datasets/Illumina_NGS_reads_sample.fastq"
+  },
+  {
+    "name": "NA12878_chr20_sample.vcf",
+    "size": 13582,
+    "category": "Variant Call Format v4.2 (GATK / SAMtools Standard)",
+    "gene": "NA12878",
+    "url": "/datasets/NA12878_chr20_sample.vcf"
+  },
+  {
+    "name": "SAMtools_bcftools_view.vcf",
+    "size": 5482,
+    "category": "Variant Call Format v4.2 (GATK / SAMtools Standard)",
+    "gene": "SAMtools",
+    "url": "/datasets/SAMtools_bcftools_view.vcf"
+  },
+  {
+    "name": "BCFtools_annotate_id.vcf",
+    "size": 306,
+    "category": "Variant Call Format v4.2 (GATK / SAMtools Standard)",
+    "gene": "BCFtools",
+    "url": "/datasets/BCFtools_annotate_id.vcf"
+  },
+  {
+    "name": "BCFtools_convert.vcf",
+    "size": 8113,
+    "category": "Variant Call Format v4.2 (GATK / SAMtools Standard)",
+    "gene": "BCFtools",
+    "url": "/datasets/BCFtools_convert.vcf"
+  },
+  {
+    "name": "BCFtools_aa.vcf",
+    "size": 1190,
+    "category": "Variant Call Format v4.2 (GATK / SAMtools Standard)",
+    "gene": "BCFtools",
+    "url": "/datasets/BCFtools_aa.vcf"
+  },
+  {
+    "name": "BCFtools_ad_bias.vcf",
+    "size": 2591,
+    "category": "Variant Call Format v4.2 (GATK / SAMtools Standard)",
+    "gene": "BCFtools",
+    "url": "/datasets/BCFtools_ad_bias.vcf"
+  },
+  {
+    "name": "BCFtools_af_dist.vcf",
+    "size": 1111,
+    "category": "Variant Call Format v4.2 (GATK / SAMtools Standard)",
+    "gene": "BCFtools",
+    "url": "/datasets/BCFtools_af_dist.vcf"
+  }
+]

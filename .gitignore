@@ -1,0 +1,60 @@
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Build & Hardhat Cache
+dist/
+**/dist/
+artifacts/
+cache/
+typechain-types/
+types/
+
+# Environment & Logs
+.env
+*.log
+.DS_Store
+Thumbs.db
+
+# Cloned External Repositories
+research_repos/
+
+# Agent System (Local Agentic Configuration & Prompt Metadata)
+.agents/
+AGENTS.md
+.agent/
+GEMINI.md
+UNIVERSAL_AGENT_SYSTEM/
+
+# Knowledge Graph Local Output
+graphify-out/
+
+# Academic / Coursework Documents & Internal Audit Reports
+docs/
+*.docx
+*.xlsx
+*.pdf
+extract_runs.py
+
+# Large Demo Recordings & Media Files
+recordings/
+
+# Temporary / Scratch Analysis & Local Audit Scripts
+scripts/copy_covers*
+scripts/audit/
+scripts/demo/record_rubric_demo.py
+scripts/check_env_tools.py
+scripts/detail_labs.py
+scripts/dump_lab_2_3_4.py
+scripts/dump_lab_essentials.py
+scripts/extract_all_labs.py
+scripts/extract_docx.py
+scripts/get_bai03.py
+scripts/get_lab_names.py
+scripts/inspect_labs.py
+scripts/lab_titles.py
+scripts/read_docx_p2.py
+scripts/read_docx_p3.py
+scripts/scan_extracted_docx.py
+scripts/scan_lab_structure.py
+scripts/summarize_labs.py

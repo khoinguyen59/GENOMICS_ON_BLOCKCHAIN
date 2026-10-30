@@ -1,0 +1,18 @@
+##fileformat=VCFv4.2
+##fileDate=20260918
+##source=NCBI_dbSNP_GRCh38
+##reference=GRCh38
+##FILTER=<ID=PASS,Description="All filters passed">
+##INFO=<ID=AF,Number=A,Type=Float,Description="Allele Frequency in East Asian Population">
+##INFO=<ID=ANN,Number=.,Type=String,Description="Functional annotations: Allele|Annotation|Impact|Gene_Name|Feature_Type|Feature_ID|Transcript_BioType|Rank|HGVS.c|HGVS.p">
+##INFO=<ID=GENE,Number=1,Type=String,Description="ABCC11">
+##INFO=<ID=TRAIT,Number=.,Type=String,Description="Dry_earwax_and_apocrine_secretion_trait">
+##INFO=<ID=CATEGORY,Number=1,Type=String,Description="Traits & Physical Phenotypes">
+##INFO=<ID=BLOOD_GROUP,Number=1,Type=String,Description="O+">
+##INFO=<ID=ANCESTRY,Number=1,Type=String,Description="Vietnamese (Kinh)">
+##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">
+##FORMAT=<ID=AD,Number=R,Type=Integer,Description="Allelic depths for ref and alt alleles">
+##FORMAT=<ID=DP,Number=1,Type=Integer,Description="Approximate read depth">
+##FORMAT=<ID=GQ,Number=1,Type=Integer,Description="Genotype Quality">
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO	FORMAT	DONOR_VN_KINH_04
+chr16	48224287	rs17822931	G	A	99	PASS	AF=0.89000;GENE=ABCC11;TRAIT=Dry_earwax_phenotype;CATEGORY=Traits & Physical Phenotypes;BLOOD_GROUP=O+;ANCESTRY=Vietnamese (Kinh);ANN=A|missense_variant|MODERATE|ABCC11|transcript|NM_033151.4|protein_coding|12/29|c.538G>A|p.Gly180Arg	GT:AD:DP:GQ	1/1:0,61:61:99

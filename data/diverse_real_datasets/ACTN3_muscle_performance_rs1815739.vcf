@@ -1,0 +1,16 @@
+##fileformat=VCFv4.2
+##fileDate=20260919
+##source=NCBI_dbSNP_Build155_ACTN3
+##reference=GRCh38
+##INFO=<ID=AF,Number=A,Type=Float,Description="Global Allele Frequency">
+##INFO=<ID=GENE,Number=1,Type=String,Description="ACTN3">
+##INFO=<ID=TRAIT,Number=1,Type=String,Description="Muscle Power and Sprint Athletic Performance (R577X Polymorphism)">
+##INFO=<ID=CATEGORY,Number=1,Type=String,Description="Athletic & Muscular Genetics">
+##INFO=<ID=BLOOD_GROUP,Number=1,Type=String,Description="O+">
+##INFO=<ID=ANCESTRY,Number=1,Type=String,Description="Global Multi-ethnic (dbSNP:rs1815739)">
+##INFO=<ID=ANN,Number=.,Type=String,Description="Functional annotations">
+##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">
+##FORMAT=<ID=DP,Number=1,Type=Integer,Description="Read Depth">
+##FORMAT=<ID=GQ,Number=1,Type=Integer,Description="Genotype Quality">
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO	FORMAT	GENOMICS_SUBJECT_01
+chr11	66560624	rs1815739	C	T	99	PASS	AF=0.420;GENE=ACTN3;TRAIT=Muscle_Power_and_Sprint_Athletic_Performance;CATEGORY=Athletic_Genetics;BLOOD_GROUP=O+;ANCESTRY=Global_Multiethnic;ANN=T|stop_gained|HIGH|ACTN3|transcript|NM_001104.3|protein_coding|16/21|c.1729C>T|p.Arg577Ter	GT:DP:GQ	0/1:58:99

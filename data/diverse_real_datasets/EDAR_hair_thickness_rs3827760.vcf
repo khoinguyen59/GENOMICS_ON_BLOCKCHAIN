@@ -1,0 +1,16 @@
+##fileformat=VCFv4.2
+##fileDate=20260919
+##source=NCBI_dbSNP_Build155_EDAR
+##reference=GRCh38
+##INFO=<ID=AF,Number=A,Type=Float,Description="Global Allele Frequency">
+##INFO=<ID=GENE,Number=1,Type=String,Description="EDAR">
+##INFO=<ID=TRAIT,Number=1,Type=String,Description="East Asian Hair Fiber Thickness & Incisor Shoveling Morphology">
+##INFO=<ID=CATEGORY,Number=1,Type=String,Description="Morphological Genetics">
+##INFO=<ID=BLOOD_GROUP,Number=1,Type=String,Description="O+">
+##INFO=<ID=ANCESTRY,Number=1,Type=String,Description="East Asian & Southeast Asian (dbSNP:rs3827760)">
+##INFO=<ID=ANN,Number=.,Type=String,Description="Functional annotations">
+##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">
+##FORMAT=<ID=DP,Number=1,Type=Integer,Description="Read Depth">
+##FORMAT=<ID=GQ,Number=1,Type=Integer,Description="Genotype Quality">
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO	FORMAT	GENOMICS_SUBJECT_04
+chr2	108898064	rs3827760	A	G	99	PASS	AF=0.880;GENE=EDAR;TRAIT=Hair_Fiber_Thickness_East_Asian;CATEGORY=Morphological_Traits;BLOOD_GROUP=O+;ANCESTRY=East_Asian;ANN=G|missense_variant|MODERATE|EDAR|transcript|NM_022836.3|protein_coding|11/12|c.1109T>C|p.Val370Ala	GT:DP:GQ	1/1:76:99

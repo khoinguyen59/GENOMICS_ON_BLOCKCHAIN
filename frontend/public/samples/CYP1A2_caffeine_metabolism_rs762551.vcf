@@ -1,0 +1,18 @@
+##fileformat=VCFv4.2
+##fileDate=20260918
+##source=NCBI_PharmGKB_GRCh38
+##reference=GRCh38
+##FILTER=<ID=PASS,Description="All filters passed">
+##INFO=<ID=AF,Number=A,Type=Float,Description="Allele Frequency in Global Population">
+##INFO=<ID=ANN,Number=.,Type=String,Description="Functional annotations: Allele|Annotation|Impact|Gene_Name|Feature_Type|Feature_ID|Transcript_BioType|Rank|HGVS.c|HGVS.p">
+##INFO=<ID=GENE,Number=1,Type=String,Description="CYP1A2">
+##INFO=<ID=TRAIT,Number=.,Type=String,Description="Caffeine_fast_vs_slow_metabolizer">
+##INFO=<ID=CATEGORY,Number=1,Type=String,Description="Pharmacogenomics & Metabolism">
+##INFO=<ID=BLOOD_GROUP,Number=1,Type=String,Description="A+">
+##INFO=<ID=ANCESTRY,Number=1,Type=String,Description="East Asian (Han / Japanese)">
+##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">
+##FORMAT=<ID=AD,Number=R,Type=Integer,Description="Allelic depths for ref and alt alleles">
+##FORMAT=<ID=DP,Number=1,Type=Integer,Description="Approximate read depth">
+##FORMAT=<ID=GQ,Number=1,Type=Integer,Description="Genotype Quality">
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO	FORMAT	DONOR_EA_03
+chr15	74749576	rs762551	A	C	99	PASS	AF=0.34000;GENE=CYP1A2;TRAIT=Caffeine_metabolism;CATEGORY=Pharmacogenomics & Metabolism;BLOOD_GROUP=A+;ANCESTRY=East Asian (Han / Japanese);ANN=C|intron_variant|MODIFIER|CYP1A2|transcript|NM_000761.5|protein_coding|1/6|c.-163A>C||	GT:AD:DP:GQ	1/1:0,52:52:99

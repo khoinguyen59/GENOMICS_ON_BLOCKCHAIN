@@ -1,0 +1,20 @@
+##fileformat=VCFv4.2
+##fileDate=20260919
+##source=1000Genomes_Phase3_KHV_WGS
+##reference=GRCh38
+##INFO=<ID=AF,Number=A,Type=Float,Description="Global Allele Frequency">
+##INFO=<ID=KHV_AF,Number=A,Type=Float,Description="Allele Frequency in 1000 Genomes Kinh in Ho Chi Minh City, Vietnam">
+##INFO=<ID=EAS_AF,Number=A,Type=Float,Description="Allele Frequency in East Asian Cohort">
+##INFO=<ID=GENE,Number=1,Type=String,Description="Gene Symbol">
+##INFO=<ID=TRAIT,Number=1,Type=String,Description="Genomic Trait or Analysis Locus">
+##INFO=<ID=CATEGORY,Number=1,Type=String,Description="Genomic Category">
+##INFO=<ID=VT,Number=1,Type=String,Description="Variant Type">
+##INFO=<ID=DP,Number=1,Type=Integer,Description="Total Depth Across Cohort">
+##INFO=<ID=ANN,Number=.,Type=String,Description="Functional annotations">
+##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">
+##FORMAT=<ID=DP,Number=1,Type=Integer,Description="Read Depth">
+##FORMAT=<ID=GQ,Number=1,Type=Integer,Description="Genotype Quality">
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO	FORMAT	KHV01	KHV02	KHV03	KHV04
+chr12	111803962	rs671	G	A	100	PASS	AF=0.380;KHV_AF=0.520;EAS_AF=0.485;GENE=ALDH2;TRAIT=Alcohol_Dehydrogenase_Metabolism;CATEGORY=Population_Genomics;VT=SNP;DP=2400;ANN=A|missense_variant|MODERATE|ALDH2|transcript|NM_000690.4|protein_coding|12/13|c.1510G>A|p.Glu504Lys	GT:DP:GQ	0/1:42:99	1/1:38:99	0/1:45:99	0/0:40:99
+chr12	111804200	rs671001	C	T	100	PASS	AF=0.120;KHV_AF=0.150;EAS_AF=0.140;GENE=ALDH2;TRAIT=Exonic_Synonymous_Polymorphism;CATEGORY=Population_Genomics;VT=SNP;DP=2100;ANN=T|synonymous_variant|LOW|ALDH2|transcript|NM_000690.4|protein_coding|12/13|c.1548C>T|p.Leu516Leu	GT:DP:GQ	0/0:35:99	0/1:41:99	0/0:39:99	0/0:42:99
+chr12	111815040	rs1229984	C	T	100	PASS	AF=0.280;KHV_AF=0.340;EAS_AF=0.310;GENE=ADH1B;TRAIT=Alcohol_Metabolism_Enzyme_Rate;CATEGORY=Population_Genomics;VT=SNP;DP=2800;ANN=T|missense_variant|MODERATE|ADH1B|transcript|NM_000668.5|protein_coding|3/9|c.143C>T|p.Arg48His	GT:DP:GQ	0/1:48:99	0/1:50:99	1/1:52:99	0/0:46:99

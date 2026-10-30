@@ -1,0 +1,329 @@
+/* ==========================================================================
+   GENOCHAIN BUTTONS, CHIPS & INTERACTIVE CONTROLS — ULTRA-LUXURY DeSci UI
+   Modern Web3 Luxury Action Triggers, Frosted Glass Buttons, Portal Subnav & Bio-Badges
+   ========================================================================== */
+
+/* ─── Portal Sub-Navigation Bar ─── */
+.portal-subnav-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 24px;
+  padding: 8px 12px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  box-shadow: var(--shadow-sm);
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.subnav-tabs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg-surface-elevated);
+  padding: 4px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border-subtle);
+}
+
+.subnav-tab-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 18px;
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  white-space: nowrap;
+}
+
+.subnav-tab-item:hover:not(.active) {
+  color: var(--text-primary);
+  background: var(--bg-surface-hover);
+}
+
+.subnav-tab-item.active {
+  color: #ffffff;
+  font-weight: 700;
+  background: linear-gradient(135deg, var(--accent-cyan) 0%, var(--accent-blue) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  box-shadow: 0 2px 10px var(--accent-cyan-glow);
+}
+
+.portal-role-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 14px;
+  background: rgba(56, 189, 248, 0.1);
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  border-radius: var(--radius-full);
+  font-size: 12px;
+  font-weight: 700;
+  color: #38bdf8;
+  letter-spacing: 0.02em;
+}
+
+/* ─── Action Button Grouping ─── */
+.action-cell-btns {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Base Precision Button */
+.btn-terminal {
+  border-radius: var(--radius-md);
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 8px 16px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid transparent;
+  transition: all var(--transition-fast);
+  font-family: var(--font-sans);
+  white-space: nowrap;
+  user-select: none;
+}
+
+.btn-terminal:active {
+  transform: scale(0.98);
+}
+
+/* Primary Cyan-Blue Gradient Button */
+.btn-terminal-primary {
+  background: linear-gradient(135deg, #0284c7 0%, #2563eb 100%);
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.18);
+  box-shadow: 0 4px 14px rgba(37, 99, 235, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+}
+
+.btn-terminal-primary:hover:not(:disabled) {
+  background: linear-gradient(135deg, #0ea5e9 0%, #3b82f6 100%);
+  box-shadow: 0 6px 20px rgba(37, 99, 235, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.4);
+  transform: translateY(-1px);
+}
+
+.btn-terminal-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+/* Success Emerald Glass Button */
+.btn-terminal-success {
+  background: rgba(16, 185, 129, 0.14);
+  color: #34d399;
+  border-color: rgba(16, 185, 129, 0.4);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.btn-terminal-success:hover {
+  background: rgba(16, 185, 129, 0.24);
+  border-color: #10b981;
+  box-shadow: 0 4px 16px rgba(16, 185, 129, 0.25);
+  transform: translateY(-1px);
+}
+
+/* Sleek Ghost Glass Button */
+.btn-terminal-ghost {
+  background: var(--bg-surface-elevated);
+  color: var(--text-secondary);
+  border-color: var(--border-subtle);
+  backdrop-filter: blur(8px);
+}
+
+.btn-terminal-ghost:hover {
+  background: var(--bg-surface-hover);
+  border-color: var(--accent-cyan);
+  color: var(--text-primary);
+  transform: translateY(-1px);
+}
+
+/* Danger / Revoke Button */
+.btn-terminal-danger {
+  background: rgba(244, 63, 94, 0.12);
+  color: #fb7185;
+  border-color: rgba(244, 63, 94, 0.35);
+}
+
+.btn-terminal-danger:hover {
+  background: rgba(244, 63, 94, 0.22);
+  border-color: #f43f5e;
+  box-shadow: 0 4px 16px rgba(244, 63, 94, 0.25);
+  transform: translateY(-1px);
+}
+
+/* ─── Premium Pill Badges & Status Indicators ─── */
+.status-badge-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-sans);
+  font-size: 11.5px;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: var(--radius-full);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.status-badge-chip::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-full);
+}
+
+.badge-active {
+  background: rgba(16, 185, 129, 0.14);
+  border: 1px solid rgba(16, 185, 129, 0.4);
+  color: #34d399;
+}
+
+.badge-active::before {
+  background: #10b981;
+  box-shadow: 0 0 8px #10b981;
+  animation: beacon-glow 2s infinite;
+}
+
+.badge-paused {
+  background: rgba(245, 158, 11, 0.14);
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  color: #fbbf24;
+}
+
+.badge-paused::before {
+  background: #f59e0b;
+  box-shadow: 0 0 6px #f59e0b;
+}
+
+.badge-revoked {
+  background: rgba(244, 63, 94, 0.14);
+  border: 1px solid rgba(244, 63, 94, 0.4);
+  color: #fb7185;
+}
+
+.badge-revoked::before {
+  background: #f43f5e;
+}
+
+/* ─── Owner Chip & Sealed Ciphertext Badges ─── */
+.owner-chip {
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: var(--radius-full);
+  background: rgba(168, 85, 247, 0.14);
+  border: 1px solid rgba(168, 85, 247, 0.4);
+  color: #c084fc;
+}
+
+.sealed-sequence-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: var(--radius-full);
+  background: rgba(56, 189, 248, 0.1);
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  color: #38bdf8;
+  cursor: help;
+}
+
+/* Blood Group & Region Chips */
+.blood-tag {
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  background: rgba(244, 63, 94, 0.15);
+  border: 1px solid rgba(244, 63, 94, 0.3);
+  color: #fda4af;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+}
+
+.region-tag {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* ─── Light Mode Monochrome Overrides for Buttons & Subnav ─── */
+[data-theme="light"] .portal-subnav-bar {
+  background: #ffffff;
+  border-color: #e4e4e7;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+[data-theme="light"] .subnav-tabs {
+  background: #f4f4f5;
+  border-color: #e4e4e7;
+}
+
+[data-theme="light"] .subnav-tab-item.active {
+  color: #ffffff;
+  background: #09090b;
+  border: 1px solid #000000;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+[data-theme="light"] .subnav-tab-item:not(.active) {
+  color: #52525b;
+}
+
+[data-theme="light"] .subnav-tab-item:not(.active):hover {
+  color: #000000;
+  background: #e4e4e7;
+}
+
+[data-theme="light"] .btn-terminal-primary {
+  background: #09090b;
+  color: #ffffff;
+  border-color: #000000;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12);
+}
+
+[data-theme="light"] .btn-terminal-primary:hover:not(:disabled) {
+  background: #27272a;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+[data-theme="light"] .portal-role-tag {
+  background: #f4f4f5;
+  border-color: #e4e4e7;
+  color: #18181b;
+}
+
+[data-theme="light"] .btn-terminal-ghost {
+  background: #ffffff;
+  border-color: #e4e4e7;
+  color: #18181b;
+}
+
+[data-theme="light"] .btn-terminal-ghost:hover {
+  background: #f4f4f5;
+  border-color: #09090b;
+  color: #000000;
+}

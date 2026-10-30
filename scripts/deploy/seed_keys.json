@@ -1,0 +1,75 @@
+{
+  "deployerAddress": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+  "seeds": [
+    {
+      "dataId": 1,
+      "rawCid": "QmS9hxhfrXgitCTPsFoWNhwUFAQCCdgoEXmQvMLJUcqgnx",
+      "aesKeyHex": "18f70c1df1879b301fcb734ba1994f8a9109285adf9e6f86f27acce8dc1be9e1",
+      "ivHex": "0f2069dc4be8c61f89e2bcd5",
+      "rawDataHash": "0x8241371e2a7fac5d10b3b0094eb515e4868fd37d6cb3314c6588124d94a3da8f"
+    },
+    {
+      "dataId": 2,
+      "rawCid": "QmSGfKBZwU3mrxuybLYg5dBoQRSKyJCDNQKssVxnjXkbML",
+      "aesKeyHex": "a8eb0eb7a9feef8d0c00e2253d5f30c6696608eca3f672eb8666fc889c197f2d",
+      "ivHex": "caf29472790ad67b2ea98118",
+      "rawDataHash": "0x7063a491853acabd982d65c06939410f777a92fb4df17dea10f5c1f61d84c422"
+    },
+    {
+      "dataId": 3,
+      "rawCid": "QmdhvLYud2JqEZLXLUMDnqsnryJRwZuTLKbdpzZ1FaQnhi",
+      "aesKeyHex": "278e8865f5dc27de999750c642a585006ba1bc86f248327422b6f4d0244c0ad5",
+      "ivHex": "3a270c0f90d56b23bd4bb724",
+      "rawDataHash": "0xa6b3cf087eafb1c5ac8191dd7862c5c0210e98711d365f08cf9a44cfb5350a5f"
+    },
+    {
+      "dataId": 4,
+      "rawCid": "QmZWPCiQtT2GutqT3eFg5asrqvjVY25XUdQTkxC7PJhXbV",
+      "aesKeyHex": "3be685fd1652162f61f213f4eb3665ee469babaffb983734d9536893de52a9a0",
+      "ivHex": "9d24ba59481bfedd07c75aaf",
+      "rawDataHash": "0x9b50400ba5ba286e31b082a06a84810a7680b7cd0e6c0b6efb33129269e1a75f"
+    },
+    {
+      "dataId": 5,
+      "rawCid": "Qmd3BEj78ggcoSW38kSmMFxmuYdH6ZSzURS9tiCfK6VkTc",
+      "aesKeyHex": "dd38d3c9bf20674c3942765f311e0c60b91a869d82779a23f8e3ae3dcf1d345d",
+      "ivHex": "61e7f2f6a6fcf33a3e44849c",
+      "rawDataHash": "0x42004698485df00ed4b1e28878a4a838db5316fba2f79e65e56ba1d482444c61"
+    },
+    {
+      "dataId": 6,
+      "rawCid": "QmRQQxqyAxoVSubYfQ3BktsbxPpBHuY5eTpgH5rZrMYrXG",
+      "aesKeyHex": "2bbcb7fbc4d24c99916f7a827a574e4b0dd775d38ac8d247adf1ad7b30b788c7",
+      "ivHex": "68e4beda1a1b25a16410c50a",
+      "rawDataHash": "0x6e2ac3eee41e5fb67fc613df2d5a04efcce29fc9a46eb52788f26c627166a04d"
+    },
+    {
+      "dataId": 7,
+      "rawCid": "QmRFw74aS3iZzppn59M2ny3DKkFsNMXLFSNctggByTe7Xx",
+      "aesKeyHex": "e6854ff63a117074b82e050da864c2d97a1fb973f5febad4c6620098538578e6",
+      "ivHex": "a47f5db50d0f395bb24962fa",
+      "rawDataHash": "0xa174cd1ce0435c5b47398659ecd5da5b9a14cf25cbd7f861b21b8892f994deb2"
+    },
+    {
+      "dataId": 8,
+      "rawCid": "QmTouEzXNygM2pPVagffyiq1BtWbF646agJvEzVeynHHF5",
+      "aesKeyHex": "b19d17edd3f140effc2e9c496519b4a3ab2885ff1d734fdb1d12e5139a930008",
+      "ivHex": "1e84c487c6581507b6026f9f",
+      "rawDataHash": "0x47c56bf63b90e468bfa257da9d3539c64319def45a1140087ecc71ba971b76ba"
+    },
+    {
+      "dataId": 9,
+      "rawCid": "QmdttiRqQw5HMs6LNgrMw6utiLyu2B6WoWDUrznkgeppsR",
+      "aesKeyHex": "faba75dcb76650a28224300a367b15f66441db236e3fae23a7720dfb3c1942e5",
+      "ivHex": "e54f131e8501d231761f98e3",
+      "rawDataHash": "0x60fcd8973d468547d4fa07ee05610ae4dc20414f1789e2c90bef635d60ca2aa8"
+    },
+    {
+      "dataId": 10,
+      "rawCid": "QmPqjzcTg4ptb1H7AWZ1SdTpFDetrSuVdgg6vGgBjbyTQo",
+      "aesKeyHex": "49bbcd81c07f96e7d66b59ff3febded7d9fb26a8cea4adbfe560e5744dc3b6c8",
+      "ivHex": "d9605bb449d0f8af2cfa29f0",
+      "rawDataHash": "0x9ebcf5890e6b0bd6b462959fd91b7ca4e5a7780d876286c61e9f6224a1e4ec12"
+    }
+  ]
+}

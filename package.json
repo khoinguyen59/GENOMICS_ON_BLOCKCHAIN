@@ -1,0 +1,31 @@
+{
+  "name": "blockchain",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Genomics on Blockchain System",
+  "main": "index.js",
+  "scripts": {
+    "test": "hardhat test",
+    "test:stress": "hardhat run scripts/audit/independent_stress_suite.mjs",
+    "build": "hardhat build",
+    "deploy:localhost": "hardhat run scripts/deploy/deploy.js --network localhost",
+    "demo:web3": "python scripts/demo/web3_demo.py",
+    "audit:hygiene": "python scripts/audit/academic_hygiene_toolkit.py --selftest",
+    "audit:chain": "python scripts/audit/live_chain_audit.py",
+    "audit:slither": "python scripts/audit/parse_slither.py"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox-mocha-ethers": "^3.0.7",
+    "@openzeppelin/contracts": "^5.6.1",
+    "chai": "^5.1.2",
+    "ethers": "^6.13.0",
+    "hardhat": "^3.16.0"
+  },
+  "overrides": {
+    "serialize-javascript": "^7.0.5",
+    "diff": "^8.0.3"
+  }
+}

@@ -1,0 +1,32 @@
+================================================================================
+          GENOMIC SEQUENCING SUMMARY REPORT & MOLECULAR ANNOTATION
+================================================================================
+SAMPLE PSEUDONYM ID: SAMPLE_1000G_KHV01
+REPORT DATE: 2026-10-29
+GENOME BUILD: GRCh38 / hg38
+SEQUENCING PLATFORM: Illumina NovaSeq 6000 (30x Whole Genome Sequencing)
+
+MOLECULAR STUDY COHORT & TRAIT INDICATION:
+Population genomic survey of metabolic polymorphisms and athletic traits (KHV Cohort).
+Functional evaluation of ALDH2 alcohol sensitivity and ACTN3 muscle performance.
+
+SIGNIFICANT GENOMIC FINDINGS:
+1. Gene: ALDH2 (Aldehyde Dehydrogenase 2)
+   - Variant: c.1510G>A (p.Glu504Lys)
+   - dbSNP: rs671
+   - Classification: FUNCTIONAL POLYMORPHISM (1000 Genomes Project)
+   - Zygosity: Heterozygous (0/1)
+   - Biological Actionability: Reduced enzymatic activity causing alcohol flush reaction.
+     Standard metabolic trait catalogued in East/Southeast Asian populations.
+
+2. Gene: ACTN3 (Actinin Alpha 3)
+   - Variant: c.1729C>T (p.Arg577Ter)
+   - dbSNP: rs1815739
+   - Classification: FUNCTIONAL POLYMORPHISM (Athletic Performance Marker)
+   - Zygosity: Heterozygous (0/1)
+   - Biological Actionability: Mixed sprint/endurance fast-twitch muscle fiber phenotype.
+
+CONFIDENTIALITY NOTICE:
+This report contains research genomic sequence data.
+Storage and transmission are encrypted with AES-256-GCM under blockchain governance.
+================================================================================

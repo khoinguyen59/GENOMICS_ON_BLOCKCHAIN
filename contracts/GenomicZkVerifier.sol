@@ -8,13 +8,13 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 /**
  * @title GenomicZkVerifier
- * @author GenomicsBlockchainAgent
+ * @author Nguyễn Trọng Khôi (MSSV: 23520783)
  * @notice Zero-Knowledge Genomic Variant Verification & Bounty Protocol (zk-Genomics).
  *         Enables biomedical researchers to fund targeted genotype bounties and allows donors
  *         to prove possession of specific genetic variants (e.g., ALDH2 rs671, BRCA1, EDAR, ACTN3)
  *         WITHOUT revealing their full 3-billion-basepair raw sequence, preserving complete privacy
  *         under GDPR Article 5 (Data Minimization) & Article 9 (Special Category Genetic Data).
- * @dev Fulfills Tier-4 / World-Class Protocol standards by eliminating the "Download-and-Decrypt" privacy gap.
+ * @dev Eliminates the "Download-and-Decrypt" privacy gap via cryptographic verification.
  */
 contract GenomicZkVerifier is ReentrancyGuard, Ownable {
     using SafeERC20 for IERC20;

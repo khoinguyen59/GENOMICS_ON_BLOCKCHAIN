@@ -1,9 +1,9 @@
 /**
  * @file streaming.js
- * @description Kiến trúc mã hóa/giải mã phân đoạn dòng 64KB kế thừa nguyên lý thiết kế streaming
- *              tối ưu bộ nhớ O(1) từ chuẩn GA4GH Crypt4GH, được nâng cấp sang chuẩn FIPS 140-3
- *              với AES-256-GCM và RSA-OAEP 2048-bit trên nền tảng W3C Web Crypto API native,
- *              tận dụng trực tiếp tăng tốc phần cứng Intel AES-NI và ARMv8 Cryptography Extensions.
+ * @description 64KB chunked streaming encryption/decryption architecture following GA4GH Crypt4GH
+ *              O(1) memory optimization principles, upgraded to FIPS 140-3 standards with
+ *              AES-256-GCM and RSA-OAEP 2048-bit on native W3C Web Crypto API, leveraging
+ *              hardware acceleration (Intel AES-NI and ARMv8 Cryptography Extensions).
  * @module crypto/core/streaming
  */
 

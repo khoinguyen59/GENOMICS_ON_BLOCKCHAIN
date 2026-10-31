@@ -184,7 +184,7 @@ export async function createWalletKeyBackup(signer, account, keyPair) {
   const norm = account.toLowerCase();
   const aesKey = await deriveSigAesKey(signer, norm);
   if (!keyPair.privateKey || !keyPair.privateKey.extractable) {
-    throw new Error("INVARIANT-09 Enforcement: Private key is not extractable. WebCrypto API blocks raw private key material extraction; the key is securely anchored in browser IndexedDB.");
+    throw new Error("Security Policy Enforcement: Private key is not extractable. WebCrypto API blocks raw private key material extraction; the key is securely anchored in browser IndexedDB.");
   }
   const pubJwk = await cryptoObj.subtle.exportKey("jwk", keyPair.publicKey);
   const privJwk = await cryptoObj.subtle.exportKey("jwk", keyPair.privateKey);

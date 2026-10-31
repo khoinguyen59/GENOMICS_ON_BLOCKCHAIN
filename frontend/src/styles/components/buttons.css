@@ -1,5 +1,5 @@
 /* ==========================================================================
-   GENOCHAIN BUTTONS, CHIPS & INTERACTIVE CONTROLS — ULTRA-LUXURY DeSci UI
+   GENOCHAIN BUTTONS, CHIPS & INTERACTIVE CONTROLS - ULTRA-LUXURY DeSci UI
    Modern Web3 Luxury Action Triggers, Frosted Glass Buttons, Portal Subnav & Bio-Badges
    ========================================================================== */
 
@@ -34,9 +34,9 @@
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 18px;
+  padding: 9px 20px;
   font-family: var(--font-sans);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--text-secondary);
   background: transparent;
@@ -65,12 +65,12 @@
   align-items: center;
   gap: 7px;
   padding: 6px 14px;
-  background: rgba(56, 189, 248, 0.1);
-  border: 1px solid rgba(56, 189, 248, 0.3);
+  background: rgba(2, 132, 199, 0.1);
+  border: 1px solid rgba(2, 132, 199, 0.3);
   border-radius: var(--radius-full);
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 700;
-  color: #38bdf8;
+  color: var(--accent-cyan);
   letter-spacing: 0.02em;
 }
 
@@ -84,9 +84,9 @@
 /* Base Precision Button */
 .btn-terminal {
   border-radius: var(--radius-md);
-  font-size: 12.5px;
+  font-size: 14px;
   font-weight: 600;
-  padding: 8px 16px;
+  padding: 9px 18px;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
@@ -173,9 +173,9 @@
   align-items: center;
   gap: 6px;
   font-family: var(--font-sans);
-  font-size: 11.5px;
+  font-size: 12.5px;
   font-weight: 700;
-  padding: 4px 10px;
+  padding: 5px 12px;
   border-radius: var(--radius-full);
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -227,7 +227,7 @@
   display: inline-flex;
   align-items: center;
   font-family: var(--font-mono);
-  font-size: 11.5px;
+  font-size: 12.5px;
   font-weight: 700;
   padding: 4px 10px;
   border-radius: var(--radius-full);
@@ -241,7 +241,7 @@
   align-items: center;
   gap: 6px;
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 12.5px;
   font-weight: 600;
   padding: 4px 10px;
   border-radius: var(--radius-full);
@@ -270,60 +270,102 @@
   color: var(--text-muted);
 }
 
-/* ─── Light Mode Monochrome Overrides for Buttons & Subnav ─── */
+/* ─── Light Mode Overrides for Buttons, Subnav & Badges ─── */
 [data-theme="light"] .portal-subnav-bar {
   background: #ffffff;
-  border-color: #e4e4e7;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  border-color: #e2e8f0;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.05);
 }
 
 [data-theme="light"] .subnav-tabs {
-  background: #f4f4f5;
-  border-color: #e4e4e7;
+  background: #f1f5f9;
+  border-color: #e2e8f0;
 }
 
 [data-theme="light"] .subnav-tab-item.active {
   color: #ffffff;
-  background: #09090b;
-  border: 1px solid #000000;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  background: #2563eb;
+  border: 1px solid #1d4ed8;
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.25);
 }
 
 [data-theme="light"] .subnav-tab-item:not(.active) {
-  color: #52525b;
+  color: #475569;
 }
 
 [data-theme="light"] .subnav-tab-item:not(.active):hover {
-  color: #000000;
-  background: #e4e4e7;
+  color: #0f172a;
+  background: #e2e8f0;
 }
 
 [data-theme="light"] .btn-terminal-primary {
-  background: #09090b;
+  background: #2563eb;
   color: #ffffff;
-  border-color: #000000;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12);
+  border: 1px solid #1d4ed8;
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.25);
 }
 
 [data-theme="light"] .btn-terminal-primary:hover:not(:disabled) {
-  background: #27272a;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  background: #1d4ed8;
+  box-shadow: 0 4px 14px rgba(37, 99, 235, 0.35);
+  transform: translateY(-1px);
+}
+
+[data-theme="light"] .btn-terminal-success {
+  background: #ecfdf5;
+  border: 1px solid #a7f3d0;
+  color: #047857;
+}
+
+[data-theme="light"] .btn-terminal-success:hover {
+  background: #d1fae5;
+  border-color: #34d399;
 }
 
 [data-theme="light"] .portal-role-tag {
-  background: #f4f4f5;
-  border-color: #e4e4e7;
-  color: #18181b;
+  background: #eff6ff;
+  border-color: #bfdbfe;
+  color: #2563eb;
 }
 
 [data-theme="light"] .btn-terminal-ghost {
   background: #ffffff;
-  border-color: #e4e4e7;
-  color: #18181b;
+  border-color: #cbd5e1;
+  color: #334155;
 }
 
 [data-theme="light"] .btn-terminal-ghost:hover {
-  background: #f4f4f5;
-  border-color: #09090b;
-  color: #000000;
+  background: #f1f5f9;
+  border-color: #2563eb;
+  color: #0f172a;
+}
+
+[data-theme="light"] .badge-active {
+  background: #ecfdf5;
+  border: 1px solid #a7f3d0;
+  color: #047857;
+}
+
+[data-theme="light"] .badge-paused {
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  color: #b45309;
+}
+
+[data-theme="light"] .badge-revoked {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #b91c1c;
+}
+
+[data-theme="light"] .owner-chip {
+  background: #f5f3ff;
+  border: 1px solid #ddd6fe;
+  color: #6d28d9;
+}
+
+[data-theme="light"] .sealed-sequence-badge {
+  background: #f0f9ff;
+  border: 1px solid #bae6fd;
+  color: #0369a1;
 }

@@ -74,7 +74,7 @@ def package_rsa_capsule(aes_key_hex: str, buyer_pubkey_jwk_str: str, buyer_addr:
 
 def main():
     print("=" * 75)
-    print("🤖 MULTI-WORKER GENOMICS CAPSULE DISPATCHER DAEMON - GENOCHAIN PROTOCOL")
+    print("[DAEMON] MULTI-WORKER GENOMICS CAPSULE DISPATCHER - GENOCHAIN PROTOCOL")
     print("=" * 75)
 
     rpc_url = "http://127.0.0.1:8545"

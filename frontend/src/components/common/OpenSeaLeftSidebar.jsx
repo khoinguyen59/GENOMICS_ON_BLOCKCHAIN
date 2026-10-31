@@ -271,7 +271,7 @@ export default function OpenSeaLeftSidebar({ activeNav, onSelectNav }) {
           type="button"
           className="os2-brand-btn"
           onClick={() => handleNavClick("discover")}
-          title="OpenSea — GenoChain DeSci Exchange"
+          title="OpenSea - GenoChain DeSci Exchange"
         >
           <span className="os2-brand-logo-wrap">
             <svg width="30" height="30" viewBox="0 0 30 30" fill="none" xmlns="http://www.w3.org/2000/svg">

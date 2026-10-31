@@ -139,10 +139,11 @@ export function Web3Provider({ children }) {
   }, [getContracts]);
 
   // Connect Wallet Action (MetaMask with automatic fallback to Local Hardhat RPC)
-  const connectWallet = useCallback(async () => {
+  const connectWallet = useCallback(async (customIdx) => {
     const connectLocalHardhat = async () => {
       const jsonRpc = new ethers.JsonRpcProvider("http://127.0.0.1:8545");
-      const s = await jsonRpc.getSigner(1);
+      const targetIdx = typeof customIdx === "number" ? customIdx : 1;
+      const s = await jsonRpc.getSigner(targetIdx);
       const addr = await s.getAddress();
       setAccount(addr);
       const c = await getContracts();
@@ -447,6 +448,12 @@ export function Web3Provider({ children }) {
     backupKeypairToWallet,
     restoreKeypairFromWallet
   };
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      window.__genoWeb3 = value;
+    }
+  }, [value]);
 
   return <Web3Context.Provider value={value}>{children}</Web3Context.Provider>;
 }

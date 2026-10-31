@@ -94,7 +94,7 @@ export async function publishGenomicDataset({
   const phenopacket = buildPhenopacket({
     subjectId,
     disease,
-    phenotypes: [{ id: hpoCode.split(" — ")[0], label: hpoCode.split(" — ")[1] || disease }],
+    phenotypes: [{ id: hpoCode.split(/\s*-\s*/)[0], label: hpoCode.split(/\s*-\s*/)[1] || disease }],
     variants: [{ gene: geneSymbol, hgvs: "c.3454G>A", zygosity: "heterozygous" }],
     rawDataHash: encryptedRaw.rawDataHash,
     rawCid: rawCid,
@@ -161,7 +161,7 @@ export async function updateDatasetStatus({ dataId, newStatusNum, signer }) {
 }
 
 /**
- * Data Access Fee Update - Enforces onlyDataOwner (Ràng buộc 1)
+ * Data Access Fee Update - Enforces onlyDataOwner Access Control
  */
 export async function updateDatasetPrice({ dataId, newPriceGeno, signer }) {
   if (!signer) throw new Error("Wallet not connected.");
@@ -173,7 +173,7 @@ export async function updateDatasetPrice({ dataId, newPriceGeno, signer }) {
 }
 
 /**
- * Grant Direct Viewing Access without payment - Enforces onlyDataOwner (Ràng buộc 1)
+ * Grant Direct Viewing Access without payment - Enforces onlyDataOwner Access Control
  */
 export async function grantDirectDatasetAccess({ dataId, recipientAddress, signer }) {
   if (!signer) throw new Error("Wallet not connected.");

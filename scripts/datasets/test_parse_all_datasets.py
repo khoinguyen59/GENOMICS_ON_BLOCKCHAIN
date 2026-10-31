@@ -50,11 +50,11 @@ def parse_genomic_metadata(content, filename):
                         break
             
             # HPO detection
-            hpo = "HP:0000001 — Phenotypic abnormality"
+            hpo = "HP:0000001 - Phenotypic abnormality"
             if "phenotypicFeatures" in data and len(data["phenotypicFeatures"]) > 0:
                 pf = data["phenotypicFeatures"][0]
                 pf_type = pf.get("type", {})
-                hpo = f"{pf_type.get('id', 'HP:0000001')} — {pf_type.get('label', 'Phenotypic feature')}"
+                hpo = f"{pf_type.get('id', 'HP:0000001')} - {pf_type.get('label', 'Phenotypic feature')}"
                 
             sex = data.get("subject", {}).get("sex", "Unknown")
             return {
@@ -78,7 +78,7 @@ def parse_genomic_metadata(content, filename):
             "subjectId": f"RUN_{read_id[:12]}",
             "disease": "High-Throughput Sequencing Read Benchmark",
             "geneSymbol": "Exome / Transcriptome NGS Reads (Illumina)",
-            "hpoCode": "SO:0001483 — snv_sequencing_read",
+            "hpoCode": "SO:0001483 - snv_sequencing_read",
             "ancestryRegion": "Illumina NGS Platform",
             "bloodGroup": "O+"
         }
@@ -92,7 +92,7 @@ def parse_genomic_metadata(content, filename):
             "subjectId": f"REF_{contig_id}",
             "disease": "Genomic Reference Assembly Contig",
             "geneSymbol": f"Contig {contig_id} (FASTA)",
-            "hpoCode": "SO:0000340 — chromosome_arm",
+            "hpoCode": "SO:0000340 - chromosome_arm",
             "ancestryRegion": "Consensus Reference Standard",
             "bloodGroup": "O+"
         }
@@ -100,17 +100,17 @@ def parse_genomic_metadata(content, filename):
     # 4. VCF (Variant Call Format)
     # Check known genes
     gene_map = {
-        "aldh2": ("ALDH2 (c.1510G>A, rs671)", "Alcohol Flush Reaction (Hội chứng đỏ mặt cồn)", "HP:0001945 — Vasomotor flush response", "Vietnamese (Kinh)", "O+"),
-        "lct": ("MCM6 / LCT (c.-13910C>T, rs4988235)", "Adult Lactose Intolerance (Dung nạp đường sữa)", "HP:0004789 — Lactose intolerance", "Vietnamese (Kinh)", "B+"),
-        "mcm6": ("MCM6 / LCT (c.-13910C>T, rs4988235)", "Adult Lactose Intolerance (Dung nạp đường sữa)", "HP:0004789 — Lactose intolerance", "Vietnamese (Kinh)", "B+"),
-        "cyp1a2": ("CYP1A2 (c.-163A>C, rs762551)", "Caffeine Metabolism Rate (Tốc độ chuyển hóa Cafein)", "PharmGKB:PA124 — Caffeine response", "East Asian (Han / Japanese)", "A+"),
-        "abcc11": ("ABCC11 (c.538G>A, rs17822931)", "Dry Earwax & Apocrine Trait (Đặc trưng ráy tai khô)", "HP:0030058 — Dry cerumen trait", "Vietnamese (Kinh)", "O+"),
-        "hbb": ("HBB (c.20A>T, rs334)", "Beta-Globin Hemoglobinopathy Carrier Screen", "HP:0001903 — Hemoglobinopathy", "Vietnamese (Kinh)", "B+"),
-        "brca": ("BRCA1 (c.3454G>A, rs80357906)", "Hereditary Breast & Ovarian Carrier Screening", "HP:0003002 — Breast carcinoma risk", "Southeast Asian (Vietnamese)", "O+"),
-        "cftr": ("CFTR (p.Phe508del, rs113993960)", "Cystic Fibrosis Carrier Screening (ClinVar Pathogenic)", "HP:0002099 — Abnormal pulmonary function", "Global / Multi-ethnic", "A+"),
-        "apoe": ("APOE (epsilon 4 allele, rs429358)", "Late-Onset Alzheimer Disease Risk Assessment", "HP:0002511 — Alzheimer disease", "Global / Multi-ethnic", "O+"),
-        "na12878": ("Chr20 RNA-seq Non-Ref Cohort (GIAB)", "CEPH/Utah Reference Genome Benchmark (GIAB NA12878)", "HP:0000001 — Reference Benchmark", "European (CEU)", "O+"),
-        "samtools": ("BCFtools Multi-locus Panel", "Multi-sample Variant Call Standard", "HP:0000001 — Reference Cohort", "Global Multi-ancestry", "A+"),
+        "aldh2": ("ALDH2 (c.1510G>A, rs671)", "Alcohol Flush Reaction (Hội chứng đỏ mặt cồn)", "HP:0001945 - Vasomotor flush response", "Vietnamese (Kinh)", "O+"),
+        "lct": ("MCM6 / LCT (c.-13910C>T, rs4988235)", "Adult Lactose Intolerance (Dung nạp đường sữa)", "HP:0004789 - Lactose intolerance", "Vietnamese (Kinh)", "B+"),
+        "mcm6": ("MCM6 / LCT (c.-13910C>T, rs4988235)", "Adult Lactose Intolerance (Dung nạp đường sữa)", "HP:0004789 - Lactose intolerance", "Vietnamese (Kinh)", "B+"),
+        "cyp1a2": ("CYP1A2 (c.-163A>C, rs762551)", "Caffeine Metabolism Rate (Tốc độ chuyển hóa Cafein)", "PharmGKB:PA124 - Caffeine response", "East Asian (Han / Japanese)", "A+"),
+        "abcc11": ("ABCC11 (c.538G>A, rs17822931)", "Dry Earwax & Apocrine Trait (Đặc trưng ráy tai khô)", "HP:0030058 - Dry cerumen trait", "Vietnamese (Kinh)", "O+"),
+        "hbb": ("HBB (c.20A>T, rs334)", "Beta-Globin Hemoglobinopathy Carrier Screen", "HP:0001903 - Hemoglobinopathy", "Vietnamese (Kinh)", "B+"),
+        "brca": ("BRCA1 (c.3454G>A, rs80357906)", "Hereditary Breast & Ovarian Carrier Screening", "HP:0003002 - Breast carcinoma risk", "Southeast Asian (Vietnamese)", "O+"),
+        "cftr": ("CFTR (p.Phe508del, rs113993960)", "Cystic Fibrosis Carrier Screening (ClinVar Pathogenic)", "HP:0002099 - Abnormal pulmonary function", "Global / Multi-ethnic", "A+"),
+        "apoe": ("APOE (epsilon 4 allele, rs429358)", "Late-Onset Alzheimer Disease Risk Assessment", "HP:0002511 - Alzheimer disease", "Global / Multi-ethnic", "O+"),
+        "na12878": ("Chr20 RNA-seq Non-Ref Cohort (GIAB)", "CEPH/Utah Reference Genome Benchmark (GIAB NA12878)", "HP:0000001 - Reference Benchmark", "European (CEU)", "O+"),
+        "samtools": ("BCFtools Multi-locus Panel", "Multi-sample Variant Call Standard", "HP:0000001 - Reference Cohort", "Global Multi-ancestry", "A+"),
     }
 
     content_upper = content.upper()
@@ -144,7 +144,7 @@ def parse_genomic_metadata(content, filename):
         "subjectId": f"SAMPLE_{filename.replace('.', '_')[:12].upper()}",
         "geneSymbol": f"BCFtools Variant Callset ({variant_locus})",
         "disease": "Bioinformatics Reference Cohort & Variant Standard",
-        "hpoCode": "HP:0000001 — Reference Benchmark",
+        "hpoCode": "HP:0000001 - Reference Benchmark",
         "ancestryRegion": "International Benchmark Panel",
         "bloodGroup": "O+"
     }

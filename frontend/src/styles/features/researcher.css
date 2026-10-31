@@ -1,5 +1,5 @@
 /* ==========================================================================
-   GENOCHAIN RESEARCHER MARKETPLACE FEATURE STYLES — OPENSEA-GRADE LUXURY DeSci UI
+   GENOCHAIN RESEARCHER MARKETPLACE FEATURE STYLES - OPENSEA-GRADE LUXURY DeSci UI
    Collection hero banner, spotlight showcase, trending leaderboard, 
    OpenSea-style search, filters drawer, and modern NFT grid cards
    ========================================================================== */
@@ -105,7 +105,7 @@
 }
 
 .collection-main-title {
-  font-size: 22px;
+  font-size: 26px;
   font-weight: 800;
   letter-spacing: -0.02em;
   color: var(--text-primary);
@@ -216,7 +216,7 @@
 }
 
 .stat-label {
-  font-size: 10.5px;
+  font-size: 12px;
   font-family: var(--font-mono);
   font-weight: 700;
   color: var(--text-muted);
@@ -225,7 +225,7 @@
 }
 
 .stat-value {
-  font-size: 16px;
+  font-size: 19px;
   font-weight: 800;
   color: var(--text-primary);
   font-family: var(--font-mono);
@@ -346,7 +346,7 @@
 }
 
 .spotlight-item-title {
-  font-size: 18px;
+  font-size: 22px;
   font-weight: 800;
   color: var(--text-primary);
   margin: 0 0 10px 0;
@@ -360,11 +360,11 @@
 }
 
 .spotlight-trait-chip {
-  padding: 3px 9px;
+  padding: 4px 10px;
   border-radius: var(--radius-full);
   background: var(--bg-surface-elevated);
   border: 1px solid var(--border-subtle);
-  font-size: 11px;
+  font-size: 12.5px;
   font-weight: 600;
   color: var(--text-secondary);
 }
@@ -386,7 +386,7 @@
 }
 
 .spotlight-price-label {
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -394,7 +394,7 @@
 }
 
 .spotlight-price-val {
-  font-size: 20px;
+  font-size: 24px;
   font-weight: 900;
   font-family: var(--font-mono);
   color: var(--text-primary);
@@ -623,9 +623,9 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 7px 14px;
+  padding: 8px 16px;
   border-radius: var(--radius-full);
-  font-size: 12px;
+  font-size: 13.5px;
   font-weight: 600;
   border: 1px solid var(--border-subtle);
   background: var(--bg-surface-elevated);
@@ -748,9 +748,9 @@
 }
 
 .filter-toggle-btn {
-  height: 38px;
-  padding: 0 14px;
-  font-size: 12.5px;
+  height: 40px;
+  padding: 0 16px;
+  font-size: 14px;
   font-weight: 700;
   border-radius: var(--radius-md);
   display: inline-flex;
@@ -762,10 +762,10 @@
 .filter-count-badge {
   background: var(--accent-cyan);
   color: #040711;
-  font-size: 10.5px;
+  font-size: 11.5px;
   font-family: var(--font-mono);
   font-weight: 800;
-  padding: 1px 6px;
+  padding: 2px 7px;
   border-radius: var(--radius-full);
 }
 
@@ -787,12 +787,12 @@
 
 .opensea-search-field-toolbar {
   width: 100%;
-  height: 38px;
+  height: 42px;
   background: var(--bg-input);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
   padding: 0 36px 0 36px;
-  font-size: 13px;
+  font-size: 14px;
   color: var(--text-primary);
   transition: all var(--transition-fast);
 }
@@ -805,7 +805,7 @@
 }
 
 .toolbar-results-chip {
-  font-size: 12.5px;
+  font-size: 13.5px;
   font-family: var(--font-mono);
   font-weight: 600;
   color: var(--text-primary);
@@ -840,13 +840,13 @@
 }
 
 .opensea-sort-select {
-  height: 38px;
+  height: 40px;
   padding: 0 32px 0 32px;
   background: var(--bg-surface-elevated);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
   color: var(--text-primary);
-  font-size: 12.5px;
+  font-size: 13.5px;
   font-weight: 600;
   cursor: pointer;
   appearance: none;
@@ -1016,7 +1016,7 @@
   background: transparent;
   border: none;
   color: var(--text-primary);
-  font-size: 12px;
+  font-size: 13.5px;
   font-weight: 700;
   letter-spacing: 0.04em;
   cursor: pointer;
@@ -1044,11 +1044,11 @@
 }
 
 .sidebar-chip {
-  padding: 5px 10px;
+  padding: 6px 12px;
   border-radius: var(--radius-sm);
   background: var(--bg-surface-elevated);
   border: 1px solid var(--border-subtle);
-  font-size: 11px;
+  font-size: 12.5px;
   font-weight: 600;
   color: var(--text-secondary);
   cursor: pointer;
@@ -1528,12 +1528,12 @@
 }
 
 .nft-card-title {
-  font-size: 14.5px;
+  font-size: 16px;
   font-weight: 700;
   color: var(--text-primary);
-  line-height: 1.4;
+  line-height: 1.45;
   margin: 0;
-  min-height: 40px;
+  min-height: 46px;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
@@ -1552,7 +1552,7 @@
   border-radius: var(--radius-full);
   background: var(--bg-surface-elevated);
   border: 1px solid var(--border-subtle);
-  font-size: 10.5px;
+  font-size: 11.5px;
   font-weight: 600;
   color: var(--accent-cyan);
 }
@@ -1578,7 +1578,7 @@
 }
 
 .nft-price-label {
-  font-size: 9.5px;
+  font-size: 11.5px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -1586,7 +1586,7 @@
 }
 
 .nft-price-value {
-  font-size: 15.5px;
+  font-size: 17.5px;
   font-weight: 800;
   font-family: var(--font-mono);
   color: var(--text-primary);
@@ -1597,9 +1597,9 @@
 }
 
 .btn-card-action {
-  height: 32px;
-  padding: 0 12px;
-  font-size: 12px;
+  height: 36px;
+  padding: 0 14px;
+  font-size: 13.5px;
   font-weight: 700;
   border-radius: var(--radius-sm);
 }
@@ -1639,7 +1639,7 @@
   align-items: center;
   gap: 5px;
   font-family: var(--font-mono);
-  font-size: 11.5px;
+  font-size: 12.5px;
   font-weight: 700;
   background: rgba(56, 189, 248, 0.12);
   border: 1px solid rgba(56, 189, 248, 0.35);
@@ -1651,7 +1651,7 @@
 
 .rsid-chip {
   font-family: var(--font-mono);
-  font-size: 11.5px;
+  font-size: 12.5px;
   font-weight: 600;
   background: var(--bg-surface-elevated);
   border: 1px solid var(--border-subtle);
@@ -1665,7 +1665,7 @@
   align-items: center;
   gap: 6px;
   font-family: var(--font-sans);
-  font-size: 11.5px;
+  font-size: 12.5px;
   font-weight: 700;
   padding: 3px 10px;
   border-radius: var(--radius-full);
@@ -1739,13 +1739,13 @@
 
 .consequence-chip {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-secondary);
 }
 
 .zyg-chip {
   font-family: var(--font-mono);
-  font-size: 10.5px;
+  font-size: 11.5px;
   color: var(--text-muted);
 }
 
@@ -1763,3 +1763,118 @@
   font-family: var(--font-mono);
   word-break: break-all;
 }
+
+/* ==========================================================================
+   RESEARCHER MARKETPLACE LIGHT MODE OVERRIDES (OpenSea OS2 / Lovable Aesthetics)
+   ========================================================================== */
+[data-theme="light"] .collection-hero-backdrop {
+  background: linear-gradient(135deg, #e0f2fe 0%, #f0fdf4 50%, #fdf4ff 100%);
+  border-bottom: 1px solid #e2e8f0;
+}
+
+[data-theme="light"] .backdrop-gradient-glow {
+  opacity: 0.35;
+}
+
+[data-theme="light"] .opensea-collection-hero {
+  background: #ffffff;
+  border-color: #e2e8f0;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.04);
+}
+
+[data-theme="light"] .collection-avatar-ring {
+  background: #ffffff;
+  border-color: #f8fafc;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08), 0 0 16px rgba(37, 99, 235, 0.15);
+}
+
+[data-theme="light"] .collection-stat-pill {
+  background: #f8fafc;
+  border-color: #e2e8f0;
+}
+
+[data-theme="light"] .opensea-spotlight-card {
+  background: #ffffff;
+  border-color: #e2e8f0;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.04);
+}
+
+[data-theme="light"] .opensea-leaderboard-box {
+  background: #ffffff;
+  border-color: #e2e8f0;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.04);
+}
+
+[data-theme="light"] .opensea-filter-sidebar {
+  background: #ffffff;
+  border-color: #e2e8f0;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.04);
+}
+
+[data-theme="light"] .opensea-toolbar-row {
+  background: #ffffff;
+  border-color: #e2e8f0;
+}
+
+[data-theme="light"] .opensea-nft-card {
+  background: #ffffff;
+  border-color: #e2e8f0;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.04);
+}
+
+[data-theme="light"] .opensea-nft-card:hover {
+  border-color: #2563eb;
+  box-shadow: 0 14px 34px rgba(37, 99, 235, 0.15);
+}
+
+[data-theme="light"] .nft-card-media-wrap {
+  background: #f1f5f9;
+}
+
+[data-theme="light"] .nft-gene-badge {
+  background: rgba(255, 255, 255, 0.92);
+  border-color: #e2e8f0;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
+[data-theme="light"] .nft-gene-badge .gene-name {
+  color: #0284c7;
+}
+
+[data-theme="light"] .nft-gene-badge .gene-chrom {
+  color: #64748b;
+}
+
+[data-theme="light"] .nft-format-badge {
+  background: rgba(255, 255, 255, 0.92);
+  border-color: #e2e8f0;
+  color: #334155;
+}
+
+[data-theme="light"] .nft-card-footer {
+  background: #f8fafc;
+  border-color: #e2e8f0;
+}
+
+[data-theme="light"] .spotlight-floating-badge {
+  background: rgba(255, 255, 255, 0.92);
+  border-color: #e2e8f0;
+  color: #0284c7;
+}
+
+[data-theme="light"] .spotlight-format-badge {
+  background: rgba(255, 255, 255, 0.92);
+  border-color: #e2e8f0;
+  color: #334155;
+}
+
+[data-theme="light"] .opensea-activity-wrapper {
+  background: #ffffff;
+  border-color: #e2e8f0;
+}
+
+[data-theme="light"] .activity-thumb-box {
+  background: #f1f5f9;
+  border-color: #e2e8f0;
+}
+

@@ -7,7 +7,7 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 
 /**
  * @title GenomicNFT (GNFT)
- * @author GenomicsBlockchainAgent
+ * @author Nguyễn Trọng Khôi (MSSV: 23520783)
  * @notice ERC-721 Data Ownership NFT with full EIP-2981 Royalty Enforcement.
  * @dev Enforces strict minting access: ONLY the authorized GenomicsRegistry can mint NFTs.
  *      Each NFT uniquely represents an encrypted genomic dataset uploaded by a patient/data owner.

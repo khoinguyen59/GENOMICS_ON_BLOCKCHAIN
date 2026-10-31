@@ -1,17 +1,112 @@
 /* ==========================================================================
    GENOCHAIN LUXURY DESCI BIOTECH DESIGN TOKENS
-   Deep Space Obsidian (Dark) & Crisp Monochrome Clinical White (Light)
+   Default: OpenSea OS2 / Lovable Crisp Light Mode
+   Override: Deep Space Obsidian Dark Mode
    ========================================================================== */
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
 
-:root {
-  /* ─── Default Dark Mode (Deep Space Obsidian) ─── */
+:root,
+[data-theme="light"] {
+  /* ─── Default OpenSea OS2 / Lovable Light Mode (Slate Scale) ─── */
+  --bg-app: #f8fafc;
+  --bg-mesh-1: rgba(2, 132, 199, 0.03);
+  --bg-mesh-2: rgba(99, 102, 241, 0.02);
+  --bg-mesh-3: rgba(16, 185, 129, 0.02);
+
+  --bg-surface: #ffffff;
+  --bg-surface-solid: #ffffff;
+  --bg-surface-elevated: #f1f5f9;
+  --bg-surface-hover: #f1f5f9;
+  --bg-input: #ffffff;
+  --bg-input-focus: #ffffff;
+  --bg-table-header: #f8fafc;
+  --bg-table-row-hover: #f1f5f9;
+  --bg-table-zebra: #fafafa;
+
+  /* Subtle Crisp Slate Borders */
+  --border-subtle: #e2e8f0;
+  --border-medium: #cbd5e1;
+  --border-strong: #0f172a;
+  --border-glow-cyan: rgba(2, 132, 199, 0.4);
+  --border-glow-purple: rgba(124, 58, 237, 0.4);
+  --border-glow-emerald: rgba(16, 185, 129, 0.4);
+
+  /* Modern Sans-Serif Typography */
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', 'SF Mono', Consolas, monospace;
+
+  /* High-Contrast Readability & Typographic Hierarchy (Slate Spectrum) */
+  --text-primary: #0f172a;
+  --text-secondary: #334155;
+  --text-muted: #64748b;
+  --text-disabled: #94a3b8;
+
+  /* Curated Biotech Vibrant Accent Palettes */
+  --accent-cyan: #0284c7;
+  --accent-cyan-light: #0369a1;
+  --accent-cyan-glow: rgba(2, 132, 199, 0.15);
+  --accent-cyan-subtle: #f0f9ff;
+
+  --accent-blue: #2563eb;
+  --accent-blue-hover: #1d4ed8;
+  --accent-blue-glow: rgba(37, 99, 235, 0.2);
+  --accent-blue-subtle: #eff6ff;
+
+  --accent-emerald: #10b981;
+  --accent-emerald-light: #059669;
+  --accent-emerald-glow: rgba(16, 185, 129, 0.15);
+  --accent-emerald-subtle: #ecfdf5;
+  --accent-emerald-text: #047857;
+
+  --accent-amber: #f59e0b;
+  --accent-amber-light: #d97706;
+  --accent-amber-glow: rgba(245, 158, 11, 0.15);
+  --accent-amber-subtle: #fffbeb;
+  --accent-amber-text: #b45309;
+
+  --accent-purple: #7c3aed;
+  --accent-purple-light: #6d28d9;
+  --accent-purple-glow: rgba(124, 58, 237, 0.15);
+  --accent-purple-subtle: #f5f3ff;
+  --accent-purple-text: #6d28d9;
+
+  --accent-rose: #ef4444;
+  --accent-rose-glow: rgba(239, 68, 68, 0.15);
+  --accent-rose-subtle: #fef2f2;
+  --accent-rose-text: #b91c1c;
+
+  /* Modern Smooth Corner Radii */
+  --radius-xs: 6px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+  --radius-full: 9999px;
+
+  /* Depth Shadows & Specular Highlights */
+  --shadow-sm: 0 1px 2px 0 rgba(15, 23, 42, 0.05);
+  --shadow-subtle: 0 1px 3px 0 rgba(15, 23, 42, 0.06), 0 1px 2px -1px rgba(15, 23, 42, 0.06);
+  --shadow-card: 0 1px 3px 0 rgba(15, 23, 42, 0.05), 0 0 0 1px #e2e8f0;
+  --shadow-card-hover: 0 10px 25px -5px rgba(15, 23, 42, 0.08), 0 0 0 1px #cbd5e1;
+  --shadow-modal: 0 20px 40px -10px rgba(15, 23, 42, 0.16), 0 0 0 1px #e2e8f0;
+  --shadow-glow-cyan: 0 0 16px rgba(2, 132, 199, 0.2);
+  --shadow-glow-emerald: 0 0 16px rgba(16, 185, 129, 0.2);
+  --shadow-glow-purple: 0 0 16px rgba(124, 58, 237, 0.2);
+
+  /* Smooth Micro-Transition Presets */
+  --transition-fast: 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-normal: 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-bounce: 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* ─── Dark Mode Theme Override (Deep Space Obsidian) ─── */
+[data-theme="dark"] {
   --bg-app: #040711;
   --bg-mesh-1: rgba(56, 189, 248, 0.07);
   --bg-mesh-2: rgba(139, 92, 246, 0.06);
   --bg-mesh-3: rgba(16, 185, 129, 0.04);
 
-  --bg-surface: rgba(11, 17, 32, 0.75);
+  --bg-surface: rgba(11, 17, 32, 0.85);
   --bg-surface-solid: #0b1120;
   --bg-surface-elevated: rgba(19, 28, 49, 0.85);
   --bg-surface-hover: rgba(28, 41, 71, 0.9);
@@ -21,25 +116,18 @@
   --bg-table-row-hover: rgba(56, 189, 248, 0.04);
   --bg-table-zebra: rgba(8, 13, 24, 0.5);
 
-  /* Refined Glassmorphic & Luminous Borders */
-  --border-subtle: rgba(255, 255, 255, 0.07);
-  --border-medium: rgba(255, 255, 255, 0.12);
-  --border-strong: rgba(255, 255, 255, 0.18);
+  --border-subtle: rgba(255, 255, 255, 0.08);
+  --border-medium: rgba(255, 255, 255, 0.14);
+  --border-strong: rgba(255, 255, 255, 0.22);
   --border-glow-cyan: rgba(56, 189, 248, 0.4);
   --border-glow-purple: rgba(168, 85, 247, 0.4);
   --border-glow-emerald: rgba(52, 211, 153, 0.4);
 
-  /* Modern Sans-Serif Typography */
-  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  --font-mono: 'JetBrains Mono', 'SF Mono', Consolas, monospace;
-
-  /* High-Contrast Readability & Typographic Hierarchy */
   --text-primary: #f8fafc;
   --text-secondary: #cbd5e1;
   --text-muted: #8492a6;
   --text-disabled: #4b5563;
 
-  /* Curated Biotech Vibrant Accent Palettes */
   --accent-cyan: #06b6d4;
   --accent-cyan-light: #38bdf8;
   --accent-cyan-glow: rgba(56, 189, 248, 0.25);
@@ -73,15 +161,6 @@
   --accent-rose-subtle: rgba(244, 63, 94, 0.12);
   --accent-rose-text: #fb7185;
 
-  /* Modern Smooth Corner Radii */
-  --radius-xs: 6px;
-  --radius-sm: 8px;
-  --radius-md: 12px;
-  --radius-lg: 16px;
-  --radius-xl: 22px;
-  --radius-full: 9999px;
-
-  /* Depth Shadows & Specular Highlights */
   --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.3);
   --shadow-subtle: 0 4px 16px -2px rgba(0, 0, 0, 0.4);
   --shadow-card: 0 8px 30px -4px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.07);
@@ -90,78 +169,4 @@
   --shadow-glow-cyan: 0 0 20px rgba(56, 189, 248, 0.35);
   --shadow-glow-emerald: 0 0 20px rgba(16, 185, 129, 0.35);
   --shadow-glow-purple: 0 0 20px rgba(139, 92, 246, 0.35);
-
-  /* Smooth Micro-Transition Presets */
-  --transition-fast: 0.15s cubic-bezier(0.4, 0, 0.2, 1);
-  --transition-normal: 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-  --transition-bounce: 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
-}
-
-/* ─── Light Mode Theme (Trắng Đen / Crisp High-Contrast Monochrome / Apple Minimalist) ─── */
-[data-theme="light"] {
-  --bg-app: #ffffff;
-  --bg-mesh-1: rgba(0, 0, 0, 0.015);
-  --bg-mesh-2: rgba(0, 0, 0, 0.01);
-  --bg-mesh-3: rgba(0, 0, 0, 0.005);
-
-  --bg-surface: #ffffff;
-  --bg-surface-solid: #ffffff;
-  --bg-surface-elevated: #fafafa;
-  --bg-surface-hover: #f4f4f5;
-  --bg-input: #ffffff;
-  --bg-input-focus: #ffffff;
-  --bg-table-header: #f4f4f5;
-  --bg-table-row-hover: #fafafa;
-  --bg-table-zebra: #fafafa;
-
-  --border-subtle: #e4e4e7;
-  --border-medium: #d4d4d8;
-  --border-strong: #09090b;
-  --border-glow-cyan: #09090b;
-  --border-glow-purple: #09090b;
-  --border-glow-emerald: #09090b;
-
-  --text-primary: #000000;
-  --text-secondary: #18181b;
-  --text-muted: #52525b;
-  --text-disabled: #a1a1aa;
-
-  --accent-cyan: #0284c7;
-  --accent-cyan-light: #0369a1;
-  --accent-cyan-glow: rgba(0, 0, 0, 0.05);
-  --accent-cyan-subtle: #f4f4f5;
-
-  --accent-blue: #18181b;
-  --accent-blue-hover: #09090b;
-  --accent-blue-glow: rgba(0, 0, 0, 0.08);
-  --accent-blue-subtle: #f4f4f5;
-
-  --accent-emerald: #15803d;
-  --accent-emerald-light: #166534;
-  --accent-emerald-glow: rgba(21, 128, 61, 0.1);
-  --accent-emerald-subtle: #f0fdf4;
-  --accent-emerald-text: #15803d;
-
-  --accent-amber: #b45309;
-  --accent-amber-light: #92400e;
-  --accent-amber-glow: rgba(180, 83, 9, 0.1);
-  --accent-amber-subtle: #fffbeb;
-  --accent-amber-text: #b45309;
-
-  --accent-purple: #6d28d9;
-  --accent-purple-light: #5b21b6;
-  --accent-purple-glow: rgba(109, 40, 217, 0.1);
-  --accent-purple-subtle: #f5f3ff;
-  --accent-purple-text: #6d28d9;
-
-  --accent-rose: #be123c;
-  --accent-rose-glow: rgba(190, 18, 60, 0.1);
-  --accent-rose-subtle: #fff1f2;
-  --accent-rose-text: #be123c;
-
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
-  --shadow-subtle: 0 1px 3px rgba(0, 0, 0, 0.05);
-  --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.05), 0 0 0 1px #e4e4e7;
-  --shadow-card-hover: 0 10px 25px -3px rgba(0, 0, 0, 0.08), 0 0 0 1px #18181b;
-  --shadow-modal: 0 20px 50px -10px rgba(0, 0, 0, 0.2), 0 0 0 1px #e4e4e7;
 }

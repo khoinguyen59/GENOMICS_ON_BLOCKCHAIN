@@ -79,7 +79,7 @@ function AppContent() {
     }
   };
 
-  // Data Access Fee Update (Ràng buộc 1)
+  // Data Access Fee Update (Access Control Policy)
   const handleUpdatePrice = async (dataId, newPriceGeno) => {
     try {
       showToast(`Broadcasting updateDataPrice(${dataId}, ${newPriceGeno} GENO)...`, "info");
@@ -92,7 +92,7 @@ function AppContent() {
     }
   };
 
-  // Grant Direct Viewing Access on Blockchain (Ràng buộc 1)
+  // Grant Direct Viewing Access on Blockchain (Access Control Policy)
   const handleGrantDirectAccess = async (dataId, recipientAddress) => {
     try {
       showToast(`Broadcasting grantDirectAccess(${dataId}, ${recipientAddress.slice(0, 8)}...)...`, "info");

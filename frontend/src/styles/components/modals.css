@@ -1,5 +1,5 @@
 /* ==========================================================================
-   GENOCHAIN MODALS & OVERLAYS — OPENSEA-GRADE LUXURY DeSci UI
+   GENOCHAIN MODALS & OVERLAYS - OPENSEA-GRADE LUXURY DeSci UI
    Inspection drawers, frosted modal dialogs, spec displays, backdrop & toasts
    ========================================================================== */
 
@@ -84,7 +84,7 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  font-size: 15px;
+  font-size: 18px;
   font-weight: 700;
   color: #ffffff;
   letter-spacing: -0.01em;
@@ -205,7 +205,7 @@
 
 .opensea-spec-key {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 12.5px;
   font-weight: 700;
   color: var(--text-muted);
   text-transform: uppercase;
@@ -213,6 +213,7 @@
 }
 
 .opensea-spec-val {
+  font-size: 14px;
   color: var(--text-primary);
   text-align: right;
 }
@@ -249,7 +250,7 @@
 }
 
 .opensea-modal-title {
-  font-size: 22px;
+  font-size: 25px;
   font-weight: 800;
   letter-spacing: -0.02em;
   color: var(--text-primary);
@@ -282,7 +283,7 @@
 }
 
 .opensea-section-title {
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 700;
   color: var(--text-primary);
   display: flex;
@@ -315,7 +316,7 @@
 }
 
 .opensea-trait-type {
-  font-size: 10px;
+  font-size: 11.5px;
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -323,7 +324,7 @@
 }
 
 .opensea-trait-val {
-  font-size: 13px;
+  font-size: 14.5px;
   font-weight: 700;
   color: var(--text-primary);
   white-space: nowrap;
@@ -332,7 +333,7 @@
 }
 
 .opensea-trait-rarity {
-  font-size: 10px;
+  font-size: 12px;
   font-family: var(--font-mono);
   color: var(--text-muted);
 }
@@ -350,7 +351,7 @@
 }
 
 .buybox-price-label {
-  font-size: 10.5px;
+  font-size: 12.5px;
   font-family: var(--font-mono);
   font-weight: 700;
   text-transform: uppercase;
@@ -367,14 +368,14 @@
 }
 
 .buybox-price-num {
-  font-size: 26px;
+  font-size: 30px;
   font-weight: 900;
   font-family: var(--font-mono);
   color: var(--text-primary);
 }
 
 .buybox-price-symbol {
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 800;
   color: var(--accent-cyan);
 }
@@ -383,7 +384,7 @@
   background: rgba(245, 158, 11, 0.12);
   border: 1px solid rgba(245, 158, 11, 0.3);
   color: var(--accent-amber);
-  font-size: 11px;
+  font-size: 12.5px;
   font-weight: 700;
   padding: 3px 8px;
   border-radius: var(--radius-full);
@@ -412,9 +413,9 @@
 }
 
 .btn-opensea-large {
-  height: 46px;
+  height: 50px;
   width: 100%;
-  font-size: 14px;
+  font-size: 15.5px;
   font-weight: 800;
   letter-spacing: 0.01em;
   border-radius: var(--radius-md);
@@ -516,7 +517,7 @@
   border: 1px solid rgba(255, 255, 255, 0.15);
   padding: 12px 20px;
   border-radius: var(--radius-full);
-  font-size: 13px;
+  font-size: 14px;
   font-family: var(--font-sans);
   font-weight: 600;
   color: #ffffff;
@@ -558,7 +559,7 @@
   box-shadow: 0 12px 30px rgba(0, 0, 0, 0.6), 0 0 16px rgba(16, 185, 129, 0.2);
 }
 
-/* ─── Light Mode Theme (Clinical Apple Health Monochrome) ─── */
+/* ─── Light Mode Theme (OpenSea OS2 / Lovable Clean White) ─── */
 [data-theme="light"] .terminal-modal-backdrop {
   background: rgba(15, 23, 42, 0.45);
 }
@@ -597,12 +598,32 @@
 }
 
 [data-theme="light"] .opensea-trait-card {
-  background: rgba(2, 132, 199, 0.06);
-  border-color: rgba(2, 132, 199, 0.2);
+  background: #f0f9ff;
+  border: 1px solid #bae6fd;
+}
+
+[data-theme="light"] .opensea-trait-type {
+  color: #0284c7;
+}
+
+[data-theme="light"] .opensea-trait-val {
+  color: #0f172a;
 }
 
 [data-theme="light"] .opensea-crypto-proof-box {
   background: #f1f5f9;
+}
+
+[data-theme="light"] .btn-opensea-large {
+  background: #2563eb;
+  color: #ffffff;
+  border: 1px solid #1d4ed8;
+  box-shadow: 0 4px 14px rgba(37, 99, 235, 0.3);
+}
+
+[data-theme="light"] .btn-opensea-large:hover {
+  background: #1d4ed8;
+  box-shadow: 0 6px 20px rgba(37, 99, 235, 0.45);
 }
 
 [data-theme="light"] .terminal-toast {

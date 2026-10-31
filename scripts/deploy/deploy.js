@@ -7,7 +7,7 @@ import { computeIpfsCidV0, cacheLocalIpfsContent } from "../../ipfs/pinata_uploa
 
 async function main() {
   console.log("==================================================");
-  console.log("🚀 Deploying Genomics on Blockchain System...");
+  console.log("[INFO] Deploying Genomics on Blockchain System...");
   console.log("==================================================");
 
   const connection = await hre.network.connect("localhost");
@@ -23,32 +23,32 @@ async function main() {
   const GenomicToken = await ethers.getContractFactory("GenomicToken");
   const token = await GenomicToken.deploy(deployer.address);
   await token.waitForDeployment();
-  console.log(`✅ GenomicToken deployed at: ${token.target}`);
+  console.log(`[OK] GenomicToken deployed at: ${token.target}`);
 
   // 2. Deploy GenomicNFT (ERC-721 + EIP-2981)
   console.log("\n2. Deploying GenomicNFT (ERC-721 + EIP-2981 Royalty)...");
   const GenomicNFT = await ethers.getContractFactory("GenomicNFT");
   const nft = await GenomicNFT.deploy(deployer.address, 1000); // 10% default royalty
   await nft.waitForDeployment();
-  console.log(`✅ GenomicNFT deployed at: ${nft.target}`);
+  console.log(`[OK] GenomicNFT deployed at: ${nft.target}`);
 
   // 3. Deploy GenomicsRegistry
   console.log("\n3. Deploying GenomicsRegistry (Core Registry + Escrow)...");
   const GenomicsRegistry = await ethers.getContractFactory("GenomicsRegistry");
   const registry = await GenomicsRegistry.deploy(token.target, nft.target, deployer.address);
   await registry.waitForDeployment();
-  console.log(`✅ GenomicsRegistry deployed at: ${registry.target}`);
+  console.log(`[OK] GenomicsRegistry deployed at: ${registry.target}`);
 
   // 4. Link Registry Contract in GenomicNFT
   console.log("\n4. Authorizing GenomicsRegistry in GenomicNFT...");
   const authTx = await nft.connect(deployer).setRegistryContract(registry.target);
   await authTx.wait();
-  console.log("✅ GenomicsRegistry authorization completed!");
+  console.log("[OK] GenomicsRegistry authorization completed!");
 
   // Authorize deployer as Capsule Dispatcher
   const dispTx = await registry.connect(deployer).setCapsuleDispatcher(deployer.address);
   await dispTx.wait();
-  console.log("✅ Capsule Dispatcher authorized!");
+  console.log("[OK] Capsule Dispatcher authorized!");
 
   // 5. Seed 10 Authenticated Clinical & Scientific Genomic Cohorts On-Chain
   console.log("\n5. Seeding 10 authentic clinical & scientific genomic cohorts on-chain...");
@@ -86,7 +86,7 @@ async function main() {
       rsId: "rs671",
       geneSymbol: "KHV_1000G",
       gene: "ALDH2 / ADH1B Multi-locus Loci (chr12)",
-      disease: "1000 Genomes Project — Quần thể Hệ Gen Người Kinh TP.HCM (KHV Cohort WGS)",
+      disease: "1000 Genomes Project - Quần thể Hệ Gen Người Kinh TP.HCM (KHV Cohort WGS)",
       clinicalSignificance: "Population Genetics",
       consequence: "missense_variant",
       zygosity: "0/1 (Heterozygous)",
@@ -370,7 +370,7 @@ async function main() {
     );
     await tx.wait();
     console.log(
-      `✅ On-chain Seed #${c.dataId} (${c.geneSymbol}): dataId=${c.dataId}, price=${c.priceGeno} GENO, rawDataHash=${enc.rawDataHash.substring(0, 14)}...`
+      `[OK] On-chain Seed #${c.dataId} (${c.geneSymbol}): dataId=${c.dataId}, price=${c.priceGeno} GENO, rawDataHash=${enc.rawDataHash.substring(0, 14)}...`
     );
 
     // 6. Public metadata for frontend
@@ -427,7 +427,7 @@ async function main() {
     path.join(outputDir, "contractAddresses.json"),
     JSON.stringify(addresses, null, 2)
   );
-  console.log("\n📄 Contract addresses saved to frontend/src/contracts/contractAddresses.json");
+  console.log("\n[FILE] Contract addresses saved to frontend/src/contracts/contractAddresses.json");
 
   // Save Contract ABIs for frontend
   const contractsToExport = ["GenomicToken", "GenomicNFT", "GenomicsRegistry"];
@@ -439,7 +439,7 @@ async function main() {
         path.join(outputDir, `${name}ABI.json`),
         JSON.stringify(artifact.abi, null, 2)
       );
-      console.log(`📄 Exported ABI for ${name} to frontend/src/contracts/${name}ABI.json`);
+      console.log(`[FILE] Exported ABI for ${name} to frontend/src/contracts/${name}ABI.json`);
     }
   }
 
@@ -452,7 +452,7 @@ async function main() {
     path.join(outputDir, "seedMetadata.json"),
     JSON.stringify(publicSeedDataStore, null, 2)
   );
-  console.log("📄 Public seed metadata catalog saved to frontend/src/contracts/seedMetadata.json (10 Cohorts, Zero keys leaked)");
+  console.log("[FILE] Public seed metadata catalog saved to frontend/src/contracts/seedMetadata.json (10 Cohorts, Zero keys leaked)");
 
   // Private keys saved to backend/scripts and dev fallback ONLY
   const secretKeyStore = {
@@ -463,10 +463,10 @@ async function main() {
     path.resolve("scripts/deploy/seed_keys.json"),
     JSON.stringify(secretKeyStore, null, 2)
   );
-  console.log("🔒 Seed secret keys saved securely to scripts/deploy/seed_keys.json");
+  console.log("[SECURITY] Seed secret keys saved securely to scripts/deploy/seed_keys.json");
 
   console.log("\n==================================================");
-  console.log("🎉 DEPLOYMENT AND ON-CHAIN SEEDING FINISHED SUCCESSFULLY (10 COHORTS SEEDED)!");
+  console.log("[SUCCESS] DEPLOYMENT AND ON-CHAIN SEEDING FINISHED SUCCESSFULLY (10 COHORTS SEEDED)!");
   console.log("==================================================");
 }
 

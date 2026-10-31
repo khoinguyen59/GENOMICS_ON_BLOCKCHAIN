@@ -52,7 +52,7 @@ const CONSORTIUM_BY_GENE = {
   LCT: "Regulatory Enhancer & Metabolic Consortium",
   ABCC11: "Transmembrane ABC Transporter Project",
   ALDH2: "Acetaldehyde Metabolic Kinetics Group",
-  "KHV-WGS": "1000 Genomes Project — Vietnam KHV"
+  "KHV-WGS": "1000 Genomes Project - Vietnam KHV"
 };
 
 const PREFERRED_HERO_ORDER = [2, 8, 7, 5, 9, 10, 4, 6, 3, 1];
@@ -309,7 +309,7 @@ export default function OpenSeaSpotlightShowcase({ onPurchase }) {
       <div className="os2-discover-split-grid">
         {/* LEFT COLUMN */}
         <div className="os2-discover-left-col">
-          {/* A. Full-Bleed Hero Banner with Real 3D Gemini Molecular Artwork & 3 Square Thumbnails */}
+          {/* A. Full-Bleed Hero Banner with 3D Molecular Artwork & 3 Square Thumbnails */}
           <div className="os2-hero-banner-wrap">
             <div
               className="os2-hero-banner-card"
@@ -361,7 +361,7 @@ export default function OpenSeaSpotlightShowcase({ onPurchase }) {
                     className="os2-hero-title"
                     onClick={() => setSelectedAssetModal(featured)}
                   >
-                    {featuredGeneKey} —{" "}
+                    {featuredGeneKey} -{" "}
                     {getLocalizedTitle ? getLocalizedTitle(featured, lang) : featured.disease}
                   </h2>
                   <VerifiedBadgeIcon size={20} color="#0086FF" />
@@ -579,7 +579,7 @@ export default function OpenSeaSpotlightShowcase({ onPurchase }) {
                     <div className="os2-featured-strip-overlay">
                       <div className="os2-featured-strip-title-row">
                         <span className="os2-featured-strip-title">
-                          {geneName} — {displayTitle}
+                          {geneName} - {displayTitle}
                         </span>
                         <VerifiedBadgeIcon size={14} color="#0086FF" />
                       </div>
@@ -642,7 +642,7 @@ export default function OpenSeaSpotlightShowcase({ onPurchase }) {
                       <span className="os2-lb-name" title={displayTitle}>
                         {rightTab === "tokens"
                           ? `$${geneSym} (${ds.chromosome})`
-                          : `${geneSym} — ${displayTitle}`}
+                          : `${geneSym} - ${displayTitle}`}
                       </span>
                       <VerifiedBadgeIcon size={13} color="#0086FF" />
                     </div>

@@ -7,7 +7,7 @@ import { computeIpfsCidV0, cacheLocalIpfsContent } from "../../ipfs/pinata_uploa
 
 async function main() {
   console.log("==================================================");
-  console.log("🚀 Deploying to Hardhat Localhost Node (port 8545)...");
+  console.log("[INFO] Deploying to Hardhat Localhost Node (port 8545)...");
   console.log("==================================================");
 
   const { ethers } = await hre.network.connect("localhost");
@@ -20,40 +20,40 @@ async function main() {
   const GenomicToken = await ethers.getContractFactory("GenomicToken");
   const token = await GenomicToken.deploy(deployer.address);
   await token.waitForDeployment();
-  console.log(`✅ GenomicToken deployed at: ${token.target}`);
+  console.log(`[PASS] GenomicToken deployed at: ${token.target}`);
 
   // 2. Deploy GenomicNFT
   console.log("\n2. Deploying GenomicNFT (ERC-721 + EIP-2981 Royalty)...");
   const GenomicNFT = await ethers.getContractFactory("GenomicNFT");
   const nft = await GenomicNFT.deploy(deployer.address, 1000);
   await nft.waitForDeployment();
-  console.log(`✅ GenomicNFT deployed at: ${nft.target}`);
+  console.log(`[OK] GenomicNFT deployed at: ${nft.target}`);
 
   // 3. Deploy GenomicsRegistry
   console.log("\n3. Deploying GenomicsRegistry (Core + Escrow)...");
   const GenomicsRegistry = await ethers.getContractFactory("GenomicsRegistry");
   const registry = await GenomicsRegistry.deploy(token.target, nft.target, deployer.address);
   await registry.waitForDeployment();
-  console.log(`✅ GenomicsRegistry deployed at: ${registry.target}`);
+  console.log(`[OK] GenomicsRegistry deployed at: ${registry.target}`);
 
   // 3b. Deploy GenomicZkVerifier (Tier-4 zk-Genomics)
   console.log("\n3b. Deploying GenomicZkVerifier (Zero-Knowledge Variant Verification)...");
   const GenomicZkVerifier = await ethers.getContractFactory("GenomicZkVerifier");
   const zkVerifier = await GenomicZkVerifier.deploy(token.target);
   await zkVerifier.waitForDeployment();
-  console.log(`✅ GenomicZkVerifier deployed at: ${zkVerifier.target}`);
+  console.log(`[OK] GenomicZkVerifier deployed at: ${zkVerifier.target}`);
 
   // 4. Authorize Registry in NFT
   console.log("\n4. Authorizing GenomicsRegistry in GenomicNFT...");
   const authTx = await nft.connect(deployer).setRegistryContract(registry.target);
   await authTx.wait();
-  console.log("✅ Authorization completed!");
+  console.log("[OK] Authorization completed!");
 
   // Transfer initial $GENO tokens to researcher for test buying
   console.log("\nTransferring 1,000 $GENO to Researcher account for marketplace testing...");
   const fundTx = await token.connect(deployer).transfer(researcher.address, ethers.parseUnits("1000", 18));
   await fundTx.wait();
-  console.log(`✅ Researcher balance funded: 1,000 $GENO`);
+  console.log(`[OK] Researcher balance funded: 1,000 $GENO`);
 
   // 5. Seed On-chain Data
   console.log("\n5. Seeding authenticated genomic datasets...");
@@ -66,7 +66,7 @@ async function main() {
 
   const pdfBytes1 = generateClinicalPdfReport({
     subjectId: "1000G_KHV_VN_01",
-    disease: "1000 Genomes Project — Quần thể Hệ Gen Người Kinh TP.HCM (KHV Cohort WGS)",
+    disease: "1000 Genomes Project - Quần thể Hệ Gen Người Kinh TP.HCM (KHV Cohort WGS)",
     gene: "ALDH2 / ADH1B Multi-locus Loci (chr12)",
     variant: "rs671 (c.1510G>A)",
   });
@@ -75,7 +75,7 @@ async function main() {
 
   const pheno1 = buildPhenopacket({
     subjectId: "1000G_KHV_VN_01",
-    disease: "1000 Genomes Project — Quần thể Hệ Gen Người Kinh TP.HCM (KHV Cohort WGS)",
+    disease: "1000 Genomes Project - Quần thể Hệ Gen Người Kinh TP.HCM (KHV Cohort WGS)",
     phenotypes: [{ id: "SO:0000694", label: "Population SNP Callset" }],
     variants: [{ gene: "ALDH2", hgvs: "c.1510G>A", zygosity: "heterozygous" }],
     rawDataHash: enc1.rawDataHash,
@@ -101,7 +101,7 @@ async function main() {
     1000
   );
   await tx1.wait();
-  console.log(`✅ Seed #1 (1000G KHV) registered on-chain: dataId=1`);
+  console.log(`[OK] Seed #1 (1000G KHV) registered on-chain: dataId=1`);
 
   // Seed 2: ACTN3 Muscle Performance
   const seedVcf2 =
@@ -146,7 +146,7 @@ async function main() {
     1000
   );
   await tx2.wait();
-  console.log(`✅ Seed #2 (ACTN3) registered on-chain: dataId=2`);
+  console.log(`[OK] Seed #2 (ACTN3) registered on-chain: dataId=2`);
 
   // 6. Save contract addresses + ABIs for frontend
   const addresses = {
@@ -165,7 +165,7 @@ async function main() {
   const outputDir = path.resolve("frontend/src/contracts");
   if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
   fs.writeFileSync(path.join(outputDir, "contractAddresses.json"), JSON.stringify(addresses, null, 2));
-  console.log("\n📄 Contract addresses saved to frontend/src/contracts/contractAddresses.json");
+  console.log("\n[FILE] Contract addresses saved to frontend/src/contracts/contractAddresses.json");
 
   const contractsToExport = ["GenomicToken", "GenomicNFT", "GenomicsRegistry", "GenomicZkVerifier"];
   for (const name of contractsToExport) {
@@ -173,7 +173,7 @@ async function main() {
     if (fs.existsSync(artifactPath)) {
       const artifact = JSON.parse(fs.readFileSync(artifactPath, "utf8"));
       fs.writeFileSync(path.join(outputDir, `${name}ABI.json`), JSON.stringify(artifact.abi, null, 2));
-      console.log(`📄 Exported ABI: ${name}ABI.json`);
+      console.log(`[FILE] Exported ABI: ${name}ABI.json`);
     }
   }
 
@@ -182,7 +182,7 @@ async function main() {
     seeds: [
       {
         dataId: 1,
-        disease: "1000 Genomes Project — Quần thể Hệ Gen Người Kinh TP.HCM (KHV Cohort WGS)",
+        disease: "1000 Genomes Project - Quần thể Hệ Gen Người Kinh TP.HCM (KHV Cohort WGS)",
         gene: "ALDH2 / ADH1B Multi-locus Loci (chr12)",
         hpoTerm: "SO:0000694 (Population SNP Callset)",
         ancestry: "Vietnamese Kinh (1000 Genomes: KHV)",
@@ -207,7 +207,7 @@ async function main() {
     ],
   };
   fs.writeFileSync(path.join(outputDir, "seedMetadata.json"), JSON.stringify(publicSeedDataStore, null, 2));
-  console.log("📄 Public seed metadata saved (Zero keys leaked)");
+  console.log("[FILE] Public seed metadata saved (Zero keys leaked)");
 
   // Private keys -> scripts only
   const secretKeyStore = {
@@ -218,10 +218,10 @@ async function main() {
     ],
   };
   fs.writeFileSync(path.resolve("scripts/deploy/seed_keys.json"), JSON.stringify(secretKeyStore, null, 2));
-  console.log("🔒 Seed keys saved to scripts/deploy/seed_keys.json");
+  console.log("[SECURITY] Seed keys saved to scripts/deploy/seed_keys.json");
 
   console.log("\n==================================================");
-  console.log("🎉 LOCALHOST DEPLOYMENT COMPLETE!");
+  console.log("[SUCCESS] LOCALHOST DEPLOYMENT COMPLETE!");
   console.log(`   GenomicToken    : ${token.target}`);
   console.log(`   GenomicNFT      : ${nft.target}`);
   console.log(`   GenomicsRegistry: ${registry.target}`);

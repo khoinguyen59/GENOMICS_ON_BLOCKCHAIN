@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """
-GenoChain - Decentralized Genomic Data Infrastructure - Web3.py Interaction Script
+GenoChain - Hệ thống Quản lý và Chia sẻ Dữ liệu Di truyền trên Blockchain
+Môn học: IS355 - Công nghệ Blockchain
+Giảng viên hướng dẫn: ThS. Hà Lê Hoài Trung
+Sinh viên thực hiện: Nguyễn Trọng Khôi - MSSV: 23520783
+Khoa Hệ thống Thông tin - Trường ĐH Công nghệ Thông tin, ĐHQG-HCM
+
 Thực hiện 100% giao dịch thật trên EVM qua Web3.py:
 1. Nạp ABI và địa chỉ từ frontend/src/contracts/
 2. Đăng ký dữ liệu di truyền: registerGenomicData() với bytes32 rawDataHash và IPFS CIDv0
@@ -152,7 +157,7 @@ def main():
         print(f"[!] Burn notice: {e}")
 
     # 2. Register Genomic Data
-    print("\n--- 2. Nghiệp vụ 1: registerGenomicData() ---")
+    print("\n--- Step 2: Genomic Data Registration & Integrity Anchor ---")
     sample_vcf = f"##fileformat=VCFv4.2\n#nonce={time.time()}\nchr12\t111803962\trs671\tG\tA\tANN=ALDH2"
     raw_data_hash = compute_raw_hash(sample_vcf)
     raw_cid = "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG"
@@ -181,7 +186,7 @@ def main():
     print(f"[+] Tổng số bộ dữ liệu trên Blockchain: {data_count}")
 
     # 3. Grant Access with Escrow & Royalty
-    print("\n--- 3. Nghiệp vụ 2: grantAccess() kèm Ký quỹ Escrow & 10% Royalty ---")
+    print("\n--- Step 3: Access Granting with Escrow & Automated 10% Royalty ---")
     owner_bal_before = token_contract.functions.balanceOf(data_owner).call()
 
     print("[+] Researcher approve $GENO token cho hợp đồng GenomicsRegistry...")
@@ -199,7 +204,7 @@ def main():
     print(f"[+] Kiểm tra quyền truy cập hasActiveAccess: {has_access}")
 
     # 3b. Grant Access with Timelocked Escrow Protection
-    print("\n--- 3b. Nghiệp vụ 2b: grantAccessWithEscrow() Ký quỹ Timelock & Dispute Window ---")
+    print("\n--- Step 4: Escrow Protection with Timelock Dispute Window ---")
     sample_vcf2 = f"##fileformat=VCFv4.2\n#nonce={time.time()}_2\nchr11\t66560624\trs1815739\tC\tT\tANN=ACTN3"
     raw_data_hash2 = compute_raw_hash(sample_vcf2)
     raw_cid2 = "QmXoypizjW3WknFiJnKLwHCnL72vedxjQkDDP1mXWo6uco"
@@ -238,14 +243,14 @@ def main():
     print(f"    - Đã hoàn tiền     : {escrow_dep[6]}")
 
     # 4. Update Status with onlyDataOwner check
-    print("\n--- 4. Nghiệp vụ 3: updateDataStatus() & Ràng buộc onlyDataOwner ---")
+    print("\n--- Step 5: Data Lifecycle Management & Access Control ---")
     status_tx = registry_contract.functions.updateDataStatus(data_count, 1).transact({"from": data_owner}) # 1 = Paused
     w3.eth.wait_for_transaction_receipt(status_tx)
     updated_data = registry_contract.functions.getGenomicData(data_count).call()
     print(f"[OK] Trạng thái mới của Dataset #{data_count}: {updated_data[9]} (1 = Paused)")
 
-    # 5. Update Fee & Grant Direct Access (Ràng buộc 1: Only Data Owner can change fee or grant viewing access)
-    print("\n--- 5. Ràng buộc 1: updateDataPrice() & grantDirectAccess() ---")
+    # 5. Update Fee & Grant Direct Access (Owner Access Control Enforcement)
+    print("\n--- Step 6: Pricing Configuration & Direct Access Authorization ---")
     new_price_wei = w3.to_wei(150, "ether")
     price_tx = registry_contract.functions.updateDataPrice(data_count, new_price_wei).transact({"from": data_owner})
     w3.eth.wait_for_transaction_receipt(price_tx)

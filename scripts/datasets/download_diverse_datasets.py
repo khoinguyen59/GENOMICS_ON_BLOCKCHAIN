@@ -14,7 +14,7 @@ os.makedirs(FRONTEND_DIR, exist_ok=True)
 # 1. Inspect Phenopackets in monarch-initiative
 def get_phenopacket_url(gene):
     api_url = f"https://api.github.com/repos/monarch-initiative/phenopacket-store/contents/notebooks/{gene}/phenopackets"
-    req = urllib.request.Request(api_url, headers={"User-Agent": "GenomicsBlockchainAgent/1.0"})
+    req = urllib.request.Request(api_url, headers={"User-Agent": "GenoChain-Researcher/1.0"})
     try:
         with urllib.request.urlopen(req, context=ctx, timeout=8) as resp:
             data = json.loads(resp.read().decode())
@@ -119,7 +119,7 @@ for item in all_downloads:
     out_pub_path = os.path.join(FRONTEND_DIR, item["name"])
     print(f"Downloading {item['name']}...")
     try:
-        req = urllib.request.Request(item["url"], headers={"User-Agent": "GenomicsBlockchainAgent/1.0"})
+        req = urllib.request.Request(item["url"], headers={"User-Agent": "GenoChain-Researcher/1.0"})
         with urllib.request.urlopen(req, context=ctx, timeout=12) as resp:
             content = resp.read()
             with open(out_data_path, "wb") as f:

@@ -395,7 +395,7 @@ export default function PatientSovereignVault({
                         <button
                           className="btn-terminal btn-terminal-ghost"
                           onClick={() => setGrantModalData(d)}
-                          title="Grant Direct Access to EVM Address (Ràng buộc 1)"
+                          title="Grant Direct Access to EVM Address (Access Control Rule)"
                           style={{ border: "1px solid #10b981", color: "#10b981", fontSize: "12px", height: "30px" }}
                           type="button"
                         >

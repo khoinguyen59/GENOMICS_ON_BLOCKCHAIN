@@ -6,7 +6,7 @@ ctx = ssl._create_unverified_context()
 
 def explore_repo(owner_repo, path=""):
     url = f"https://api.github.com/repos/{owner_repo}/contents/{path}"
-    req = urllib.request.Request(url, headers={"User-Agent": "GenomicsBlockchainAgent/1.0"})
+    req = urllib.request.Request(url, headers={"User-Agent": "GenoChain-Researcher/1.0"})
     try:
         with urllib.request.urlopen(req, context=ctx, timeout=10) as resp:
             data = json.loads(resp.read().decode())

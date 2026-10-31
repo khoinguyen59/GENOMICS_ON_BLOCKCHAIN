@@ -13,8 +13,9 @@ import { computeDataHash } from "../core/symmetric.js";
  */
 function escapePdfLiteral(str) {
   if (!str) return "";
+  const dashRegex = new RegExp("[" + String.fromCharCode(0x2014, 0x2013) + "]", "g");
   return String(str)
-    .replace(/—/g, "--")
+    .replace(dashRegex, "-")
     .replace(/\\/g, "\\\\")
     .replace(/\(/g, "\\(")
     .replace(/\)/g, "\\)");
@@ -24,7 +25,7 @@ function escapePdfLiteral(str) {
  * Generate a valid, renderable PDF 1.4 clinical genomic summary report
  * @param {Object} params
  * @param {string} [params.subjectId="1000G_KHV_01"] Patient pseudonym
- * @param {string} [params.disease="1000 Genomes Project -- Population Genomic Variation (KHV Cohort)"] Indication or condition
+ * @param {string} [params.disease="1000 Genomes Project - Population Genomic Variation (KHV Cohort)"] Indication or condition
  * @param {string} [params.gene="ALDH2"] Analyzed gene
  * @param {string} [params.variant="rs671 (c.1510G>A, p.Glu504Lys)"] Pathogenic variant notation
  * @param {string} [params.date] Report issue date
@@ -32,7 +33,7 @@ function escapePdfLiteral(str) {
  */
 export function generateClinicalPdfReport({
   subjectId = "1000G_KHV_01",
-  disease = "1000 Genomes Project -- Population Genomic Variation (KHV Cohort)",
+  disease = "1000 Genomes Project - Population Genomic Variation (KHV Cohort)",
   gene = "ALDH2",
   variant = "rs671 (c.1510G>A, p.Glu504Lys)",
   date = new Date().toISOString().split("T")[0],

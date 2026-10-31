@@ -286,7 +286,7 @@ function ProceduralGenomicArtwork({ dataset, dataId }) {
 }
 
 /**
- * GenomicVisualCover — OpenSea / DeSci Collection Card Cover Header
+ * GenomicVisualCover - OpenSea / DeSci Collection Card Cover Header
  * Features full-bleed visual cover, zoom on card hover, overlapping avatar with verified badge.
  */
 export default function GenomicVisualCover({
@@ -314,7 +314,7 @@ export default function GenomicVisualCover({
         height: `${height}px`,
         width: "100%",
         overflow: "visible",
-        background: "#090d16",
+        background: "var(--bg-surface-elevated, #f1f5f9)",
         borderTopLeftRadius: "inherit",
         borderTopRightRadius: "inherit",
         ...style
@@ -469,8 +469,8 @@ export default function GenomicVisualCover({
               height: "42px",
               borderRadius: "50%",
               background: "linear-gradient(135deg, #0f172a 0%, #1e293b 100%)",
-              border: "2.5px solid var(--bg-surface-solid, #0f172a)",
-              boxShadow: "0 4px 14px rgba(0, 0, 0, 0.5)",
+              border: "2.5px solid var(--bg-surface, #ffffff)",
+              boxShadow: "0 4px 14px rgba(0, 0, 0, 0.25)",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
@@ -498,7 +498,7 @@ export default function GenomicVisualCover({
               position: "absolute",
               bottom: "-2px",
               right: "-2px",
-              background: "var(--bg-surface-solid, #0f172a)",
+              background: "var(--bg-surface, #ffffff)",
               borderRadius: "50%",
               padding: "1px",
               display: "flex",

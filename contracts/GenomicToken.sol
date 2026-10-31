@@ -7,7 +7,7 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 
 /**
  * @title GenomicToken ($GENO)
- * @author GenomicsBlockchainAgent
+ * @author Nguyễn Trọng Khôi (MSSV: 23520783)
  * @notice ERC-20 utility and payment token for the Genomics on Blockchain ecosystem.
  * @dev Used for Escrow payment, access purchases, and distributing automatic royalties.
  *      Includes rate-limited faucet with 1-hour cooldown to prevent abuse.

@@ -9,10 +9,10 @@ import "./GenomicNFT.sol";
 
 /**
  * @title GenomicsRegistry
- * @author GenomicsBlockchainAgent
+ * @author Nguyễn Trọng Khôi (MSSV: 23520783)
  * @notice Core registry contract for managing genomic data registration, access granting with escrow,
  *         status updates, and automatic EIP-2981 royalty disbursement.
- * @dev Fulfills all criteria of Bài tập 06 (Smart Contract + Escrow + Royalty + Security).
+ * @dev Comprehensive DeSci Genomic Registry implementing smart contracts, escrow, royalty settlement, and access control.
  */
 contract GenomicsRegistry is ReentrancyGuard, Ownable {
     using SafeERC20 for IERC20;
@@ -23,7 +23,7 @@ contract GenomicsRegistry is ReentrancyGuard, Ownable {
         uint256 dataId;
         uint256 tokenId;
         address currentOwner;
-        bytes32 rawDataHash;         // [FIX P1] SHA-256 integrity hash of raw dataset
+        bytes32 rawDataHash;         // SHA-256 integrity hash of raw dataset
         string rawCiphertextCid;     // IPFS CID of encrypted raw sequence (.vcf/.fastq)
         string summaryCiphertextCid; // IPFS CID of encrypted summary report (.pdf)
         string metadataCid;          // IPFS CID of public GA4GH phenotype metadata (.json)
@@ -235,7 +235,7 @@ contract GenomicsRegistry is ReentrancyGuard, Ownable {
     }
 
     // =========================================================================
-    // Core Business Functions (Yêu cầu đề bài)
+    // Core Business Functions
     // =========================================================================
 
     /**
@@ -521,7 +521,7 @@ contract GenomicsRegistry is ReentrancyGuard, Ownable {
 
     /**
      * @notice 3. updateDataStatus(): Change status of the dataset (Active, Paused, Revoked).
-     *         Enforces Ràng buộc 1: Only data owner can execute!
+     *         Enforces Access Control Rule: Only data owner can execute!
      * @param dataId Dataset ID
      * @param newStatus New status to set
      */
@@ -536,7 +536,7 @@ contract GenomicsRegistry is ReentrancyGuard, Ownable {
 
     /**
      * @notice updateDataPrice(): Change access fee in $GENO tokens for the dataset.
-     *         Enforces Ràng buộc 1: Only data owner can execute!
+     *         Enforces Access Control Rule: Only data owner can execute!
      * @param dataId Dataset ID
      * @param newPrice New price in $GENO wei
      */
@@ -552,7 +552,7 @@ contract GenomicsRegistry is ReentrancyGuard, Ownable {
 
     /**
      * @notice grantDirectAccess(): Data Owner directly grants viewing access for a researcher/institution.
-     *         Enforces Ràng buộc 1: Only data owner can execute!
+     *         Enforces Access Control Rule: Only data owner can execute!
      * @param dataId Dataset ID
      * @param recipient Researcher receiving access
      */

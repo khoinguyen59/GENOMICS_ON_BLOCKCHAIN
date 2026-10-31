@@ -15,7 +15,7 @@ import {
 } from "../crypto/client_crypto.js";
 import { uploadEncryptedRawData } from "../ipfs/pinata_uploader.js";
 
-describe("Genomics on Blockchain System (Bài Tập 06 - Production Hardened & Adversarial)", function () {
+describe("Genomics on Blockchain System (Production Hardened & Adversarial)", function () {
   let ethers;
   let deployer, dataOwner, researcher, unauthorizedUser, dispatcherWorker;
   let genomicToken, genomicNFT, genomicsRegistry;
@@ -121,7 +121,7 @@ describe("Genomics on Blockchain System (Bài Tập 06 - Production Hardened & A
     });
   });
 
-  describe("2. Nghiệp vụ 1: registerGenomicData() & Ciphertext Package Integrity", function () {
+  describe("2. Dataset Registration: registerGenomicData() & Ciphertext Package Integrity", function () {
     it("Should successfully register genomic data, mint NFT and record ciphertext package hash", async function () {
       const tx = await genomicsRegistry.connect(dataOwner).registerGenomicData(
         sampleDataHash,
@@ -238,7 +238,7 @@ describe("Genomics on Blockchain System (Bài Tập 06 - Production Hardened & A
     });
   });
 
-  describe("3. Nghiệp vụ 2: grantAccess() kèm Escrow & Auto-Royalty", function () {
+  describe("3. Access Settlement: grantAccess() with Escrow & Auto-Royalty", function () {
     beforeEach(async function () {
       // Data owner registers dataset
       await genomicsRegistry.connect(dataOwner).registerGenomicData(
@@ -318,7 +318,7 @@ describe("Genomics on Blockchain System (Bài Tập 06 - Production Hardened & A
     });
   });
 
-  describe("4. Nghiệp vụ 3: updateDataStatus() & Ràng buộc onlyDataOwner", function () {
+  describe("4. Status Management: updateDataStatus() & Access Control Constraints", function () {
     beforeEach(async function () {
       await genomicsRegistry.connect(dataOwner).registerGenomicData(
         sampleDataHash,
@@ -334,7 +334,7 @@ describe("Genomics on Blockchain System (Bài Tập 06 - Production Hardened & A
       await genomicToken.connect(researcher).approve(genomicsRegistry.target, INITIAL_PRICE);
     });
 
-    it("Ràng buộc 1: Only the data owner can update data status", async function () {
+    it("Access Control: Only the data owner can update data status", async function () {
       // Unauthorized user attempts update -> must revert
       await expect(
         genomicsRegistry.connect(unauthorizedUser).updateDataStatus(1, 1) // Paused
@@ -354,7 +354,7 @@ describe("Genomics on Blockchain System (Bài Tập 06 - Production Hardened & A
       ).to.be.revertedWithCustomError(genomicsRegistry, "DataNotActive");
     });
 
-    it("Ràng buộc 1: Only the data owner can update data access fee", async function () {
+    it("Access Control: Only the data owner can update data access fee", async function () {
       const newPrice = ethers.parseUnits("250", 18);
 
       // Unauthorized user attempts price change -> must revert
@@ -377,7 +377,7 @@ describe("Genomics on Blockchain System (Bài Tập 06 - Production Hardened & A
       expect(data.price).to.equal(newPrice);
     });
 
-    it("Ràng buộc 1: Data owner can grant direct viewing access without payment", async function () {
+    it("Access Control: Data owner can grant direct viewing access without payment", async function () {
       // Unauthorized user attempts direct grant -> must revert
       await expect(
         genomicsRegistry.connect(unauthorizedUser).grantDirectAccess(1, researcher.address)

@@ -1,7 +1,7 @@
 import { expect } from "chai";
 import hre from "hardhat";
 
-describe("zk-Genomics: Zero-Knowledge Genetic Variant Verification & Bounties (Tier 4 / World-Class Upgrade)", function () {
+describe("zk-Genomics: Zero-Knowledge Genetic Variant Verification & Bounties", function () {
   let ethers;
   let token;
   let zkVerifier;

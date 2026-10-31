@@ -26,8 +26,8 @@ export default function DragDropMintingStudio({ onPublishSuccess }) {
 
   // Form State
   const [subjectId, setSubjectId] = useState("1000G_KHV_VN_01");
-  const [disease, setDisease] = useState("1000 Genomes Project — Quần thể Hệ Gen Người Kinh TP.HCM (KHV Cohort WGS)");
-  const [hpoCode, setHpoCode] = useState("SO:0000694 — Population Genomic SNP Callset");
+  const [disease, setDisease] = useState("1000 Genomes Project - Quần thể Hệ Gen Người Kinh TP.HCM (KHV Cohort WGS)");
+  const [hpoCode, setHpoCode] = useState("SO:0000694 - Population Genomic SNP Callset");
   const [geneSymbol, setGeneSymbol] = useState("ALDH2 / ADH1B Multi-locus Loci (chr12)");
   const [fileFormat, setFileFormat] = useState("VCF v4.2");
   const [ancestryRegion, setAncestryRegion] = useState("Vietnamese Kinh (1000 Genomes: KHV)");
@@ -110,9 +110,9 @@ export default function DragDropMintingStudio({ onPublishSuccess }) {
         ivHex: "STREAMING_INDIVIDUAL_IVS_PER_64KB",
         tagHex: "STREAMING_GMAC_TAGS_PER_64KB",
         dataHash: "Will compute SHA-256 over chunked package on submission...",
-        status: `VERIFIED: GA4GH Crypt4GH Streaming Guard Active (${(fileSize / (1024 * 1024)).toFixed(1)} MB) — 64KB Slices`
+        status: `VERIFIED: GA4GH Crypt4GH Streaming Guard Active (${(fileSize / (1024 * 1024)).toFixed(1)} MB) - 64KB Slices`
       });
-      showToast(`⚡ Large file detected (${(fileSize / (1024 * 1024)).toFixed(1)} MB): GA4GH Streaming Mode Active`);
+      showToast(`Large file detected (${(fileSize / (1024 * 1024)).toFixed(1)} MB): GA4GH Streaming Mode Active`);
     } else {
       // Compute live client-side WebCrypto encryption preview to demonstrate Zero Plaintext Leakage
       try {

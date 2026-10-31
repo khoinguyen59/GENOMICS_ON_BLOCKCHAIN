@@ -5,7 +5,7 @@
  *              - Eliminates non-standard schema fields in Individual (such as raw ancestry strings).
  *              - Models population descriptors via standard Human Ancestry Ontology (HANCESTRO).
  *              - Provides validation function to ensure 100% schema correctness.
- * @author GenomicsBlockchainAgent
+ * @author Nguyễn Trọng Khôi (MSSV: 23520783)
  */
 
 /**

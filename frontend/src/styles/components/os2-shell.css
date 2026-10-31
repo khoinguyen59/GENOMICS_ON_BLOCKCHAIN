@@ -15,7 +15,7 @@
 
 [data-theme="light"] .os2-app-shell,
 [data-theme="light"] body {
-  background-color: #ffffff !important;
+  background-color: var(--bg-app) !important;
   background-image: none !important;
 }
 
@@ -190,7 +190,7 @@
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  font-size: 13.5px;
+  font-size: 14.5px;
   font-weight: 500;
   opacity: 0;
   transition: opacity 150ms ease;
@@ -205,7 +205,7 @@
 .os2-nav-badge {
   padding: 1px 6px;
   border-radius: 4px;
-  font-size: 10px;
+  font-size: 11.5px;
   font-weight: 600;
   background: var(--bg-elevated);
   color: var(--text-secondary);
@@ -291,7 +291,7 @@
   border: none !important;
   background: transparent !important;
   color: var(--text-primary);
-  font-size: 13.5px;
+  font-size: 14.5px;
   height: 100%;
   outline: none !important;
   box-shadow: none !important;
@@ -350,13 +350,13 @@
 }
 
 .os2-faucet-btn {
-  height: 36px;
-  padding: 0 12px;
+  height: 38px;
+  padding: 0 14px;
   border-radius: 8px;
   border: 1px solid rgba(0, 134, 255, 0.3);
   background: rgba(0, 134, 255, 0.08);
   color: #0086ff;
-  font-size: 12.5px;
+  font-size: 13.5px;
   font-weight: 600;
   display: inline-flex;
   align-items: center;
@@ -389,7 +389,7 @@
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  font-size: 12.5px;
+  font-size: 13.5px;
   font-weight: 600;
   color: var(--text-primary);
   font-family: var(--font-mono);
@@ -406,7 +406,7 @@
   border: none;
   background: var(--bg-elevated);
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: 13px;
   font-family: var(--font-mono);
   cursor: pointer;
 }
@@ -441,13 +441,13 @@
 }
 
 .os2-signin-btn {
-  height: 36px;
+  height: 38px;
   padding: 0 14px;
   border-radius: 8px;
   border: 1px solid var(--border-subtle);
   background: var(--bg-surface);
   color: var(--text-primary);
-  font-size: 13.5px;
+  font-size: 14.5px;
   font-weight: 600;
   cursor: pointer;
   transition: background 140ms ease;
@@ -533,13 +533,13 @@
 }
 
 .os2-cat-pill {
-  height: 32px;
-  padding: 0 12px;
+  height: 36px;
+  padding: 0 14px;
   border-radius: 8px;
   border: none;
   background: transparent;
   color: var(--text-secondary);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 500;
   display: inline-flex;
   align-items: center;
@@ -850,7 +850,7 @@
 
 .os2-hero-title {
   color: #ffffff;
-  font-size: 25px;
+  font-size: 28px;
   font-weight: 700;
   letter-spacing: -0.02em;
   line-height: 1.2;
@@ -910,7 +910,7 @@
 }
 
 .os2-hero-stat-label {
-  font-size: 9.5px;
+  font-size: 11.5px;
   font-weight: 600;
   letter-spacing: 0.06em;
   color: rgba(203, 213, 225, 0.72);
@@ -918,7 +918,7 @@
 }
 
 .os2-hero-stat-val {
-  font-size: 13.5px;
+  font-size: 15px;
   font-weight: 700;
   color: #ffffff;
   font-family: var(--font-mono);
@@ -1069,7 +1069,7 @@
 }
 
 .os2-section-title {
-  font-size: 18px;
+  font-size: 22px;
   font-weight: 700;
   color: var(--text-primary);
   letter-spacing: -0.01em;
@@ -1081,7 +1081,7 @@
 }
 
 .os2-section-subtitle {
-  font-size: 13px;
+  font-size: 14px;
   color: var(--text-muted);
   margin: 0;
 }
@@ -1152,7 +1152,7 @@
 }
 
 .os2-token-ticker {
-  font-size: 10.5px;
+  font-size: 12px;
   font-weight: 500;
   color: var(--text-muted);
   font-family: var(--font-mono);
@@ -1276,7 +1276,7 @@
 }
 
 .os2-token-name {
-  font-size: 13px;
+  font-size: 14.5px;
   font-weight: 600;
   color: var(--text-primary);
   white-space: nowrap;
@@ -1296,7 +1296,7 @@
 }
 
 .os2-token-price {
-  font-size: 12px;
+  font-size: 13.5px;
   font-weight: 600;
   color: var(--text-secondary);
   font-family: var(--font-mono);
@@ -1345,7 +1345,7 @@
   justify-content: space-between;
   padding: 4px 6px 8px 6px;
   border-bottom: 1px solid var(--border-subtle);
-  font-size: 11px;
+  font-size: 12.5px;
   font-weight: 600;
   letter-spacing: 0.05em;
   color: var(--text-muted);
@@ -1409,7 +1409,7 @@
 }
 
 .os2-lb-name {
-  font-size: 13px;
+  font-size: 14.5px;
   font-weight: 600;
   color: var(--text-primary);
   white-space: nowrap;
@@ -1429,7 +1429,7 @@
 }
 
 .os2-lb-floor {
-  font-size: 12.5px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--text-primary);
   font-family: var(--font-mono);
@@ -1499,7 +1499,7 @@
   padding: 0 16px;
   display: flex;
   align-items: center;
-  font-size: 11.5px;
+  font-size: 12.5px;
   color: var(--text-muted);
 }
 

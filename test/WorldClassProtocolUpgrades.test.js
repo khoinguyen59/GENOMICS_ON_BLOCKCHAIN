@@ -13,7 +13,7 @@ import {
   importSovereignKeyVault,
 } from "../crypto/client_crypto.js";
 
-describe("World-Class Production Protocol Upgrades (Gaps 1-5 Benchmark)", function () {
+describe("Production Protocol Architecture & Security Verification", function () {
   let ethers;
   let token, nft, registry;
   let owner, seller, researcher, attacker;
@@ -70,7 +70,7 @@ describe("World-Class Production Protocol Upgrades (Gaps 1-5 Benchmark)", functi
     await token.connect(researcher).approve(registry.target, 10000n * 10n ** 18n);
   });
 
-  describe("Gap 4: Escrow Protection & Timelock Dispute Window", function () {
+  describe("Escrow Protection & Timelock Dispute Window", function () {
     it("should lock payment in escrow contract upon grantAccessWithEscrow", async function () {
       const balanceBefore = await token.balanceOf(researcher.address);
       const registryBalanceBefore = await token.balanceOf(registry.target);
@@ -203,7 +203,7 @@ describe("World-Class Production Protocol Upgrades (Gaps 1-5 Benchmark)", functi
     });
   });
 
-  describe("Gap 3: Gas-Optimized Capsule Storage & Event Retrieval (emitTransformedCapsule)", function () {
+  describe("Gas-Optimized Capsule Storage & Event Retrieval (emitTransformedCapsule)", function () {
     it("should emit CapsuleStored event without SSTORE and save ~550,000 gas", async function () {
       // Grant viewing access for researcher first
       await registry.connect(seller).grantDirectAccess(1, researcher.address);
@@ -252,7 +252,7 @@ describe("World-Class Production Protocol Upgrades (Gaps 1-5 Benchmark)", functi
       ).to.be.revertedWithCustomError(registry, "EmptyCapsule");
     });
 
-    it("should revert getCapsuleForBuyer when dataset status is not Active (Invariant 16)", async function () {
+    it("should revert getCapsuleForBuyer when dataset status is not Active", async function () {
       await registry.connect(seller).grantDirectAccess(1, researcher.address);
       await registry.connect(seller).storeTransformedCapsule(1, researcher.address, "capsule_data");
 
@@ -268,7 +268,7 @@ describe("World-Class Production Protocol Upgrades (Gaps 1-5 Benchmark)", functi
     });
   });
 
-  describe("Gap 1: Sovereign Key Vault Backup & Multi-Device Persistence", function () {
+  describe("Sovereign Key Vault Backup & Multi-Device Persistence", function () {
     it("should save and load owner capsules with dual-layer persistence", async function () {
       const testCid = "QmTestCidPersistence1234567890abcdef12345678";
       const testCapsule = JSON.stringify({ key: "0x1234", tag: "test" });
@@ -375,7 +375,7 @@ describe("World-Class Production Protocol Upgrades (Gaps 1-5 Benchmark)", functi
     });
   });
 
-  describe("Gap 2: Streaming Chunked Encryption Memory Guard (Crypt4GH Style)", function () {
+  describe("Streaming Chunked Encryption Memory Guard (Crypt4GH Architecture)", function () {
     it("should encrypt and decrypt chunked data with streaming progress without memory explosion", async function () {
       // Simulate genomic VCF file
       const line = "chr1\t1000\trs123\tA\tT\t100\tPASS\tDP=50\n";

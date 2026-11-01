@@ -1,9 +1,0 @@
-feat(security): integrate >1000-star security tools, async nonce mutex and defi incident test suite
-
-- Add async resilience module with p-queue (concurrency: 1) and p-retry
-- Add DOMPurify client-side sanitization for IPFS metadata
-- Add Dexie.js ACID storage for sovereign keypairs
-- Add Solhint linter and GitHub Actions security CI workflow
-- Add DeFiHackLabs and Damn Vulnerable DeFi adversarial test suite
-- Vendor 11 authoritative reference repositories into tools/
-- IS355 UIT - ThS. Ha Le Hoai Trung - Nguyen Trong Khoi (23520783)

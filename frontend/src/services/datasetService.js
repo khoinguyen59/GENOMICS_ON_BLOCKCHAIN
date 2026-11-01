@@ -31,6 +31,7 @@ import {
 import contractAddresses from "../contracts/contractAddresses.json";
 import GenomicsRegistryABI from "../contracts/GenomicsRegistryABI.json";
 import GenomicTokenABI from "../contracts/GenomicTokenABI.json";
+import { executeSerializedTx, smartReadWithRetry } from "../utils/asyncResilience.js";
 
 /**
  * 3-Step Client-Side Encryption, IPFS Storage, and Smart Contract Registration Pipeline
@@ -239,27 +240,29 @@ export async function dispatchCapsuleToBuyer({
 export async function purchaseDatasetAccess({ dataset, account, signer, researcherKeyPair }) {
   if (!account || !signer) throw new Error("Wallet not connected.");
 
-  const token = new ethers.Contract(contractAddresses.GenomicToken, GenomicTokenABI, signer);
-  const registry = new ethers.Contract(contractAddresses.GenomicsRegistry, GenomicsRegistryABI, signer);
+  return executeSerializedTx(account, async () => {
+    const token = new ethers.Contract(contractAddresses.GenomicToken, GenomicTokenABI, signer);
+    const registry = new ethers.Contract(contractAddresses.GenomicsRegistry, GenomicsRegistryABI, signer);
 
-  const priceWei = ethers.parseUnits(dataset.price.toString(), 18);
-  const balWei = await token.balanceOf(account);
+    const priceWei = ethers.parseUnits(dataset.price.toString(), 18);
+    const balWei = await token.balanceOf(account);
 
-  if (balWei < priceWei) {
-    throw new Error("Insufficient $GENO balance. Use +1,000 Faucet to fund wallet.");
-  }
+    if (balWei < priceWei) {
+      throw new Error("Insufficient $GENO balance. Use +1,000 Faucet to fund wallet.");
+    }
 
-  // 1/2: Check and approve allowance if needed
-  const currentAllowance = await token.allowance(account, contractAddresses.GenomicsRegistry);
-  if (currentAllowance < priceWei) {
-    const approveTx = await token.approve(contractAddresses.GenomicsRegistry, priceWei);
-    await approveTx.wait();
-  }
+    // 1/2: Check and approve allowance if needed
+    const currentAllowance = await token.allowance(account, contractAddresses.GenomicsRegistry);
+    if (currentAllowance < priceWei) {
+      const approveTx = await token.approve(contractAddresses.GenomicsRegistry, priceWei);
+      await approveTx.wait();
+    }
 
-  // 2/2: Grant access with escrow settlement
-  const buyTx = await registry.grantAccess(dataset.dataId);
-  await buyTx.wait();
-  return buyTx;
+    // 2/2: Grant access with escrow settlement
+    const buyTx = await registry.grantAccess(dataset.dataId);
+    await buyTx.wait();
+    return buyTx;
+  });
 }
 
 /**
@@ -268,26 +271,28 @@ export async function purchaseDatasetAccess({ dataset, account, signer, research
 export async function purchaseDatasetWithEscrow({ dataset, disputeWindowDays = 1, account, signer }) {
   if (!account || !signer) throw new Error("Wallet not connected.");
 
-  const token = new ethers.Contract(contractAddresses.GenomicToken, GenomicTokenABI, signer);
-  const registry = new ethers.Contract(contractAddresses.GenomicsRegistry, GenomicsRegistryABI, signer);
+  return executeSerializedTx(account, async () => {
+    const token = new ethers.Contract(contractAddresses.GenomicToken, GenomicTokenABI, signer);
+    const registry = new ethers.Contract(contractAddresses.GenomicsRegistry, GenomicsRegistryABI, signer);
 
-  const priceWei = ethers.parseUnits(dataset.price.toString(), 18);
-  const balWei = await token.balanceOf(account);
+    const priceWei = ethers.parseUnits(dataset.price.toString(), 18);
+    const balWei = await token.balanceOf(account);
 
-  if (balWei < priceWei) {
-    throw new Error("Insufficient $GENO balance. Use +1,000 Faucet to fund wallet.");
-  }
+    if (balWei < priceWei) {
+      throw new Error("Insufficient $GENO balance. Use +1,000 Faucet to fund wallet.");
+    }
 
-  const currentAllowance = await token.allowance(account, contractAddresses.GenomicsRegistry);
-  if (currentAllowance < priceWei) {
-    const approveTx = await token.approve(contractAddresses.GenomicsRegistry, priceWei);
-    await approveTx.wait();
-  }
+    const currentAllowance = await token.allowance(account, contractAddresses.GenomicsRegistry);
+    if (currentAllowance < priceWei) {
+      const approveTx = await token.approve(contractAddresses.GenomicsRegistry, priceWei);
+      await approveTx.wait();
+    }
 
-  const disputeWindowSeconds = Math.max(3600, disputeWindowDays * 86400);
-  const buyTx = await registry.grantAccessWithEscrow(dataset.dataId, disputeWindowSeconds);
-  await buyTx.wait();
-  return buyTx;
+    const disputeWindowSeconds = Math.max(3600, disputeWindowDays * 86400);
+    const buyTx = await registry.grantAccessWithEscrow(dataset.dataId, disputeWindowSeconds);
+    await buyTx.wait();
+    return buyTx;
+  });
 }
 
 /**
@@ -399,8 +404,8 @@ export async function decryptDatasetPayload({ dataset, account, contracts, resea
     throw new Error("Decryption keypair not initialized.");
   }
 
-  // 1/4: Fetch ciphertext blob from IPFS
-  const downloadedBlob = await retrieveFromIpfs(dataset.rawCid);
+  // 1/4: Fetch ciphertext blob from IPFS with resilient exponential backoff (p-retry)
+  const downloadedBlob = await smartReadWithRetry(() => retrieveFromIpfs(dataset.rawCid));
 
   // 2/4: Cryptographic integrity check against on-chain anchor
   const computedHash = await computeDataHash(downloadedBlob);
@@ -442,8 +447,8 @@ export async function decryptSummaryReport({ dataset, account, contracts, resear
     throw new Error("No clinical summary report CID associated with this dataset.");
   }
 
-  // 1. Fetch ciphertext blob from IPFS
-  const downloadedBlob = await retrieveFromIpfs(dataset.summaryCid);
+  // 1. Fetch ciphertext blob from IPFS with resilient exponential backoff (p-retry)
+  const downloadedBlob = await smartReadWithRetry(() => retrieveFromIpfs(dataset.summaryCid));
 
   // 1b. Cryptographic SHA-256 integrity check & Dual-Anchor Verification (Invariant 05 & DEF2-2-06)
   const computedHash = await computeDataHash(downloadedBlob);
@@ -481,7 +486,7 @@ export async function decryptSummaryReport({ dataset, account, contracts, resear
  */
 export async function fetchPhenopacketMetadata({ metadataCid }) {
   if (!metadataCid) throw new Error("Metadata CID is missing.");
-  const bytes = await retrieveFromIpfs(metadataCid);
+  const bytes = await smartReadWithRetry(() => retrieveFromIpfs(metadataCid));
   const jsonText = new TextDecoder().decode(bytes);
   return JSON.parse(jsonText);
 }

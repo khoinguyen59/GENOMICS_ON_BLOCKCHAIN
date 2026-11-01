@@ -18,6 +18,7 @@ Thumbs.db
 
 # Cloned External Repositories
 research_repos/
+tools/
 
 # Agent System (Local Agentic Configuration & Prompt Metadata)
 .agents/

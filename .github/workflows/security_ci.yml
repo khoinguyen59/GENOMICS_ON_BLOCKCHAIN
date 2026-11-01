@@ -1,0 +1,109 @@
+name: GenoChain Protocol Continuous Integration & Security Assurance Gate
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  smart-contract-tests:
+    name: 1. EVM Smart Contracts & Cryptographic Suite
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Codebase Recursively
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup Node.js Runtime
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "npm"
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Compile Smart Contracts
+        run: npx hardhat compile
+
+      - name: Run 106-Case Hardhat Test Suite
+        run: npm test
+
+      - name: Run 24-Case Independent Adversarial Stress Suite
+        run: npx hardhat run scripts/audit/independent_stress_suite.mjs
+
+  static-analysis-and-linting:
+    name: 2. Static Analysis & Linter Verification (Slither & Solhint)
+    runs-on: ubuntu-latest
+    needs: smart-contract-tests
+    steps:
+      - name: Checkout Codebase
+        uses: actions/checkout@v4
+
+      - name: Setup Python Runtime
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Setup Node.js Runtime
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Dependencies & Solhint
+        run: |
+          npm ci
+          npm install -g solhint
+
+      - name: Run Solhint Linter
+        run: solhint "contracts/**/*.sol"
+
+      - name: Run Static Security Check
+        run: python scripts/audit/parse_slither.py
+
+  frontend-build-and-audit:
+    name: 3. Frontend Production Build & Zero-Vulnerability Audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Codebase
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js Runtime
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Frontend Dependencies
+        working-directory: ./frontend
+        run: npm ci --legacy-peer-deps
+
+      - name: Audit Frontend Dependencies
+        working-directory: ./frontend
+        run: npm audit --audit-level=high
+
+      - name: Build Production Frontend Assets
+        working-directory: ./frontend
+        run: npm run build
+
+  academic-and-web3-hygiene:
+    name: 4. Academic Hygiene & Web3.py Compatibility
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Codebase
+        uses: actions/checkout@v4
+
+      - name: Setup Python Runtime
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python Web3 & Cryptography Dependencies
+        run: pip install web3 cryptography eth-account
+
+      - name: Run Academic Hygiene Self-Test
+        run: python scripts/audit/academic_hygiene_toolkit.py --selftest
+
+      - name: Run Web3.py Contract ABI Verification
+        run: python scripts/demo/web3_demo.py

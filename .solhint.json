@@ -1,0 +1,16 @@
+{
+  "extends": "solhint:recommended",
+  "rules": {
+    "compiler-version": ["error", "^0.8.20"],
+    "func-visibility": ["warn", { "ignoreConstructors": true }],
+    "avoid-tx-origin": "error",
+    "no-inline-assembly": "off",
+    "not-rely-on-time": "off",
+    "reason-string": ["warn", { "maxLength": 64 }],
+    "const-name-snakecase": "warn",
+    "event-name-camelcase": "warn",
+    "payable-fallback": "error",
+    "state-visibility": "error",
+    "quotes": ["error", "double"]
+  }
+}

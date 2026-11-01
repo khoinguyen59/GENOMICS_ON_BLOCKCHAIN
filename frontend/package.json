@@ -10,8 +10,12 @@
   },
   "dependencies": {
     "blockchain": "file:..",
+    "dexie": "^4.4.7",
+    "dompurify": "^3.4.17",
     "ethers": "^6.13.0",
     "lucide-react": "^0.460.0",
+    "p-queue": "^10.0.0",
+    "p-retry": "^8.0.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },

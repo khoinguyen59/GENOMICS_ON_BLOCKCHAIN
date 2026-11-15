@@ -598,7 +598,7 @@ describe("Genomics on Blockchain System (Production Hardened & Adversarial)", fu
       expect(await genomicsRegistry.authorizedCapsuleWorkers(1, dispatcherWorker.address)).to.be.true;
 
       // 3. Worker stores transformed capsule on-chain
-      const sampleCapsule = JSON.stringify({ version: "RSA-OAEP-2048", keyCipher: "0x1234abcd" });
+      const sampleCapsule = JSON.stringify({ version: "GENO-ASYM-RSA-OAEP-v2", keyCipher: "ab".repeat(256) });
       await genomicsRegistry
         .connect(dispatcherWorker)
         .storeTransformedCapsule(1, researcher.address, sampleCapsule);

@@ -1,7 +1,7 @@
 import hre from "hardhat";
 import fs from "node:fs";
 import path from "node:path";
-import { encryptGenomicData, generateClinicalPdfReport } from "../../crypto/client_crypto.js";
+import { encryptGenomicData, generateClinicalPdfReport, computeDataHash } from "../../crypto/client_crypto.js";
 import { buildPhenopacket } from "../../ipfs/phenopacket_builder.js";
 import { computeIpfsCidV0, cacheLocalIpfsContent } from "../../ipfs/pinata_uploader.js";
 import { pinFileToKubo, pinJsonToKubo } from "../../ipfs/kubo_client.js";
@@ -12,9 +12,19 @@ async function main() {
   console.log("==================================================");
 
   const { ethers } = await hre.network.connect("localhost");
-  const [deployer, researcher] = await ethers.getSigners();
+  const COHORT_BLIND_SALT = ethers.id("GENOCHAIN_COHORT_SALT_V1");
+  const computeBlindTagHex = (traitKey, traitValue) =>
+    ethers.keccak256(
+      ethers.AbiCoder.defaultAbiCoder().encode(
+        ["string", "string", "string", "bytes32"],
+        ["GENOCHAIN_BLIND_TAG_V1", traitKey, traitValue, COHORT_BLIND_SALT]
+      )
+    );
+  const [deployer, account1, account2] = await ethers.getSigners();
+  const researcher = account1;
   console.log(`Deployer Address   : ${deployer.address}`);
-  console.log(`Researcher Address : ${researcher.address}`);
+  console.log(`Provider (#1)      : ${account1.address}`);
+  console.log(`Researcher (#2)    : ${account2.address}`);
 
   // 1. Deploy GenomicToken
   console.log("\n1. Deploying GenomicToken ($GENO)...");
@@ -55,11 +65,13 @@ async function main() {
   await authTx.wait();
   console.log("[OK] Authorization completed!");
 
-  // Transfer initial $GENO tokens to researcher for test buying
-  console.log("\nTransferring 1,000 $GENO to Researcher account for marketplace testing...");
-  const fundTx = await token.connect(deployer).transfer(researcher.address, ethers.parseUnits("1000", 18));
-  await fundTx.wait();
-  console.log(`[OK] Researcher balance funded: 1,000 $GENO`);
+  // Transfer initial $GENO tokens to Account #1 (Data Provider) & Account #2 (Researcher) for testing
+  console.log("\nTransferring 2,000 $GENO each to Account #1 (Provider) and Account #2 (Researcher)...");
+  const fundTx1 = await token.connect(deployer).transfer(account1.address, ethers.parseUnits("2000", 18));
+  await fundTx1.wait();
+  const fundTx2 = await token.connect(deployer).transfer(account2.address, ethers.parseUnits("2000", 18));
+  await fundTx2.wait();
+  console.log(`[OK] Account #1 (${account1.address}) & Account #2 (${account2.address}) each funded: 2,000 $GENO`);
 
   // 5. Seed On-chain Data
   console.log("\n5. Seeding authenticated genomic datasets...");
@@ -119,18 +131,22 @@ async function main() {
     console.warn("[IPFS] Kubo daemon pin note for Seed #1:", kuboErr?.message || kuboErr);
   }
 
-  const tx1 = await registry.connect(deployer).registerGenomicData(
-    enc1.rawDataHash,
-    rawCid1,
-    summaryCid1,
-    metaCid1,
-    `ipfs://${metaCid1}`,
+  const metaHash1 = await computeDataHash(new TextEncoder().encode(metaJson1));
+  const blindTags1 = [
+    computeBlindTagHex("gene", "ALDH2"),
+    computeBlindTagHex("trait", "1000G_KHV_WGS"),
+    computeBlindTagHex("rsid", "rs671"),
+  ];
+  const tx1 = await registry.connect(deployer).registerGenomicDataBundle(
+    [enc1.rawDataHash, encPdf1.rawDataHash, metaHash1],
+    [rawCid1, summaryCid1, metaCid1, `ipfs://${metaCid1}`],
     ethers.parseUnits("100", 18),
     45 * 86400,
-    1000
+    1000,
+    blindTags1
   );
   await tx1.wait();
-  console.log(`[OK] Seed #1 (1000G KHV) registered on-chain: dataId=1`);
+  console.log(`[OK] Seed #1 (1000G KHV) registered on-chain via bundle: dataId=1 (${blindTags1.length} blind tags)`);
 
   // Seed 2: ACTN3 Muscle Performance Authentic VCF
   const seedVcf2 = loadVcf(
@@ -179,18 +195,37 @@ async function main() {
     console.warn("[IPFS] Kubo daemon pin note for Seed #2:", kuboErr?.message || kuboErr);
   }
 
-  const tx2 = await registry.connect(deployer).registerGenomicData(
-    enc2.rawDataHash,
-    rawCid2,
-    summaryCid2,
-    metaCid2,
-    `ipfs://${metaCid2}`,
+  const metaHash2 = await computeDataHash(new TextEncoder().encode(metaJson2));
+  const blindTags2 = [
+    computeBlindTagHex("gene", "ACTN3"),
+    computeBlindTagHex("trait", "Fast_twitch_muscle_power"),
+    computeBlindTagHex("rsid", "rs1815739"),
+  ];
+  const tx2 = await registry.connect(deployer).registerGenomicDataBundle(
+    [enc2.rawDataHash, encPdf2.rawDataHash, metaHash2],
+    [rawCid2, summaryCid2, metaCid2, `ipfs://${metaCid2}`],
     ethers.parseUnits("85", 18),
     30 * 86400,
-    1000
+    1000,
+    blindTags2
   );
   await tx2.wait();
-  console.log(`[OK] Seed #2 (ACTN3) registered on-chain: dataId=2`);
+  console.log(`[OK] Seed #2 (ACTN3) registered on-chain via bundle: dataId=2 (${blindTags2.length} blind tags)`);
+
+  // Seed ZK Research Bounty #1 (50 $GENO x 5 claims = 250 $GENO escrowed on GenomicZkVerifier)
+  const bountyReward = ethers.parseUnits("50", 18);
+  const bountyMaxClaims = 5n;
+  const approveBountyTx = await token.connect(deployer).approve(zkVerifier.target, bountyReward * bountyMaxClaims);
+  await approveBountyTx.wait();
+  const createBountyTx = await zkVerifier.connect(deployer).createZkBounty(
+    ethers.id("ALDH2_rs671"),
+    "ALDH2 rs671 East Asian Alcohol Flush & Drug Metabolism Cohort",
+    bountyReward,
+    bountyMaxClaims,
+    86400
+  );
+  await createBountyTx.wait();
+  console.log(`[OK] Seed ZK Bounty #1 created on GenomicZkVerifier (50 $GENO x 5 claims)`);
 
   // 6. Save contract addresses + ABIs for frontend
   const addresses = {
@@ -235,6 +270,7 @@ async function main() {
         summaryCid: summaryCid1,
         rawDataHash: enc1.rawDataHash,
         summaryDataHash: encPdf1.rawDataHash,
+        metadataHash: metaHash1,
       },
       {
         dataId: 2,
@@ -247,6 +283,7 @@ async function main() {
         summaryCid: summaryCid2,
         rawDataHash: enc2.rawDataHash,
         summaryDataHash: encPdf2.rawDataHash,
+        metadataHash: metaHash2,
       },
     ],
   };

@@ -120,8 +120,9 @@ describe("Production Protocol Architecture & Security Verification", function ()
       const sellerBalanceBefore = await token.balanceOf(seller.address);
 
       const capsulePayload = JSON.stringify({
+        version: "GENO-ASYM-RSA-OAEP-v2",
         type: "ECIES-RSA-OAEP-2048",
-        ephemeralCiphertext: "0123456789abcdef",
+        keyCipher: "ab".repeat(256),
       });
 
       // Seller stores capsule (since seller is both creator & seller, seller gets proceeds 90 + royalty 10 = 100)
@@ -210,8 +211,9 @@ describe("Production Protocol Architecture & Security Verification", function ()
       await registry.connect(seller).grantDirectAccess(1, researcher.address);
 
       const capsule = JSON.stringify({
-        encryptedKey: "0xabcdef1234567890",
+        version: "GENO-ASYM-RSA-OAEP-v2",
         iv: "0x1234567890abcdef12345678",
+        keyCipher: "ab".repeat(256),
       });
 
       // Regular storeTransformedCapsule (costs > 100k-500k gas due to storage write)
@@ -254,8 +256,13 @@ describe("Production Protocol Architecture & Security Verification", function ()
     });
 
     it("should revert getCapsuleForBuyer when dataset status is not Active", async function () {
+      const validCapsule = JSON.stringify({
+        version: "GENO-ASYM-RSA-OAEP-v2",
+        tag: "capsule_data",
+        keyCipher: "ab".repeat(256),
+      });
       await registry.connect(seller).grantDirectAccess(1, researcher.address);
-      await registry.connect(seller).storeTransformedCapsule(1, researcher.address, "capsule_data");
+      await registry.connect(seller).storeTransformedCapsule(1, researcher.address, validCapsule);
 
       // Pause dataset
       await registry.connect(seller).updateDataStatus(1, 1); // 1 = Paused
@@ -265,7 +272,7 @@ describe("Production Protocol Architecture & Security Verification", function ()
 
       // Restore Active status
       await registry.connect(seller).updateDataStatus(1, 0); // 0 = Active
-      expect(await registry.connect(seller).getCapsuleForBuyer(1, researcher.address)).to.equal("capsule_data");
+      expect(await registry.connect(seller).getCapsuleForBuyer(1, researcher.address)).to.equal(validCapsule);
     });
   });
 

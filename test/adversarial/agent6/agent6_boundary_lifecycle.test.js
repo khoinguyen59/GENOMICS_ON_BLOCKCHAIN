@@ -358,7 +358,7 @@ describe("AGENT6 :: GenomicsRegistry boundary, lifecycle symmetry & revocation",
       await (
         await registry
           .connect(owner)
-          .storeTransformedCapsule(1, buyer.address, '{"keyCipher":"' + "ef".repeat(64) + '"}')
+          .storeTransformedCapsule(1, buyer.address, '{"keyCipher":"' + "ef".repeat(256) + '"}')
       ).wait();
 
       // let the direct grant lapse, then open a fresh escrow (no capsule delivered for it)
@@ -455,8 +455,9 @@ describe("AGENT6 :: GenomicsRegistry boundary, lifecycle symmetry & revocation",
       await registerOne("DNA_SHORT", 120);
       await fundedBuyer();
       await (await registry.connect(buyer)["grantAccess(uint256,uint256)"](1, PRICE)).wait();
-      await (await registry.connect(owner).storeTransformedCapsule(1, buyer.address, "kk")).wait();
-      expect(await registry.connect(buyer).getTransformedCapsule(1)).to.equal("kk");
+      const validCapsule = JSON.stringify({ version: "GENO-ASYM-RSA-OAEP-v2", tag: "kk", keyCipher: "ab".repeat(256) });
+      await (await registry.connect(owner).storeTransformedCapsule(1, buyer.address, validCapsule)).wait();
+      expect(await registry.connect(buyer).getTransformedCapsule(1)).to.equal(validCapsule);
 
       const grant = await registry.accessGrants(1, buyer.address);
       // mine the block: view calls are simulated against the LATEST block, so a merely

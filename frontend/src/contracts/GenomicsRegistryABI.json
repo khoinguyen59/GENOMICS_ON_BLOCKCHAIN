@@ -37,6 +37,11 @@
   },
   {
     "inputs": [],
+    "name": "ArtifactHashesAlreadyAnchored",
+    "type": "error"
+  },
+  {
+    "inputs": [],
     "name": "CannotRescuePaymentToken",
     "type": "error"
   },
@@ -102,6 +107,16 @@
   },
   {
     "inputs": [],
+    "name": "InvalidBlindTag",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "InvalidCapsuleFormat",
+    "type": "error"
+  },
+  {
+    "inputs": [],
     "name": "InvalidDataHashOrCid",
     "type": "error"
   },
@@ -123,6 +138,11 @@
   {
     "inputs": [],
     "name": "InvalidRecipient",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "InvalidStudyCommitment",
     "type": "error"
   },
   {
@@ -196,6 +216,11 @@
   },
   {
     "inputs": [],
+    "name": "StudyReuseAlreadyRecorded",
+    "type": "error"
+  },
+  {
+    "inputs": [],
     "name": "TokenIdMismatch",
     "type": "error"
   },
@@ -234,6 +259,50 @@
       }
     ],
     "name": "AccessGranted",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "uint256",
+        "name": "dataId",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "bytes32",
+        "name": "summaryHash",
+        "type": "bytes32"
+      },
+      {
+        "indexed": false,
+        "internalType": "bytes32",
+        "name": "metadataHash",
+        "type": "bytes32"
+      }
+    ],
+    "name": "ArtifactHashesAnchored",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "uint256",
+        "name": "dataId",
+        "type": "uint256"
+      },
+      {
+        "indexed": true,
+        "internalType": "bytes32",
+        "name": "blindTag",
+        "type": "bytes32"
+      }
+    ],
+    "name": "BlindTagRegistered",
     "type": "event"
   },
   {
@@ -584,6 +653,43 @@
     "inputs": [
       {
         "indexed": true,
+        "internalType": "uint256",
+        "name": "dataId",
+        "type": "uint256"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "researcher",
+        "type": "address"
+      },
+      {
+        "indexed": true,
+        "internalType": "bytes32",
+        "name": "studyCommitment",
+        "type": "bytes32"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "totalFee",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "royaltyPaid",
+        "type": "uint256"
+      }
+    ],
+    "name": "StudyReuseRecorded",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
         "internalType": "address",
         "name": "token",
         "type": "address"
@@ -624,6 +730,32 @@
     "type": "event"
   },
   {
+    "inputs": [],
+    "name": "MAX_BLIND_TAGS_PER_DATASET",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "REUSE_FEE_BPS",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
     "inputs": [
       {
         "internalType": "uint256",
@@ -655,6 +787,29 @@
       }
     ],
     "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "dataId",
+        "type": "uint256"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "summaryHash",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "metadataHash",
+        "type": "bytes32"
+      }
+    ],
+    "name": "anchorArtifactHashes",
+    "outputs": [],
+    "stateMutability": "nonpayable",
     "type": "function"
   },
   {
@@ -756,8 +911,99 @@
     "type": "function"
   },
   {
+    "inputs": [
+      {
+        "internalType": "string",
+        "name": "traitKey",
+        "type": "string"
+      },
+      {
+        "internalType": "string",
+        "name": "traitValue",
+        "type": "string"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "datasetSalt",
+        "type": "bytes32"
+      }
+    ],
+    "name": "computeBlindTag",
+    "outputs": [
+      {
+        "internalType": "bytes32",
+        "name": "",
+        "type": "bytes32"
+      }
+    ],
+    "stateMutability": "pure",
+    "type": "function"
+  },
+  {
     "inputs": [],
     "name": "dataCount",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "name": "datasetBlindTagCount",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "",
+        "type": "bytes32"
+      }
+    ],
+    "name": "datasetBlindTags",
+    "outputs": [
+      {
+        "internalType": "bool",
+        "name": "",
+        "type": "bool"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "name": "datasetReuseCount",
     "outputs": [
       {
         "internalType": "uint256",
@@ -1007,6 +1253,35 @@
         "internalType": "struct GenomicsRegistry.GenomicData[]",
         "name": "",
         "type": "tuple[]"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "dataId",
+        "type": "uint256"
+      }
+    ],
+    "name": "getArtifactHashes",
+    "outputs": [
+      {
+        "internalType": "bytes32",
+        "name": "rawDataHash",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "summaryDataHash",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "metadataHash",
+        "type": "bytes32"
       }
     ],
     "stateMutability": "view",
@@ -1366,6 +1641,49 @@
     "type": "function"
   },
   {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "dataId",
+        "type": "uint256"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "blindTag",
+        "type": "bytes32"
+      }
+    ],
+    "name": "matchesBlindTag",
+    "outputs": [
+      {
+        "internalType": "bool",
+        "name": "",
+        "type": "bool"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "name": "metadataHashes",
+    "outputs": [
+      {
+        "internalType": "bytes32",
+        "name": "",
+        "type": "bytes32"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
     "inputs": [],
     "name": "owner",
     "outputs": [
@@ -1389,6 +1707,43 @@
       }
     ],
     "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "dataId",
+        "type": "uint256"
+      }
+    ],
+    "name": "quoteReuseFee",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "dataId",
+        "type": "uint256"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "studyCommitment",
+        "type": "bytes32"
+      }
+    ],
+    "name": "recordStudyReuse",
+    "outputs": [],
+    "stateMutability": "nonpayable",
     "type": "function"
   },
   {
@@ -1438,7 +1793,51 @@
     "outputs": [
       {
         "internalType": "uint256",
-        "name": "",
+        "name": "dataId",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32[3]",
+        "name": "hashes",
+        "type": "bytes32[3]"
+      },
+      {
+        "internalType": "string[4]",
+        "name": "cidsAndUri",
+        "type": "string[4]"
+      },
+      {
+        "internalType": "uint256",
+        "name": "priceInGeno",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "accessDurationSeconds",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint96",
+        "name": "royaltyBps",
+        "type": "uint96"
+      },
+      {
+        "internalType": "bytes32[]",
+        "name": "blindTags",
+        "type": "bytes32[]"
+      }
+    ],
+    "name": "registerGenomicDataBundle",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "newDataId",
         "type": "uint256"
       }
     ],
@@ -1609,6 +2008,24 @@
   {
     "inputs": [
       {
+        "internalType": "uint256",
+        "name": "dataId",
+        "type": "uint256"
+      },
+      {
+        "internalType": "bytes32[]",
+        "name": "blindTags",
+        "type": "bytes32[]"
+      }
+    ],
+    "name": "setDatasetBlindTags",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
         "internalType": "address",
         "name": "newVerifier",
         "type": "address"
@@ -1640,6 +2057,49 @@
     "name": "storeTransformedCapsule",
     "outputs": [],
     "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "",
+        "type": "bytes32"
+      }
+    ],
+    "name": "studyReuseReceipts",
+    "outputs": [
+      {
+        "internalType": "bool",
+        "name": "",
+        "type": "bool"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "name": "summaryDataHashes",
+    "outputs": [
+      {
+        "internalType": "bytes32",
+        "name": "",
+        "type": "bytes32"
+      }
+    ],
+    "stateMutability": "view",
     "type": "function"
   },
   {

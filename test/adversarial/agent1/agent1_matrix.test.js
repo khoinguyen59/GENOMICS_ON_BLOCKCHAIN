@@ -222,7 +222,7 @@ describe("AGENT1 :: Independent Adversarial Matrix", function () {
     });
 
     it("releases escrow to seller once owner dispatches capsule; blocks refund afterwards", async function () {
-      await reg.connect(creator).storeTransformedCapsule(1n, buyer1.address, "REAL_RSA_OAEP_CAPSULE_JSON");
+      await reg.connect(creator).storeTransformedCapsule(1n, buyer1.address, JSON.stringify({ version: "GENO-ASYM-RSA-OAEP-v2", tag: "REAL_RSA_OAEP_CAPSULE_JSON", keyCipher: "ab".repeat(256) }));
       const dep = await reg.escrowDeposits(1n, buyer1.address);
       expect(dep.released).to.equal(true);
       expect(dep.capsuleDelivered).to.equal(true);

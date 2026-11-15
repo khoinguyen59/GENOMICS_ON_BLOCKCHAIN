@@ -448,3 +448,11 @@
   box-shadow: var(--shadow-card-hover);
 }
 
+@media (max-width: 768px) {
+  .toolbar-left,
+  .search-input-wrap {
+    min-width: 0 !important;
+    max-width: 100% !important;
+  }
+}
+

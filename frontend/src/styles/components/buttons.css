@@ -74,6 +74,23 @@
   letter-spacing: 0.02em;
 }
 
+.portal-role-badge-static {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 12px;
+  background: var(--bg-surface-elevated);
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-sm);
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--accent-cyan);
+  letter-spacing: 0.01em;
+  cursor: default;
+  user-select: text;
+  white-space: nowrap;
+}
+
 /* ─── Action Button Grouping ─── */
 .action-cell-btns {
   display: flex;
@@ -325,7 +342,26 @@
 [data-theme="light"] .portal-role-tag {
   background: #eff6ff;
   border-color: #bfdbfe;
-  color: #2563eb;
+  color: #0369a1;
+}
+
+[data-theme="light"] .portal-role-badge-static {
+  background: #f0f9ff;
+  border-color: #bae6fd;
+  color: #0369a1;
+}
+
+[data-theme="light"] .btn-terminal-danger {
+  background: #fef2f2;
+  color: #b91c1c;
+  border-color: #fecaca;
+}
+
+[data-theme="light"] .btn-terminal-danger:hover {
+  background: #fee2e2;
+  border-color: #ef4444;
+  color: #b91c1c;
+  box-shadow: 0 4px 12px rgba(239, 68, 68, 0.16);
 }
 
 [data-theme="light"] .btn-terminal-ghost {

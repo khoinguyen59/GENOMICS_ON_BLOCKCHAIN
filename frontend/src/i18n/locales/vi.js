@@ -285,7 +285,7 @@ export const vi = {
     btnExecutePurchaseModal: "Xác Nhận Ký Quỹ & Mua Quyền Truy Cập",
 
     // OpenSea Modern Marketplace & Navigation Additions
-    searchPlaceholderNav: "Tìm kiếm mẫu gen, mã rsID, nhiễm sắc thể...",
+    searchPlaceholderNav: "Tìm mẫu gen, rsID, NST...",
     sortLabel: "Sắp xếp theo",
     sortNewest: "Mới niêm yết (Token ID giảm dần)",
     sortOldest: "Token ID tăng dần",
@@ -311,7 +311,7 @@ export const vi = {
     propertyChrom: "Nhiễm Sắc Thể",
     propertyRsid: "Mã dbSNP",
     propertyAssembly: "Bản Lắp Ghép",
-    propertyZygosity: "Zygosity",
+    propertyZygosity: "Kiểu Hợp Tử",
     propertySignificance: "Ý Nghĩa Chức Năng",
     propertyAncestry: "Quần Thể Địa Lý",
     propertyFormat: "Định Dạng Tệp",
@@ -357,7 +357,7 @@ export const vi = {
     eventEscrow: "Ký Quỹ Escrow Đã Khóa",
     eventMint: "Đã Đúc & Niêm Yết",
 
-    // Common
+    // Common & Navigation
     close: "Đóng",
     cancel: "Hủy",
     confirm: "Xác Nhận",
@@ -365,16 +365,12 @@ export const vi = {
     error: "Lỗi",
     loading: "Đang xử lý...",
     noDataFound: "Không tìm thấy mẫu gen nào phù hợp với bộ lọc hiện tại.",
-
-    // Activity Time & Empty
     activityEmpty: "Chưa ghi nhận sự kiện on-chain nào",
     timeJustNow: "vừa xong",
     timeMinutesAgo: "{m} phút trước",
     timeHoursAgo: "{h} giờ trước",
     timeDaysAgo: "{d} ngày trước",
     eventDirectGrant: "Cấp Quyền Trực Tiếp",
-
-    // Spotlight & Licensed & Modal
     escrowPendingDelivery: "Đang Chờ Người Bán Giao Khóa (Escrow Pending)",
     royaltyEip2981: "10% Bản Quyền EIP-2981",
     escrowGuaranteeDesc: "Tiền được khóa an toàn trong Smart Contract đến khi bàn giao capsule. Đảm bảo hoàn tiền 100% nếu quá hạn.",
@@ -382,8 +378,6 @@ export const vi = {
     viewLicensedTab: "Xem & Giải Mã",
     propertyConsequence: "HỆ QUẢ PHÂN TỬ",
     disconnectWallet: "Ngắt Kết Nối Ví",
-
-    // GenomicFilterBar Accordion & Chips
     filterStatus: "TRẠNG THÁI",
     filterPrice: "GIÁ ($GENO)",
     filterTargetGene: "GEN MỤC TIÊU",
@@ -407,9 +401,45 @@ export const vi = {
     filterCohortLabel: "Quần thể",
     filterTo: "đến",
     reset: "Đặt lại",
-
-    // Activity Feed & RPC Errors
-    rpcErrorOccurred: "Lỗi truy vấn RPC nguyên bản (EVM / Node Error):"
+    noDatasetsFoundDesc: "Không tìm thấy bộ dữ liệu di truyền phù hợp với bộ lọc hiện tại. Vui lòng thử lại với từ khóa khác hoặc xóa bộ lọc.",
+    eip2981EnforcedSuffix: "Thực thi chuẩn EIP-2981",
+    eip2981RoyaltyTag: "Tác quyền EIP-2981",
+    exploreAllCohorts: "Khám Phá Toàn Bộ Quần Thể Di Truyền",
+    exploreAllCohortsDesc: "Lọc theo nhiễm sắc thể, mã dbSNP rsID, hệ quả phân tử & trạng thái ký quỹ on-chain",
+    trendingTokens: "Biến Thể Gen Nổi Bật",
+    trendingTokensSub: "Các biến thể gen & locus phân tử nổi bật trên mạng lưới",
+    zkVerifierLinkedLabel: "Bộ xác thực ZK BN254",
+    zkVerifierNotLinked: "Bộ xác thực ZK BN254: Chưa liên kết",
+    zkBountiesUnit: "gói thưởng",
+    zkTraitVerifiedBadge: "✓ ĐÃ XÁC THỰC ZK ĐẶC TÍNH",
+    zkAnchoredBadge: "ĐÃ NEO BĂM ON-CHAIN",
+    rpcErrorOccurred: "Lỗi truy vấn RPC nguyên bản (EVM / Node Error):",
+    navDiscover: "Khám Phá", navCollections: "Bộ Sưu Tập", navTokens: "Biến Thể", navPerpetuals: "Hợp Đồng Thuê", navSwap: "Faucet $GENO",
+    navDrops: "Phát Hành", navActivity: "Hoạt Động", navRewards: "Tác Quyền", navTools: "Kho Đã Mua", navStudioNav: "Xưởng Đúc NFT",
+    navProfile: "Kho Bệnh Nhân", navAdmin: "Quản Trị", navResources: "Tài Liệu Chuẩn", navSettings: "Cấu Hình IPFS", navSupport: "Hỗ Trợ",
+    featuredCollectionsTitle: "Bộ Sưu Tập Tuyển Chọn", featuredCollectionsSub: "Bộ sưu tập hệ gen phân tử tuyển chọn tuần này", heroListedLabel: "ĐANG MỞ BÁN",
+    roleNavResearcher: "Nhà Nghiên Cứu", roleNavProvider: "Nhà Cung Cấp", roleNavAdmin: "Quản Trị",
+    roleAdminBadge: "Quản Trị Giao Thức",
+    adminPortalSubtitle: "Tham số giao thức, kho bạc $GENO, cấu hình IPFS và quỹ thưởng ZK",
+    adminQuickAccounts: "Đổi Tài Khoản Nhanh", adminAcct0: "#0 Quản Trị", adminAcct1: "#1 Nhà Cung Cấp", adminAcct2: "#2 Nhà Nghiên Cứu",
+    adminOpenIpfs: "Cấu Hình Node IPFS", adminRefreshTelemetry: "Làm Mới Chỉ Số", adminTelemetryTitle: "Thông Số Giao Thức & Phân Quyền",
+    adminRegistryOwner: "Chủ Sở Hữu Registry", adminConnectedSigner: "Ví Đang Kết Nối", adminOwnerMatch: "Đúng Quyền Chủ Sở Hữu", adminOwnerMismatch: "Chế Độ Xem (Không Phải Owner)",
+    adminGovPanelTitle: "Quản Trị Dispatcher & Bộ Xác Thực ZK", adminDispatcherLabel: "Địa Chỉ Capsule Dispatcher", adminSetDispatcherBtn: "Cập Nhật Dispatcher",
+    adminZkVerifierLabel: "Địa Chỉ Hợp Đồng ZK Verifier", adminSetZkVerifierBtn: "Liên Kết ZK Verifier", adminTreasuryTitle: "Kho Bạc $GENO & Thu Hồi Token",
+    adminMintToLabel: "Địa Chỉ Nhận Token Mint", adminMintAmountLabel: "Số Lượng Mint ($GENO)", adminMintBtn: "Phát Hành (Mint) $GENO",
+    adminRescueTokenLabel: "Địa Chỉ Token ERC-20", adminRescueBtn: "Thu Hồi Token Về Ví", adminBountyTitle: "Quản Trị Quỹ Thưởng ZK Trait",
+    adminBountyTraitLabel: "Mã Đặc Tính Mục Tiêu", adminBountyDescLabel: "Mô Tả Lâm Sàng", adminBountyCreateBtn: "Duyệt & Mở Quỹ Thưởng ZK",
+    adminBountyCloseBtn: "Đóng Quỹ Hết Hạn", blindSaltLabel: "Muối Mật Mã Blind Tag (Salt)", blindSearchTitle: "Tìm Kiếm Ẩn Danh On-Chain",
+    blindSearchKey: "Khóa Đặc Tính", blindSearchVal: "Giá trị (gene/disease/hpo)", blindSearchBtn: "Truy Vấn Blind Tag", blindSearchClear: "Xóa Lọc Ẩn Danh",
+    workerAuthLabel: "Ủy Quyền Worker Cấp Khóa", workerAuthBtn: "Ủy Quyền Worker", workerRevokeBtn: "Thu Hồi Worker",
+    reuseSectionTitle: "Tái Sử Dụng Nghiên Cứu (Phí 5%)", reuseStudyLabel: "Mã Đề Tài / Cam Kết", reuseRecordBtn: "Ghi Nhận Tái Sử Dụng (5%)",
+    adminPageTitle: "Bảng Điều Khiển Quản Trị", adminKpiDatasets: "Dữ Liệu / Quỹ ZK", adminKpiSupply: "Tổng Cung ($GENO)", adminKpiRoyalty: "Phí Tái SD / Tag", adminKpiEscrow: "Số Dư Ký Quỹ", adminLabelRegistry: "Hợp Đồng Registry", adminLabelDispatcher: "Dispatcher", adminLabelZkVerifier: "ZK Verifier", adminLabelIpfs: "Nút IPFS",
+    adminBtnUseConnected: "Dùng Ví Này", adminBtnUseDeployed: "Dùng Đã Triển Khai", adminTreasuryDivider: "Thu Hồi Token Ký Quỹ", adminRescueToLabel: "Địa Chỉ Nhận", adminRescueAmtLabel: "Số Lượng", adminBountyRewardLabel: "Thưởng ($GENO)", adminBountyMaxClaimsLabel: "Lượt Tối Đa", adminBountyDurationLabel: "Thời Hạn (giây, >=3600)",
+    adminBountyActiveBadge: "Đang Mở", adminBountyClosedBadge: "Đã Đóng", adminBountyExpiredBadge: "Hết Hạn", adminTraitHashLabel: "Mã Băm Đặc Tính", adminClaimsUnit: "lượt", toastCloseLabel: "Đóng thông báo", footerEvmLive: "EVM 31337 Trực Tuyến", footerKuboReady: "Kubo IPFS", footerPinataReady: "Pinata Cloud", footerCipherSpec: "AES-256-GCM", footerRoyaltySpec: "EIP-2981 (5-10%)",
+    footerIpfsConfig: "Cấu Hình IPFS", profileCopiedMsg: "Đã sao chép địa chỉ ví!", walletConnectedMsg: "Đã kết nối ví", walletDisconnectedMsg: "Đã ngắt kết nối ví.", faucetRequestingMsg: "Đang gửi yêu cầu Faucet...", faucetSuccessMsg: "Đã nhận +1,000 $GENO thành công!", faucetCooldownMsg: "Faucet đang hồi chiêu. Vui lòng đợi.", showcaseTabDatasets: "Bộ Dữ Liệu", showcaseTabVariants: "Biến Thể", showcaseTabEscrow: "Ký Quỹ",
+    showcaseColCohort: "Quần Thể", showcaseColFloor: "Giá Sàn", showcaseColVol24h: "GT 24h", filterSearchKeyGene: "Gen (gene)", filterSearchKeyDisease: "Bệnh lý (disease)", filterSearchKeyHpo: "Mã HPO (hpo)", filterSearchKeyAncestry: "Quần thể (ancestry)", filterMinPlaceholder: "Từ", filterMaxPlaceholder: "Đến", licensedTargetLabel: "Mục tiêu:", licensedArtifactHashes: "băm tệp",
+    licensedReusesLabel: "Tái sử dụng:", licensedReusePlaceholder: "VD: Nghiên cứu GWAS Tim mạch 2026", modalBlindTagsTitle: "Cập Nhật Thẻ Ẩn Danh", modalWorkerAddrLabel: "Địa Chỉ EVM Worker", vaultBtnTags: "Thẻ Tag", vaultBtnWorker: "Ủy Quyền", vaultTagsSummary: "Thẻ ẩn danh", providerCrypt4ghLabel: "Luồng Mã Hóa GA4GH Crypt4GH (Chia Gói 64KB)", providerModeStandard: "CHUẨN (MONOLITHIC)",
+    providerModeActive: "ĐANG BẬT (64KB)", providerModeLocked: "KHÓA BẢO VỆ (>10MB)", providerRamUnit: "Bytes trong RAM", traitSubGeneFreq: "9.1% (Tần suất gen)", traitSubImpact: "Tác Động Phân Tử", traitSubCall: "Kiểu Gen Đọc Được", traitSubProject: "Dự án 1000 Genomes", traitSubContainer: "Đóng gói GA4GH Crypt4GH"
 };
 
 export default vi;

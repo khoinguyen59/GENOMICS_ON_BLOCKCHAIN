@@ -29,7 +29,7 @@ export default function LiveTransmissionAudit({ liveTransmissionAudit, rawFileTe
           </div>
           <div className="audit-box-sub">{t("auditMemorySub")}</div>
           <div className="audit-metric-val">
-            {liveTransmissionAudit.plaintextSizeInRam.toLocaleString()} Bytes in RAM
+            {liveTransmissionAudit.plaintextSizeInRam.toLocaleString()} {t("providerRamUnit")}
           </div>
           <div className="audit-seq-preview">
             <code>{(rawFileText || "").substring(0, 140)}...</code>

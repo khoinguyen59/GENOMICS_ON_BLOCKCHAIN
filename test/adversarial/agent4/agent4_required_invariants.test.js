@@ -300,7 +300,7 @@ describe("AGENT4 / PART2 — assertions of the required security invariants (fai
     it("DEF4-07: buyerCapsules must stop returning the capsule to the owner path after the grant expires", async function () {
       const dataId = await register("post-expiry");
       await (await registry.connect(buyerA).grantAccess(dataId)).wait();
-      const capsule = "GNC1|secret-capsule-payload";
+      const capsule = JSON.stringify({ version: "GNC1", tag: "secret-capsule-payload", keyCipher: "ab".repeat(256) });
       await (await registry.storeTransformedCapsule(dataId, buyerA.address, capsule)).wait();
       await ethers.provider.send("evm_increaseTime", [Number(DURATION) + 60]);
       await ethers.provider.send("evm_mine", []);
@@ -337,7 +337,9 @@ describe("AGENT4 / PART2 — assertions of the required security invariants (fai
       const dataId = await register("refund-after-event");
       const buyer0 = await token.balanceOf(buyerA.address);
       await (await registry.connect(buyerA).grantAccessWithEscrow(dataId, 3600n)).wait();
-      await (await registry.emitTransformedCapsule(dataId, buyerA.address, "event-only-capsule")).wait();
+      await expect(
+        registry.emitTransformedCapsule(dataId, buyerA.address, "event-only-capsule")
+      ).to.be.revertedWithCustomError(registry, "InvalidCapsuleFormat");
       await ethers.provider.send("evm_increaseTime", [3601]);
       await ethers.provider.send("evm_mine", []);
       await (await registry.connect(buyerA).claimEscrowRefund(dataId)).wait();
@@ -350,7 +352,12 @@ describe("AGENT4 / PART2 — assertions of the required security invariants (fai
       // After refund, re-granting access must allow fresh capsule delivery (CRITICAL-03 lifecycle symmetry)
       await (await registry.grantDirectAccess(dataId, buyerA.address)).wait();
       expect(await registry.hasActiveAccess(dataId, buyerA.address)).to.equal(true);
-      await (await registry.storeTransformedCapsule(dataId, buyerA.address, '{"version":"GENO-ASYM-v2","key":"fresh-post-refund"}')).wait();
+      const freshCapsule = JSON.stringify({
+        version: "GENO-ASYM-v2",
+        key: "fresh-post-refund",
+        keyCipher: "ab".repeat(256),
+      });
+      await (await registry.storeTransformedCapsule(dataId, buyerA.address, freshCapsule)).wait();
       expect(await registry.connect(buyerA).getTransformedCapsule.staticCall(dataId)).to.contain("fresh-post-refund");
     });
   });

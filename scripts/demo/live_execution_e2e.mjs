@@ -349,9 +349,55 @@ async function main() {
   }
 
   // --------------------------------------------------------------------------
+  // STEP 9b: 3-ARTIFACT HASH ANCHORING, BLINDED SEARCH & 5% STUDY REUSE FEE
+  // --------------------------------------------------------------------------
+  console.log("\n--- STEP 9b: 3-Artifact Hashes, Blinded Trait Search & 5% Study Reuse ---");
+  const summaryHashCheck = ethers.keccak256(ethers.toUtf8Bytes("GENOCHAIN_LIVE_SUMMARY_PDF_SHA256"));
+  const metadataHashCheck = ethers.keccak256(ethers.toUtf8Bytes("GENOCHAIN_LIVE_METADATA_JSON_SHA256"));
+  const existingArtifactHashes = await registryContract.getArtifactHashes(currentDataId);
+  if (existingArtifactHashes[1] === ethers.ZeroHash || existingArtifactHashes[2] === ethers.ZeroHash) {
+    await trackTx(
+      "anchorArtifactHashes (3-Artifact Anchor)",
+      registryContract.connect(dataOwner).anchorArtifactHashes(currentDataId, summaryHashCheck, metadataHashCheck)
+    );
+  }
+  const anchored = await registryContract.getArtifactHashes(currentDataId);
+  console.log(`    ✔ 3-Artifact Hashes Anchored: raw=${anchored[0].slice(0, 12)}..., sum=${anchored[1].slice(0, 12)}..., meta=${anchored[2].slice(0, 12)}...`);
+
+  const cohortSalt = ethers.id("GENOCHAIN_COHORT_SALT_V1");
+  const blindTag = await registryContract.computeBlindTag("gene", "ALDH2", cohortSalt);
+  await trackTx(
+    "setDatasetBlindTags",
+    registryContract.connect(dataOwner).setDatasetBlindTags(currentDataId, [blindTag])
+  );
+  const tagMatches = await registryContract.matchesBlindTag(currentDataId, blindTag);
+  if (!tagMatches) {
+    throw new Error("Blinded Keccak-256 trait tag matching failed on-chain!");
+  }
+  console.log(`    ✔ Blinded Keccak-256 Trait Match Verified: ${tagMatches} (${blindTag.slice(0, 14)}...)`);
+
+  const reuseFeeWei = await registryContract.quoteReuseFee(currentDataId);
+  await trackTx(
+    "Approve Token for 5% Study Reuse Fee",
+    tokenContract.connect(researcher).approve(registryContract.target, reuseFeeWei)
+  );
+  const studyCommit = ethers.keccak256(ethers.toUtf8Bytes(`LIVE_E2E_STUDY_REUSE_${Date.now()}`));
+  await trackTx(
+    "recordStudyReuse (5% Fee + EIP-2981 Royalty)",
+    registryContract.connect(researcher).recordStudyReuse(currentDataId, studyCommit)
+  );
+  const receiptOk = await registryContract.studyReuseReceipts(currentDataId, studyCommit);
+  const reuseCnt = await registryContract.datasetReuseCount(currentDataId);
+  if (!receiptOk || reuseCnt < 1n) {
+    throw new Error("Study reuse receipt verification failed!");
+  }
+  console.log(`    ✔ Study Reuse Verified: fee=${ethers.formatEther(reuseFeeWei)} $GENO, reuseCount=${reuseCnt}`);
+
+  // --------------------------------------------------------------------------
   // STEP 10: METRICS COMPILATION
   // --------------------------------------------------------------------------
   const summaryFilePath = path.resolve(".agents/teamwork/worker_r8_live_exec/live_execution_summary.md");
+  fs.mkdirSync(path.dirname(summaryFilePath), { recursive: true });
   let mdSummary = `# GenoChain Live Execution & Empirical Verification Summary\n\n`;
   mdSummary += `**Execution Timestamp**: \`${results.executionTimestamp}\`  \n`;
   mdSummary += `**RPC Node**: \`${results.rpcEndpoint}\` (Chain ID: \`${results.chainId}\`)  \n`;

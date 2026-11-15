@@ -271,7 +271,12 @@ async function runIndependentStressSuite() {
 
   // Test 2.3: Capsule storage and Revocation Enforcement (VULN-01 Fix Verification)
   // Store capsule for buyer1
-  await registry.connect(patientDonor).storeTransformedCapsule(1, buyer1.address, "CAPSULE_FOR_BUYER_1");
+  const CAPSULE_FOR_BUYER_1 = JSON.stringify({
+    version: "GENO-ASYM-RSA-OAEP-v2",
+    tag: "CAPSULE_FOR_BUYER_1",
+    keyCipher: "ab".repeat(256),
+  });
+  await registry.connect(patientDonor).storeTransformedCapsule(1, buyer1.address, CAPSULE_FOR_BUYER_1);
   const capsuleBeforeRevoke = await registry.connect(buyer1).getTransformedCapsule(1);
   const hasAccessBeforeRevoke = await registry.hasActiveAccess(1, buyer1.address);
 
@@ -309,7 +314,7 @@ async function runIndependentStressSuite() {
   const capsuleAfterRestore = await registry.connect(buyer1).getTransformedCapsule(1);
   assertTest(
     "Status Lifecycle: Unpausing dataset restores legitimate access to active subscribers",
-    capsuleAfterRestore === "CAPSULE_FOR_BUYER_1",
+    capsuleAfterRestore === CAPSULE_FOR_BUYER_1,
     "Dataset returned to Active status; authorized subscriber retrieved capsule successfully"
   );
 

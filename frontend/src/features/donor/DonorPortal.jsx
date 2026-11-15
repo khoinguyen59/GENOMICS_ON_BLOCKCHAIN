@@ -14,7 +14,9 @@ export default function DonorPortal({
   onUpdateStatus,
   onUpdatePrice,
   onGrantDirectAccess,
-  onDispatchCapsule
+  onDispatchCapsule,
+  onAuthorizeWorker,
+  onUpdateBlindTags
 }) {
   const { donorTab, setDonorTab, account } = useWeb3();
   const { datasets } = useDatasets();
@@ -26,6 +28,7 @@ export default function DonorPortal({
 
   return (
     <div>
+      <h1 className="sr-only">{t("roleDonorBadge")}</h1>
       {/* Sub-navigation for Donor */}
       <div className="portal-subnav-bar">
         <div className="subnav-tabs">
@@ -47,8 +50,8 @@ export default function DonorPortal({
           </button>
         </div>
 
-        <div className="portal-role-tag">
-          <DataOwnerShieldIcon size={14} color="#38bdf8" />
+        <div className="portal-role-badge-static">
+          <DataOwnerShieldIcon size={14} color="var(--accent-cyan)" />
           <span>{t("roleDonorBadge")}</span>
         </div>
       </div>
@@ -65,6 +68,8 @@ export default function DonorPortal({
           onUpdatePrice={onUpdatePrice}
           onGrantDirectAccess={onGrantDirectAccess}
           onDispatchCapsule={onDispatchCapsule}
+          onAuthorizeWorker={onAuthorizeWorker}
+          onUpdateBlindTags={onUpdateBlindTags}
         />
       )}
     </div>

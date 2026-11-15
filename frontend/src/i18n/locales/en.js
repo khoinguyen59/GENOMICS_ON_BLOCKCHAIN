@@ -285,7 +285,7 @@ export const en = {
     btnExecutePurchaseModal: "Confirm Escrow Purchase",
 
     // OpenSea Modern Marketplace & Navigation Additions
-    searchPlaceholderNav: "Search genomic cohorts, rsID, chromosomes...",
+    searchPlaceholderNav: "Search genes, rsID, chr...",
     sortLabel: "Sort by",
     sortNewest: "Recently Listed (Token ID: High to Low)",
     sortOldest: "Token ID: Low to High",
@@ -357,7 +357,7 @@ export const en = {
     eventEscrow: "Escrow Deposited",
     eventMint: "Dataset Listed",
 
-    // Common
+    // Common & Navigation
     close: "Close",
     cancel: "Cancel",
     confirm: "Confirm",
@@ -365,16 +365,12 @@ export const en = {
     error: "Error",
     loading: "Processing...",
     noDataFound: "No genomic datasets found matching current filter parameters.",
-
-    // Activity Time & Empty
     activityEmpty: "No on-chain events recorded yet",
     timeJustNow: "just now",
     timeMinutesAgo: "{m}m ago",
     timeHoursAgo: "{h}h ago",
     timeDaysAgo: "{d}d ago",
     eventDirectGrant: "Direct Access Granted",
-
-    // Spotlight & Licensed & Modal
     escrowPendingDelivery: "Awaiting Key Capsule Dispatch (Escrow Pending)",
     royaltyEip2981: "10% EIP-2981 Royalty",
     escrowGuaranteeDesc: "Funds held in smart contract until capsule dispatch. 100% refund guarantee.",
@@ -382,8 +378,6 @@ export const en = {
     viewLicensedTab: "View & Decrypt",
     propertyConsequence: "MOLECULAR CONSEQUENCE",
     disconnectWallet: "Disconnect Wallet",
-
-    // GenomicFilterBar Accordion & Chips
     filterStatus: "STATUS",
     filterPrice: "PRICE ($GENO)",
     filterTargetGene: "TARGET GENE",
@@ -407,9 +401,45 @@ export const en = {
     filterCohortLabel: "Cohort",
     filterTo: "to",
     reset: "Reset",
-
-    // Activity Feed & RPC Errors
-    rpcErrorOccurred: "Original RPC Node Query Error:"
+    noDatasetsFoundDesc: "No genomic cohorts match your current filter criteria. Try another keyword or reset your filters.",
+    eip2981EnforcedSuffix: "EIP-2981 Enforced",
+    eip2981RoyaltyTag: "EIP-2981 Royalty",
+    exploreAllCohorts: "Explore All Genomic Cohorts",
+    exploreAllCohortsDesc: "Filter by chromosome, dbSNP rsID, variant consequence & on-chain escrow status",
+    trendingTokens: "Trending Tokens",
+    trendingTokensSub: "Featured molecular loci & genomic cohorts on-chain",
+    zkVerifierLinkedLabel: "BN254 ZK Verifier",
+    zkVerifierNotLinked: "BN254 ZK Verifier: Not Linked",
+    zkBountiesUnit: "bounties",
+    zkTraitVerifiedBadge: "✓ ZK TRAIT VERIFIED",
+    zkAnchoredBadge: "ON-CHAIN ANCHORED",
+    rpcErrorOccurred: "Original RPC Node Query Error:",
+    navDiscover: "Discover", navCollections: "Cohorts", navTokens: "Variants", navPerpetuals: "Leases", navSwap: "Faucet $GENO",
+    navDrops: "Drops", navActivity: "Activity", navRewards: "Royalties", navTools: "Licensed", navStudioNav: "Mint Studio",
+    navProfile: "Patient Vault", navAdmin: "Governance", navResources: "Standards", navSettings: "IPFS Engine", navSupport: "Support",
+    featuredCollectionsTitle: "Featured Collections", featuredCollectionsSub: "This week's curated genomic collections", heroListedLabel: "LISTED",
+    roleNavResearcher: "Researcher", roleNavProvider: "Provider", roleNavAdmin: "Admin",
+    roleAdminBadge: "Protocol Governance",
+    adminPortalSubtitle: "Protocol parameters, $GENO treasury, IPFS node config, and ZK trait bounties",
+    adminQuickAccounts: "Quick Hardhat Switcher", adminAcct0: "#0 Admin", adminAcct1: "#1 Provider", adminAcct2: "#2 Researcher",
+    adminOpenIpfs: "Configure IPFS Engine", adminRefreshTelemetry: "Refresh Telemetry", adminTelemetryTitle: "Protocol Telemetry & Authorities",
+    adminRegistryOwner: "Registry Owner", adminConnectedSigner: "Connected Signer", adminOwnerMatch: "Owner Authorized", adminOwnerMismatch: "Non-Owner View",
+    adminGovPanelTitle: "Contract Role & Verifier Governance", adminDispatcherLabel: "Capsule Dispatcher Address", adminSetDispatcherBtn: "Set Capsule Dispatcher",
+    adminZkVerifierLabel: "Genomic ZK Verifier Address", adminSetZkVerifierBtn: "Link ZK Verifier", adminTreasuryTitle: "$GENO Treasury & Token Rescue",
+    adminMintToLabel: "Mint Recipient Address", adminMintAmountLabel: "Mint Amount ($GENO)", adminMintBtn: "Mint $GENO Tokens",
+    adminRescueTokenLabel: "ERC-20 Token Address", adminRescueBtn: "Rescue Registry Tokens", adminBountyTitle: "ZK Trait Bounty Governance",
+    adminBountyTraitLabel: "Target Trait ID / Code", adminBountyDescLabel: "Clinical Description", adminBountyCreateBtn: "Approve & Launch ZK Bounty",
+    adminBountyCloseBtn: "Close Expired Bounty", blindSaltLabel: "Cohort Blind Tag Salt", blindSearchTitle: "On-Chain Blinded Trait Search",
+    blindSearchKey: "Trait Key", blindSearchVal: "Trait Value (gene/disease/hpo)", blindSearchBtn: "Query Blind Tag", blindSearchClear: "Clear Blind",
+    workerAuthLabel: "Delegated Capsule Worker", workerAuthBtn: "Authorize Worker", workerRevokeBtn: "Revoke Worker",
+    reuseSectionTitle: "Secondary Study Reuse (5% Royalty)", reuseStudyLabel: "Study ID / Commitment", reuseRecordBtn: "Record Reuse (5%)",
+    adminPageTitle: "Protocol Governance Console", adminKpiDatasets: "Datasets / Bounties", adminKpiSupply: "Total Supply ($GENO)", adminKpiRoyalty: "Reuse Fee / Max Tags", adminKpiEscrow: "Registry Escrow Bal", adminLabelRegistry: "Registry Contract", adminLabelDispatcher: "Dispatcher", adminLabelZkVerifier: "ZK Verifier", adminLabelIpfs: "IPFS Engines",
+    adminBtnUseConnected: "Use Connected", adminBtnUseDeployed: "Use Deployed", adminTreasuryDivider: "Rescue Registry Tokens", adminRescueToLabel: "Recipient", adminRescueAmtLabel: "Amount", adminBountyRewardLabel: "Reward ($GENO)", adminBountyMaxClaimsLabel: "Max Claims", adminBountyDurationLabel: "Duration (s, >=3600)",
+    adminBountyActiveBadge: "Active", adminBountyClosedBadge: "Closed", adminBountyExpiredBadge: "Expired", adminTraitHashLabel: "Trait Hash", adminClaimsUnit: "claims", toastCloseLabel: "Close notification", footerEvmLive: "EVM 31337 Live", footerKuboReady: "Kubo IPFS", footerPinataReady: "Pinata Cloud", footerCipherSpec: "AES-256-GCM", footerRoyaltySpec: "EIP-2981 (5-10%)",
+    footerIpfsConfig: "IPFS Engine", profileCopiedMsg: "Wallet address copied!", walletConnectedMsg: "Wallet connected", walletDisconnectedMsg: "Wallet disconnected.", faucetRequestingMsg: "Requesting test tokens...", faucetSuccessMsg: "Received 1,000 $GENO successfully!", faucetCooldownMsg: "Faucet cooldown active. Please wait.", showcaseTabDatasets: "Datasets", showcaseTabVariants: "Variants", showcaseTabEscrow: "Escrow",
+    showcaseColCohort: "Cohort", showcaseColFloor: "Floor", showcaseColVol24h: "24h Vol", filterSearchKeyGene: "Gene Symbol (gene)", filterSearchKeyDisease: "Condition (disease)", filterSearchKeyHpo: "HPO Code (hpo)", filterSearchKeyAncestry: "Ancestry (ancestry)", filterMinPlaceholder: "Min", filterMaxPlaceholder: "Max", licensedTargetLabel: "Target:", licensedArtifactHashes: "Artifact Hashes",
+    licensedReusesLabel: "Reuses:", licensedReusePlaceholder: "e.g. Heart Study GWAS 2026", modalBlindTagsTitle: "Update Blinded Tags", modalWorkerAddrLabel: "Worker EVM Address", vaultBtnTags: "Tags", vaultBtnWorker: "Worker", vaultTagsSummary: "Blind Tags", providerCrypt4ghLabel: "GA4GH Crypt4GH Streaming Pipeline (64KB Slices)", providerModeStandard: "STANDARD",
+    providerModeActive: "ACTIVE (64KB)", providerModeLocked: "LOCKED (>10MB)", providerRamUnit: "Bytes in RAM", traitSubGeneFreq: "9.1% (Gene Frequency)", traitSubImpact: "Molecular Impact", traitSubCall: "Genotype Call", traitSubProject: "1000 Genomes Project", traitSubContainer: "GA4GH Crypt4GH"
 };
 
 export default en;

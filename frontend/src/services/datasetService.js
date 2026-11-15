@@ -35,6 +35,24 @@ import GenomicZkVerifierABI from "../contracts/GenomicZkVerifierABI.json";
 import { executeSerializedTx, smartReadWithRetry, sanitizeGenomicMetadata } from "../utils/asyncResilience.js";
 
 /**
+ * Compute Domain-Separated Blinded Trait Tag (matches GenomicsRegistry.computeBlindTag)
+ */
+export function computeBlindTagHex(traitKey, traitValue, datasetSaltHex = "GENOCHAIN_COHORT_SALT_V1") {
+  const k = String(traitKey || "").trim();
+  const v = String(traitValue || "").trim();
+  const salt =
+    datasetSaltHex && /^0x[0-9a-fA-F]{64}$/.test(datasetSaltHex)
+      ? datasetSaltHex
+      : ethers.id(String(datasetSaltHex || "GENOCHAIN_COHORT_SALT_V1"));
+  return ethers.keccak256(
+    ethers.AbiCoder.defaultAbiCoder().encode(
+      ["string", "string", "string", "bytes32"],
+      ["GENOCHAIN_BLIND_TAG_V1", k, v, salt]
+    )
+  );
+}
+
+/**
  * 3-Step Client-Side Encryption, IPFS Storage, and Smart Contract Registration Pipeline
  */
 export async function publishGenomicDataset({
@@ -50,6 +68,8 @@ export async function publishGenomicDataset({
   ancestryRegion,
   priceGeno,
   durationDays,
+  blindTagSalt = "GENOCHAIN_COHORT_SALT_V1",
+  blindTraits = null,
   account,
   signer,
   onStepProgress,
@@ -111,6 +131,24 @@ export async function publishGenomicDataset({
   });
   const metaUpload = await uploadPhenopacketMetadata(phenopacket);
   const metadataCid = metaUpload?.cid || metaUpload;
+  const phenopacketBytes = new TextEncoder().encode(JSON.stringify(phenopacket, null, 2));
+  const metadataHash = await computeDataHash(phenopacketBytes);
+
+  // Build deduplicated blinded trait tags (up to MAX_BLIND_TAGS_PER_DATASET = 16)
+  const rawTraits = [
+    ["gene", geneSymbol],
+    ["disease", disease],
+    ["hpo", hpoCode ? hpoCode.split(/\s*-\s*/)[0] : ""],
+    ["ancestry", ancestryRegion],
+    ...(Array.isArray(blindTraits) ? blindTraits.map((item) => [item?.key, item?.value]) : [])
+  ];
+  const blindTagSet = new Set();
+  for (const [k, v] of rawTraits) {
+    if (k && v && String(v).trim().length > 0 && blindTagSet.size < 16) {
+      blindTagSet.add(computeBlindTagHex(k, v, blindTagSalt));
+    }
+  }
+  const blindTags = Array.from(blindTagSet);
 
   // Secure creator key locally (persistent IndexedDB scoped by account)
   try {
@@ -124,7 +162,7 @@ export async function publishGenomicDataset({
     console.warn("Owner capsule packaging note:", e);
   }
 
-  // Step 3: Smart Contract Mint & Escrow Registration
+  // Step 3: Smart Contract Bundle Mint (3-Artifact Hashes + Blinded Search Tags)
   onStepProgress?.(3);
   const registryWithSigner = new ethers.Contract(
     contractAddresses.GenomicsRegistry,
@@ -136,23 +174,38 @@ export async function publishGenomicDataset({
   const durationSeconds = durationDays * 86400;
   const royaltyBps = 1000; // 10% EIP-2981
 
-  const tx = await registryWithSigner.registerGenomicData(
-    encryptedRaw.rawDataHash,
-    rawCid,
-    summaryCid,
-    metadataCid,
-    `ipfs://${metadataCid}`,
-    priceWei,
-    durationSeconds,
-    royaltyBps
-  );
+  let tx;
+  if (typeof registryWithSigner.registerGenomicDataBundle === "function") {
+    tx = await registryWithSigner.registerGenomicDataBundle(
+      [encryptedRaw.rawDataHash, encryptedSummary.rawDataHash, metadataHash],
+      [rawCid, summaryCid, metadataCid, `ipfs://${metadataCid}`],
+      priceWei,
+      durationSeconds,
+      royaltyBps,
+      blindTags
+    );
+  } else {
+    tx = await registryWithSigner.registerGenomicData(
+      encryptedRaw.rawDataHash,
+      rawCid,
+      summaryCid,
+      metadataCid,
+      `ipfs://${metadataCid}`,
+      priceWei,
+      durationSeconds,
+      royaltyBps
+    );
+  }
   await tx.wait();
 
   return {
     rawDataHash: encryptedRaw.rawDataHash,
+    summaryDataHash: encryptedSummary.rawDataHash,
+    metadataHash,
     rawCid,
     summaryCid,
-    metadataCid
+    metadataCid,
+    blindTagsCount: blindTags.length
   };
 }
 
@@ -518,11 +571,117 @@ function sanitizeMetadataTree(val) {
 }
 
 /**
- * Retrieve and parse GA4GH Phenopacket v2 JSON metadata from IPFS
+ * Authorize or revoke a delegated capsule delivery worker for a dataset (onlyDataOwner)
  */
-export async function fetchPhenopacketMetadata({ metadataCid }) {
+export async function setDatasetCapsuleWorker({ dataId, workerAddress, authorized = true, signer }) {
+  if (!signer) throw new Error("Wallet not connected.");
+  if (!ethers.isAddress(workerAddress)) throw new Error("Invalid worker EVM address.");
+  const registry = new ethers.Contract(contractAddresses.GenomicsRegistry, GenomicsRegistryABI, signer);
+  const tx = await registry.authorizeCapsuleWorker(dataId, workerAddress, authorized);
+  await tx.wait();
+  return tx;
+}
+
+/**
+ * Replace Privacy-Preserving Blinded Trait Tags on-chain (onlyDataOwner, max 16)
+ */
+export async function updateDatasetBlindTags({ dataId, blindTags, signer }) {
+  if (!signer) throw new Error("Wallet not connected.");
+  const registry = new ethers.Contract(contractAddresses.GenomicsRegistry, GenomicsRegistryABI, signer);
+  const tx = await registry.setDatasetBlindTags(dataId, blindTags);
+  await tx.wait();
+  return tx;
+}
+
+/**
+ * Query datasets matching a privacy-preserving blinded Keccak-256 trait tag on-chain
+ */
+export async function searchDatasetsByBlindTag({
+  traitKey,
+  traitValue,
+  datasetSalt = "GENOCHAIN_COHORT_SALT_V1",
+  datasets = [],
+  contracts
+}) {
+  if (!contracts?.registry) throw new Error("Registry contract not initialized.");
+  const blindTag = computeBlindTagHex(traitKey, traitValue, datasetSalt);
+  const checks = await Promise.all(
+    (datasets || []).map(async (d) => {
+      try {
+        const matched = await contracts.registry.matchesBlindTag(d.dataId, blindTag);
+        return matched ? Number(d.dataId) : null;
+      } catch {
+        return null;
+      }
+    })
+  );
+  return {
+    blindTag,
+    matchingIds: checks.filter((id) => id !== null)
+  };
+}
+
+/**
+ * Quote on-chain Study Reuse Fee (5% of access price, min 1 wei)
+ */
+export async function quoteStudyReuse({ dataId, contracts }) {
+  if (!contracts?.registry) throw new Error("Registry contract not initialized.");
+  const feeWei = await contracts.registry.quoteReuseFee(dataId);
+  return {
+    feeWei,
+    feeGeno: Number(ethers.formatUnits(feeWei, 18))
+  };
+}
+
+/**
+ * Pay 5% Study Reuse Fee (with EIP-2981 royalty split) and anchor unique study commitment on-chain
+ */
+export async function recordDatasetStudyReuse({ dataId, studyTitleOrId, account, signer }) {
+  if (!signer) throw new Error("Wallet not connected.");
+  const activeAccount = account || (await signer.getAddress());
+  return executeSerializedTx(activeAccount, async () => {
+    const token = new ethers.Contract(contractAddresses.GenomicToken, GenomicTokenABI, signer);
+    const registry = new ethers.Contract(contractAddresses.GenomicsRegistry, GenomicsRegistryABI, signer);
+
+    const feeWei = await registry.quoteReuseFee(dataId);
+    const balWei = await token.balanceOf(activeAccount);
+    if (balWei < feeWei) {
+      throw new Error("Insufficient $GENO balance to pay 5% Study Reuse Fee.");
+    }
+
+    const allowance = await token.allowance(activeAccount, contractAddresses.GenomicsRegistry);
+    if (allowance < feeWei) {
+      const approveTx = await token.approve(contractAddresses.GenomicsRegistry, feeWei);
+      await approveTx.wait();
+    }
+
+    const label = String(studyTitleOrId || "").trim() || `${Date.now()}`;
+    const studyCommitment = ethers.keccak256(
+      ethers.toUtf8Bytes(`GENOCHAIN_STUDY_REUSE_V1:${dataId}:${activeAccount.toLowerCase()}:${label}`)
+    );
+    const tx = await registry.recordStudyReuse(dataId, studyCommitment);
+    await tx.wait();
+    return {
+      tx,
+      feeWei,
+      feeGeno: Number(ethers.formatUnits(feeWei, 18)),
+      studyCommitment
+    };
+  });
+}
+
+/**
+ * Retrieve and parse GA4GH Phenopacket v2 JSON metadata from IPFS with optional On-Chain Hash Check
+ */
+export async function fetchPhenopacketMetadata({ metadataCid, expectedMetadataHash = null }) {
   if (!metadataCid) throw new Error("Metadata CID is missing.");
   const bytes = await smartReadWithRetry(() => retrieveFromIpfs(metadataCid));
+  if (expectedMetadataHash && /^0x[0-9a-fA-F]{64}$/.test(expectedMetadataHash) && expectedMetadataHash !== ethers.ZeroHash) {
+    const computedHash = await computeDataHash(bytes);
+    if (computedHash.toLowerCase() !== expectedMetadataHash.toLowerCase()) {
+      throw new Error("Cryptographic tamper detected: Downloaded Phenopacket JSON hash does not match On-Chain Anchor!");
+    }
+  }
   const jsonText = new TextDecoder().decode(bytes);
   return sanitizeMetadataTree(JSON.parse(jsonText));
 }
@@ -530,7 +689,7 @@ export async function fetchPhenopacketMetadata({ metadataCid }) {
 /**
  * Query live GenomicZkVerifier linkage and trait possession proof status via GenomicsRegistry
  */
-export async function verifyDatasetTraitZkStatus({ dataId, contracts, variantCommitment }) {
+export async function verifyDatasetTraitZkStatus({ dataId, contracts, variantCommitment, targetTraitId, owner }) {
   const result = {
     linked: false,
     verifierAddress: ethers.ZeroAddress,
@@ -544,9 +703,10 @@ export async function verifyDatasetTraitZkStatus({ dataId, contracts, variantCom
     result.linked = Boolean(verifierAddr && verifierAddr !== ethers.ZeroAddress);
 
     const readProvider = contracts.registry.runner?.provider || contracts.registry.runner;
+    let zkContract = null;
     if (result.linked && readProvider) {
+      zkContract = new ethers.Contract(verifierAddr, GenomicZkVerifierABI, readProvider);
       try {
-        const zkContract = new ethers.Contract(verifierAddr, GenomicZkVerifierABI, readProvider);
         result.bountyCount = Number(await smartReadWithRetry(() => zkContract.bountyCount()));
       } catch {
         // Optional view query
@@ -558,9 +718,26 @@ export async function verifyDatasetTraitZkStatus({ dataId, contracts, variantCom
         ? variantCommitment
         : null;
     if (result.linked && commitment) {
-      result.verified = Boolean(
-        await smartReadWithRetry(() => contracts.registry.verifyDatasetTraitPossession(dataId, commitment))
-      );
+      if (
+        zkContract &&
+        targetTraitId &&
+        /^0x[0-9a-fA-F]{64}$/.test(targetTraitId) &&
+        owner &&
+        ethers.isAddress(owner)
+      ) {
+        try {
+          result.verified = Boolean(
+            await smartReadWithRetry(() => zkContract.hasVerifiedTraitVariant(targetTraitId, commitment, owner))
+          );
+        } catch {
+          // Fall back to registry verification
+        }
+      }
+      if (!result.verified) {
+        result.verified = Boolean(
+          await smartReadWithRetry(() => contracts.registry.verifyDatasetTraitPossession(dataId, commitment))
+        );
+      }
     }
   } catch (err) {
     console.warn("[ZK-Verify] Status check warning:", err?.message || err);

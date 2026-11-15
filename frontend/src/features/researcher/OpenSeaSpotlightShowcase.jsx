@@ -8,7 +8,15 @@ import {
   LockClosedIcon,
   LockOpenIcon,
   CheckCircleIcon,
-  CopyIcon
+  CopyIcon,
+  DnaHelixIcon,
+  PopulationGlobeIcon,
+  GeneticTraitIcon,
+  MetabolismIcon,
+  SequencingIcon,
+  BenchmarkIcon,
+  LayersIcon,
+  ShieldCheckIcon
 } from "../../components/icons/GenoIcons";
 import GenomicVisualCover, { getDatasetCoverUrl } from "../../components/common/GenomicVisualCover";
 import contractAddresses from "../../contracts/contractAddresses.json";
@@ -153,20 +161,20 @@ export default function OpenSeaSpotlightShowcase({ onPurchase }) {
     }
   };
 
-  // Category Pills matching OpenSea OS2 top bar (connected to DatasetContext.filterSignificance)
+  // Category Pills connected to DatasetContext.filterSignificance
   const categoryPills = [
     { id: "All", label: lang === "vi" ? "Tất cả" : "All", icon: null },
-    { id: "Physical Traits & Performance", label: lang === "vi" ? "Thể chất & Cơ bắp" : "Physical Traits", icon: "🏃" },
-    { id: "Sensory & Metabolism", label: lang === "vi" ? "Chuyển hóa & Vị giác" : "Metabolism", icon: "🧪" },
-    { id: "Pharmacogenomics", label: lang === "vi" ? "Dược di truyền" : "Pharmacogenomics", icon: "💊" },
-    { id: "Reference Benchmark", label: lang === "vi" ? "Chuẩn GIAB" : "GIAB Benchmark", icon: "🔬" },
-    { id: "Population Genetics", label: lang === "vi" ? "Di truyền Quần thể" : "Population WGS", icon: "🧬" }
+    { id: "Physical Traits & Performance", label: lang === "vi" ? "Thể chất & Cơ bắp" : "Physical Traits", icon: <GeneticTraitIcon size={14} /> },
+    { id: "Sensory & Metabolism", label: lang === "vi" ? "Chuyển hóa & Vị giác" : "Metabolism", icon: <MetabolismIcon size={14} /> },
+    { id: "Pharmacogenomics", label: lang === "vi" ? "Dược di truyền" : "Pharmacogenomics", icon: <SequencingIcon size={14} /> },
+    { id: "Reference Benchmark", label: lang === "vi" ? "Chuẩn GIAB" : "GIAB Benchmark", icon: <BenchmarkIcon size={14} /> },
+    { id: "Population Genetics", label: lang === "vi" ? "Di truyền Quần thể" : "Population WGS", icon: <PopulationGlobeIcon size={14} /> }
   ];
 
   // Truthful Network Filter (Single Deployed EVM Chain: 31337)
   const chains = [
-    { id: "all", label: "All Cohorts", color: "#111827" },
-    { id: "evm31337", label: "Local EVM (31337)", color: "#627EEA", symbol: "♦" }
+    { id: "all", label: lang === "vi" ? "Tất cả" : "All", color: "#111827" },
+    { id: "evm31337", label: "Local EVM (31337)", color: "#627EEA", symbol: <DnaHelixIcon size={12} color="#ffffff" /> }
   ];
 
   const timeframes = ["1h", "6h", "1d", "7d", "30d"];
@@ -252,29 +260,35 @@ export default function OpenSeaSpotlightShowcase({ onPurchase }) {
           ))}
         </div>
 
-        {/* Right: Leaderboard Controls (NFTs | Tokens | Perps + Timeframe) */}
+        {/* Right: Leaderboard Controls (Datasets | Variants | Escrow + Timeframe) */}
         <div className="os2-right-table-controls">
           <div className="os2-segmented-group">
             <button
               type="button"
               className={`os2-seg-btn ${rightTab === "nfts" ? "active" : ""}`}
               onClick={() => setRightTab("nfts")}
+              title={t("showcaseTabDatasets")}
             >
-              <span>☷ NFTs</span>
+              <LayersIcon size={13} />
+              <span>{t("showcaseTabDatasets")}</span>
             </button>
             <button
               type="button"
               className={`os2-seg-btn ${rightTab === "tokens" ? "active" : ""}`}
               onClick={() => setRightTab("tokens")}
+              title={t("showcaseTabVariants")}
             >
-              <span>◎ Tokens</span>
+              <DnaHelixIcon size={13} />
+              <span>{t("showcaseTabVariants")}</span>
             </button>
             <button
               type="button"
               className={`os2-seg-btn ${rightTab === "perps" ? "active" : ""}`}
               onClick={() => setRightTab("perps")}
+              title={t("showcaseTabEscrow")}
             >
-              <span>∞ Perps</span>
+              <ShieldCheckIcon size={13} />
+              <span>{t("showcaseTabEscrow")}</span>
             </button>
           </div>
 
@@ -301,11 +315,6 @@ export default function OpenSeaSpotlightShowcase({ onPurchase }) {
             <div
               className="os2-hero-banner-card"
               onClick={() => setSelectedAssetModal(featured)}
-              role="button"
-              tabIndex={0}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") setSelectedAssetModal(featured);
-              }}
             >
               {/* Full-Bleed High-Resolution 3D Molecular Cover Image */}
               <div className="os2-hero-mosaic-bg">
@@ -355,7 +364,7 @@ export default function OpenSeaSpotlightShowcase({ onPurchase }) {
                 </div>
 
                 <div className="os2-hero-author-line">
-                  <span>By {featuredConsortium}</span>
+                  <span>{lang === "vi" ? "Đơn vị:" : "By"} {featuredConsortium}</span>
                   <VerifiedBadgeIcon size={13} color="#9ca3af" />
                   <span className="os2-hero-dot">•</span>
                   <span className="os2-hero-locus-pill">
@@ -376,19 +385,19 @@ export default function OpenSeaSpotlightShowcase({ onPurchase }) {
                 {/* Dark Frosted Glass Stats Box (FLOOR PRICE | ITEMS | TOTAL VOLUME | LISTED) */}
                 <div className="os2-hero-stats-glass">
                   <div className="os2-hero-stat-col">
-                    <span className="os2-hero-stat-label">FLOOR PRICE</span>
+                    <span className="os2-hero-stat-label">{t("statFloorPrice").toUpperCase()}</span>
                     <span className="os2-hero-stat-val">{featured.price} $GENO</span>
                   </div>
                   <div className="os2-hero-stat-col">
-                    <span className="os2-hero-stat-label">ITEMS</span>
+                    <span className="os2-hero-stat-label">{t("statItemsCount").toUpperCase()}</span>
                     <span className="os2-hero-stat-val">{datasets.length}</span>
                   </div>
                   <div className="os2-hero-stat-col">
-                    <span className="os2-hero-stat-label">TOTAL VOLUME</span>
+                    <span className="os2-hero-stat-label">{t("statVolume").toUpperCase()}</span>
                     <span className="os2-hero-stat-val">{totalVolume.toLocaleString()} $GENO</span>
                   </div>
                   <div className="os2-hero-stat-col">
-                    <span className="os2-hero-stat-label">LISTED</span>
+                    <span className="os2-hero-stat-label">{t("heroListedLabel")}</span>
                     <span className="os2-hero-stat-val">
                       {activeCount} ({listedPct}%)
                     </span>
@@ -477,11 +486,9 @@ export default function OpenSeaSpotlightShowcase({ onPurchase }) {
           {/* B. Trending Tokens Section (4x2 Grid with Real 3D Avatars & Sparklines) */}
           <div id="os2-trending-tokens-section" className="os2-trending-section">
             <div className="os2-section-header">
-              <h3 className="os2-section-title">Trending Tokens</h3>
+              <h3 className="os2-section-title">{t("trendingTokens")}</h3>
               <p className="os2-section-subtitle">
-                {lang === "vi"
-                  ? "Các biến thể gen & locus phân tử nổi bật trên mạng lưới"
-                  : "Largest price change in the past day"}
+                {t("trendingTokensSub")}
               </p>
             </div>
 
@@ -510,7 +517,6 @@ export default function OpenSeaSpotlightShowcase({ onPurchase }) {
                       <div className="os2-token-info">
                         <div className="os2-token-name-row">
                           <span className="os2-token-name">{geneName}</span>
-                          <span className="os2-token-ticker">${geneName}</span>
                           <VerifiedBadgeIcon size={12} color="#0086FF" />
                         </div>
                         <div className="os2-token-price-row">
@@ -534,11 +540,9 @@ export default function OpenSeaSpotlightShowcase({ onPurchase }) {
           {/* C. Featured Collections 4-Card Row (Matching OpenSea OS2 Second Viewport) */}
           <div className="os2-featured-collections-strip">
             <div className="os2-section-header">
-              <h3 className="os2-section-title">Featured Collections</h3>
+              <h3 className="os2-section-title">{t("featuredCollectionsTitle")}</h3>
               <p className="os2-section-subtitle">
-                {lang === "vi"
-                  ? "Bộ sưu tập hệ gen phân tử tuyển chọn tuần này"
-                  : "This week's curated collections"}
+                {t("featuredCollectionsSub")}
               </p>
             </div>
 
@@ -571,7 +575,7 @@ export default function OpenSeaSpotlightShowcase({ onPurchase }) {
                         <VerifiedBadgeIcon size={14} color="#0086FF" />
                       </div>
                       <div className="os2-featured-strip-meta">
-                        <span>Floor: {ds.price} $GENO</span>
+                        <span>{t("showcaseColFloor")}: {ds.price} $GENO</span>
                         <span className="os2-featured-strip-badge">{ds.chromosome}:{ds.rsId}</span>
                       </div>
                     </div>
@@ -582,22 +586,22 @@ export default function OpenSeaSpotlightShowcase({ onPurchase }) {
           </div>
         </div>
 
-        {/* RIGHT STICKY LEADERBOARD COLUMN (Switches dynamically between NFTs | Tokens | Perps) */}
-        <aside className="os2-right-leaderboard-aside" aria-label="Collection Floor Leaderboard">
+        {/* RIGHT STICKY LEADERBOARD COLUMN */}
+        <aside className="os2-right-leaderboard-aside" aria-label={t("showcaseColCohort")}>
           <div className="os2-leaderboard-col-headers">
             <span>
               {rightTab === "tokens"
-                ? "TOKEN LOCUS"
+                ? (lang === "vi" ? "LOCUS BIẾN THỂ" : "VARIANT LOCUS")
                 : rightTab === "perps"
-                  ? "ESCROW CONTRACT"
-                  : `COLLECTION (${timeframe.toUpperCase()})`}
+                  ? (lang === "vi" ? "KÝ QUỸ ESCROW" : "ESCROW LEASE")
+                  : `${t("showcaseColCohort").toUpperCase()} (${timeframe.toUpperCase()})`}
             </span>
             <span>
               {rightTab === "tokens"
-                ? "PRICE / VAR"
+                ? (lang === "vi" ? "GIÁ / rsID" : "PRICE / VAR")
                 : rightTab === "perps"
-                  ? "PROTECTION"
-                  : "FLOOR"}
+                  ? (lang === "vi" ? "BẢO VỆ" : "PROTECTION")
+                  : t("showcaseColFloor").toUpperCase()}
             </span>
           </div>
 
@@ -628,7 +632,7 @@ export default function OpenSeaSpotlightShowcase({ onPurchase }) {
                     <div className="os2-lb-name-wrap">
                       <span className="os2-lb-name" title={displayTitle}>
                         {rightTab === "tokens"
-                          ? `$${geneSym} (${ds.chromosome})`
+                          ? `${geneSym} (${ds.chromosome})`
                           : `${geneSym} - ${displayTitle}`}
                       </span>
                       <VerifiedBadgeIcon size={13} color="#0086FF" />
@@ -643,8 +647,8 @@ export default function OpenSeaSpotlightShowcase({ onPurchase }) {
                       </>
                     ) : rightTab === "perps" ? (
                       <>
-                        <span className="os2-lb-floor">{ds.durationDays}d Lease</span>
-                        <span className="os2-lb-sub pos">24h Escrow Guard</span>
+                        <span className="os2-lb-floor">{ds.durationDays} {t("durationDays")}</span>
+                        <span className="os2-lb-sub pos">{lang === "vi" ? "Ký quỹ 24h" : "24h Escrow"}</span>
                       </>
                     ) : (
                       <>
@@ -652,7 +656,7 @@ export default function OpenSeaSpotlightShowcase({ onPurchase }) {
                         <span className={`os2-lb-sub ${ds.status === "Active" ? "pos" : "neg"}`}>
                           {ds.status === "Active"
                             ? salesCount > 0
-                              ? `${salesCount} sales`
+                              ? `${salesCount} ${lang === "vi" ? "lượt" : "sales"}`
                               : "+10% EIP-2981"
                             : ds.status}
                         </span>

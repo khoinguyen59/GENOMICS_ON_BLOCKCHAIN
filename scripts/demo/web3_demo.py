@@ -599,6 +599,41 @@ def main():
     trait_verified = registry_contract.functions.verifyDatasetTraitPossession(target_data_id, sample_commitment).call()
     print(f"[ZK] Liên kết GenomicZkVerifier ({zk_verifier_addr}): bountyCount={bounty_count}, verifyDatasetTraitPossession={trait_verified}")
 
+    # 9b. 40-Point Completion Features: 3-Artifact Hash Anchoring, Blinded Trait Search & 5% Study Reuse Fee
+    print("\n--- Step 9b: 3-Artifact Anchoring, Blinded Trait Search & 5% Study Reuse Fee ---")
+    summary_artifact_hash = hashlib.sha256(b"GENOCHAIN_SUMMARY_ARTIFACT_DEMO_V1").digest()
+    metadata_artifact_hash = hashlib.sha256(b"GENOCHAIN_METADATA_ARTIFACT_DEMO_V1").digest()
+    anchor_tx = registry_contract.functions.anchorArtifactHashes(
+        target_data_id,
+        summary_artifact_hash,
+        metadata_artifact_hash
+    ).transact({"from": data_owner})
+    anchor_rec = w3.eth.wait_for_transaction_receipt(anchor_tx)
+    hashes_tuple = registry_contract.functions.getArtifactHashes(target_data_id).call()
+    assert hashes_tuple[1] == summary_artifact_hash, "summaryDataHash mismatch on-chain"
+    assert hashes_tuple[2] == metadata_artifact_hash, "metadataHash mismatch on-chain"
+    print(f"[OK] Anchored 3-artifact hashes on-chain! TxHash: {w3.to_hex(anchor_rec.transactionHash)}")
+
+    blind_salt = w3.keccak(text="GENOCHAIN_DEMO_BLIND_SALT_V1")
+    blind_tag_pos = registry_contract.functions.computeBlindTag("gene", "ALDH2", blind_salt).call()
+    blind_tag_neg = registry_contract.functions.computeBlindTag("gene", "UNKNOWN_GENE", blind_salt).call()
+    tags_tx = registry_contract.functions.setDatasetBlindTags(target_data_id, [blind_tag_pos]).transact({"from": data_owner})
+    tags_rec = w3.eth.wait_for_transaction_receipt(tags_tx)
+    assert registry_contract.functions.matchesBlindTag(target_data_id, blind_tag_pos).call() is True, "Positive blind tag lookup failed"
+    assert registry_contract.functions.matchesBlindTag(target_data_id, blind_tag_neg).call() is False, "Negative blind tag lookup returned True"
+    print(f"[OK] Blinded Trait Search verified (Keccak-256)! TxHash: {w3.to_hex(tags_rec.transactionHash)}")
+
+    reuse_fee_wei = registry_contract.functions.quoteReuseFee(target_data_id).call()
+    assert reuse_fee_wei > 0, "Expected non-zero reuse fee quote"
+    reuse_appr_tx = token_contract.functions.approve(registry_addr, reuse_fee_wei).transact({"from": researcher})
+    w3.eth.wait_for_transaction_receipt(reuse_appr_tx)
+    study_id = w3.keccak(text="GENOCHAIN_REUSE_STUDY_DEMO_2026")
+    reuse_tx = registry_contract.functions.recordStudyReuse(target_data_id, study_id).transact({"from": researcher})
+    reuse_rec = w3.eth.wait_for_transaction_receipt(reuse_tx)
+    assert registry_contract.functions.studyReuseReceipts(target_data_id, study_id).call() is True, "Study reuse receipt not recorded"
+    assert registry_contract.functions.datasetReuseCount(target_data_id).call() >= 1, "Dataset reuse count did not increment"
+    print(f"[OK] 5% Study Reuse Fee recorded ({w3.from_wei(reuse_fee_wei, 'ether')} $GENO)! TxHash: {w3.to_hex(reuse_rec.transactionHash)}")
+
     print("\n" + "=" * 80)
     print("[SUCCESS] ALL GENOCHAIN WORKFLOWS, CRYPTOGRAPHIC PROOFS & ACCESS CONSTRAINTS PASSED 100%!")
     print("=" * 80)

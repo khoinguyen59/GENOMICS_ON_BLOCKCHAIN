@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from "react";
 import { ethers } from "ethers";
 import contractAddresses from "../contracts/contractAddresses.json";
+import { useLanguage } from "./LanguageContext";
 import GenomicTokenABI from "../contracts/GenomicTokenABI.json";
 import GenomicNFTABI from "../contracts/GenomicNFTABI.json";
 import GenomicsRegistryABI from "../contracts/GenomicsRegistryABI.json";
@@ -28,7 +29,11 @@ const LOCAL_RPC_PROVIDER = new ethers.JsonRpcProvider("http://127.0.0.1:8545", L
 });
 
 export function Web3Provider({ children }) {
-  // Top-Level Role Switcher: 'donor' (User Portal) | 'researcher' (Marketplace)
+  const { t } = useLanguage();
+  const tRef = useRef(t);
+  tRef.current = t;
+
+  // Top-Level Role Switcher: 'researcher' (Marketplace) | 'donor' (Data Provider) | 'admin' (Governance)
   const [userRole, setUserRole] = useState("researcher");
 
   // Sub-Navigation Tabs
@@ -38,6 +43,7 @@ export function Web3Provider({ children }) {
 
   // Blockchain & Wallet State
   const [account, setAccount] = useState("");
+  const [localAccountIndex, setLocalAccountIndex] = useState(null);
   const [genoBalance, setGenoBalance] = useState(0);
   const [contracts, setContracts] = useState(null);
   const [signer, setSigner] = useState(null);
@@ -74,11 +80,22 @@ export function Web3Provider({ children }) {
     toastTimeoutRef.current = setTimeout(() => {
       setToast(null);
       toastTimeoutRef.current = null;
-    }, 4000);
+    }, 3500);
+  }, []);
+
+  const clearToast = useCallback(() => {
+    if (toastTimeoutRef.current) {
+      clearTimeout(toastTimeoutRef.current);
+      toastTimeoutRef.current = null;
+    }
+    setToast(null);
   }, []);
 
   // Provider & Signer Resolver (Instant 0ms Local Hardhat RPC read when wallet not connected)
   const getProviderAndSigner = useCallback(async () => {
+    if (localAccountIndex !== null && signer) {
+      return { provider: provider || LOCAL_RPC_PROVIDER, signer };
+    }
     if (account && typeof window !== "undefined" && window.ethereum) {
       try {
         const [chainIdHex, accounts] = await Promise.all([
@@ -102,7 +119,7 @@ export function Web3Provider({ children }) {
       return { provider: provider || LOCAL_RPC_PROVIDER, signer };
     }
     return { provider: LOCAL_RPC_PROVIDER, signer: null };
-  }, [account, signer, provider]);
+  }, [account, signer, provider, localAccountIndex]);
 
   // Contract Instances Resolver
   const getContracts = useCallback(async (explicitSigner = null, explicitProvider = null) => {
@@ -150,14 +167,15 @@ export function Web3Provider({ children }) {
     }
   }, [getContracts]);
 
-  // Connect Wallet Action (MetaMask with automatic fallback to Local Hardhat RPC)
-  const connectWallet = useCallback(async (customIdx) => {
+  // Connect Local Hardhat Signer Directly by Account Index (#0 Admin, #1 Provider, #2 Researcher)
+  const connectLocalAccount = useCallback(async (idx = 0) => {
     manualDisconnectRef.current = false;
-    const connectLocalHardhat = async () => {
-      const jsonRpc = new ethers.JsonRpcProvider("http://127.0.0.1:8545");
-      const targetIdx = typeof customIdx === "number" ? customIdx : 1;
+    const targetIdx = typeof idx === "number" ? idx : 0;
+    try {
+      const jsonRpc = LOCAL_RPC_PROVIDER;
       const s = await jsonRpc.getSigner(targetIdx);
       const addr = await s.getAddress();
+      setLocalAccountIndex(targetIdx);
       setAccount(addr);
       setSigner(s);
       setProvider(jsonRpc);
@@ -167,8 +185,22 @@ export function Web3Provider({ children }) {
         setGenoBalance(Number(ethers.formatUnits(balWei, 18)));
       }
       await initPersistentKey(addr, c);
-      showToast(`Wallet Connected (Hardhat Node): ${addr.substring(0, 6)}...${addr.substring(addr.length - 4)}`);
+      showToast(`${tRef.current("walletConnectedMsg")} (Hardhat #${targetIdx}): ${addr.substring(0, 6)}...${addr.substring(addr.length - 4)}`);
       return addr;
+    } catch (err) {
+      showToast("Local RPC connection failed: " + (err.shortMessage || err.message), "error");
+      return null;
+    }
+  }, [getContracts, initPersistentKey, showToast]);
+
+  // Connect Wallet Action (MetaMask with automatic fallback to Local Hardhat RPC)
+  const connectWallet = useCallback(async (customIdx) => {
+    if (typeof customIdx === "number") {
+      return await connectLocalAccount(customIdx);
+    }
+    manualDisconnectRef.current = false;
+    const connectLocalHardhat = async () => {
+      return await connectLocalAccount(1);
     };
 
     if (typeof window !== "undefined" && window.ethereum) {
@@ -186,6 +218,7 @@ export function Web3Provider({ children }) {
         if (accounts.length > 0) {
           const userAddr = accounts[0];
           const s = await p.getSigner();
+          setLocalAccountIndex(null);
           setAccount(userAddr);
           setSigner(s);
           setProvider(p);
@@ -195,7 +228,7 @@ export function Web3Provider({ children }) {
             setGenoBalance(Number(ethers.formatUnits(balWei, 18)));
           }
           await initPersistentKey(userAddr, c);
-          showToast(`Wallet Connected: ${userAddr.substring(0, 6)}...${userAddr.substring(userAddr.length - 4)}`);
+          showToast(`${tRef.current("walletConnectedMsg")}: ${userAddr.substring(0, 6)}...${userAddr.substring(userAddr.length - 4)}`);
           return userAddr;
         }
       } catch {
@@ -213,11 +246,12 @@ export function Web3Provider({ children }) {
       }
     }
     return null;
-  }, [getContracts, initPersistentKey, showToast]);
+  }, [connectLocalAccount, getContracts, initPersistentKey, showToast]);
 
   // Disconnect Wallet Action
   const disconnectWallet = useCallback(() => {
     manualDisconnectRef.current = true;
+    setLocalAccountIndex(null);
     setAccount("");
     setGenoBalance(0);
     setSigner(null);
@@ -225,7 +259,7 @@ export function Web3Provider({ children }) {
     setContracts(null);
     setResearcherKeyPair(null);
     setIsPubKeyRegisteredOnChain(false);
-    showToast("Wallet disconnected.", "info");
+    showToast(tRef.current("walletDisconnectedMsg"), "info");
   }, [showToast]);
 
   // Faucet Claim Action
@@ -243,15 +277,15 @@ export function Web3Provider({ children }) {
         activeSigner = await jsonRpc.getSigner(targetAccount);
       }
       const tokenWithSigner = new ethers.Contract(contractAddresses.GenomicToken, GenomicTokenABI, activeSigner);
-      showToast("Requesting test tokens...", "info");
+      showToast(tRef.current("faucetRequestingMsg"), "info");
       const tx = await tokenWithSigner.faucet(targetAccount);
       await tx.wait();
       const balWei = await tokenWithSigner.balanceOf(targetAccount);
       setGenoBalance(Number(ethers.formatUnits(balWei, 18)));
-      showToast("Received 1,000 $GENO successfully!");
+      showToast(tRef.current("faucetSuccessMsg"));
     } catch (err) {
       if (err.message && err.message.includes("FaucetCooldownActive")) {
-        showToast("Faucet cooldown active. Please wait.", "error");
+        showToast(tRef.current("faucetCooldownMsg"), "error");
       } else {
         showToast("Faucet error: " + (err.shortMessage || err.message), "error");
       }
@@ -393,7 +427,7 @@ export function Web3Provider({ children }) {
         setContracts(null);
         setResearcherKeyPair(null);
         setIsPubKeyRegisteredOnChain(false);
-        showToast("Wallet disconnected.", "info");
+        showToast(tRef.current("walletDisconnectedMsg"), "info");
       } else {
         const newAddr = accounts[0];
         manualDisconnectRef.current = false;
@@ -415,7 +449,7 @@ export function Web3Provider({ children }) {
           } catch {}
         }
         await initPersistentKey(newAddr, c);
-        showToast(`Account switched: ${newAddr.substring(0, 6)}...${newAddr.substring(newAddr.length - 4)}`);
+        showToast(`${tRef.current("walletConnectedMsg")}: ${newAddr.substring(0, 6)}...${newAddr.substring(newAddr.length - 4)}`);
       }
     };
 
@@ -485,6 +519,9 @@ export function Web3Provider({ children }) {
     setKuboRpcInput,
     toast,
     showToast,
+    clearToast,
+    localAccountIndex,
+    connectLocalAccount,
     connectWallet,
     disconnectWallet,
     claimFaucet,

@@ -69,14 +69,18 @@ contract GenomicZkVerifier is ReentrancyGuard, Ownable {
     G1Point public ic1;
 
     // State Variables
+    uint256 public vkEpoch;
     uint256 public bountyCount;
     mapping(uint256 => ZkBounty) public bounties;
     
     // bountyId => donorAddress => claimed status (anti-double-claim invariant)
     mapping(uint256 => mapping(address => bool)) public hasClaimedBounty;
 
-    // variantCommitment => donorAddress => verified status
-    mapping(bytes32 => mapping(address => bool)) public verifiedCommitments;
+    // vkEpoch => variantCommitment => donorAddress => verified status
+    mapping(uint256 => mapping(bytes32 => mapping(address => bool))) private _verifiedByEpoch;
+
+    // vkEpoch => targetTraitId => variantCommitment => donorAddress => verified status
+    mapping(uint256 => mapping(bytes32 => mapping(bytes32 => mapping(address => bool)))) private _verifiedTraitByEpoch;
 
     // Custom Errors
     error InvalidPaymentToken();
@@ -171,9 +175,15 @@ contract GenomicZkVerifier is ReentrancyGuard, Ownable {
         if (!_isOnCurveG1(_alpha[0], _alpha[1]) || (_alpha[0] == 0 && _alpha[1] == 0)) revert InvalidCurvePoint();
         if (!_isOnCurveG1(_ic0[0], _ic0[1]) || (_ic0[0] == 0 && _ic0[1] == 0)) revert InvalidCurvePoint();
         if (!_isOnCurveG1(_ic1[0], _ic1[1]) || (_ic1[0] == 0 && _ic1[1] == 0)) revert InvalidCurvePoint();
-        if (!_isOnCurveG2(_beta) || (_beta[0][0] == 0 && _beta[0][1] == 0)) revert InvalidCurvePoint();
-        if (!_isOnCurveG2(_gamma) || (_gamma[0][0] == 0 && _gamma[0][1] == 0)) revert InvalidCurvePoint();
-        if (!_isOnCurveG2(_delta) || (_delta[0][0] == 0 && _delta[0][1] == 0)) revert InvalidCurvePoint();
+        if (!_isOnCurveG2(_beta) || (_beta[0][0] == 0 && _beta[0][1] == 0) || !_isInSubgroupG2(_beta)) {
+            revert InvalidCurvePoint();
+        }
+        if (!_isOnCurveG2(_gamma) || (_gamma[0][0] == 0 && _gamma[0][1] == 0) || !_isInSubgroupG2(_gamma)) {
+            revert InvalidCurvePoint();
+        }
+        if (!_isOnCurveG2(_delta) || (_delta[0][0] == 0 && _delta[0][1] == 0) || !_isInSubgroupG2(_delta)) {
+            revert InvalidCurvePoint();
+        }
 
         bytes32 hBeta = keccak256(abi.encode(_beta));
         bytes32 hGamma = keccak256(abi.encode(_gamma));
@@ -186,6 +196,9 @@ contract GenomicZkVerifier is ReentrancyGuard, Ownable {
         delta = G2Point(_delta[0][0], _delta[0][1], _delta[1][0], _delta[1][1]);
         ic0 = G1Point(_ic0[0], _ic0[1]);
         ic1 = G1Point(_ic1[0], _ic1[1]);
+        unchecked {
+            ++vkEpoch;
+        }
 
         emit VerificationKeyUpdated(msg.sender);
     }
@@ -275,9 +288,10 @@ contract GenomicZkVerifier is ReentrancyGuard, Ownable {
             revert InvalidZkProof();
         }
 
-        // 3. State update: Mark as claimed & record commitment
+        // 3. State update: Mark as claimed & record epoch- and trait-bound commitment
         hasClaimedBounty[bountyId][msg.sender] = true;
-        verifiedCommitments[variantCommitment][msg.sender] = true;
+        _verifiedByEpoch[vkEpoch][variantCommitment][msg.sender] = true;
+        _verifiedTraitByEpoch[vkEpoch][bounty.targetTraitId][variantCommitment][msg.sender] = true;
         bounty.currentClaims++;
         bounty.remainingFunding -= bounty.rewardPerClaim;
 
@@ -316,10 +330,28 @@ contract GenomicZkVerifier is ReentrancyGuard, Ownable {
     }
 
     /**
-     * @notice Check whether an address has proven possession of a genomic trait under a given commitment
+     * @notice Backward-compatible getter scoped to current verification key epoch
+     */
+    function verifiedCommitments(bytes32 variantCommitment, address donor) external view returns (bool) {
+        return _verifiedByEpoch[vkEpoch][variantCommitment][donor];
+    }
+
+    /**
+     * @notice Check whether an address has proven possession of a genomic trait under a given commitment in current epoch
      */
     function hasVerifiedVariant(bytes32 variantCommitment, address donor) external view returns (bool) {
-        return verifiedCommitments[variantCommitment][donor];
+        return _verifiedByEpoch[vkEpoch][variantCommitment][donor];
+    }
+
+    /**
+     * @notice Check whether an address has proven possession of a specific trait under a given commitment in current epoch
+     */
+    function hasVerifiedTraitVariant(
+        bytes32 targetTraitId,
+        bytes32 variantCommitment,
+        address donor
+    ) external view returns (bool) {
+        return _verifiedTraitByEpoch[vkEpoch][targetTraitId][variantCommitment][donor];
     }
 
     /**
@@ -383,6 +415,33 @@ contract GenomicZkVerifier is ReentrancyGuard, Ownable {
         uint256 rhsIm = addmod(x3Im, B2_IM, P_MOD);
 
         return (y2Re == rhsRe) && (y2Im == rhsIm);
+    }
+
+    /**
+     * @dev Checks prime-order r-torsion subgroup membership on BN254 G2 using pairing precompile 0x08
+     *      with non-zero complementary G1 points G1_gen and -G1_gen.
+     */
+    function _isInSubgroupG2(uint256[2][2] calldata b) internal view returns (bool) {
+        uint256[12] memory input;
+        input[0] = 1;
+        input[1] = 2;
+        input[2] = b[0][0];
+        input[3] = b[0][1];
+        input[4] = b[1][0];
+        input[5] = b[1][1];
+        input[6] = 1;
+        input[7] = P_MOD - 2;
+        input[8] = b[0][0];
+        input[9] = b[0][1];
+        input[10] = b[1][0];
+        input[11] = b[1][1];
+
+        uint256[1] memory out;
+        bool success;
+        assembly {
+            success := staticcall(160000, 0x08, input, 384, out, 32)
+        }
+        return success && (out[0] == 1);
     }
 
     /**

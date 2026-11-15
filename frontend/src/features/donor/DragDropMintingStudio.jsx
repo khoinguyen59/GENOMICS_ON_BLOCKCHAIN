@@ -51,6 +51,7 @@ export default function DragDropMintingStudio({ onPublishSuccess }) {
   );
   const [priceGeno, setPriceGeno] = useState(100);
   const [durationDays, setDurationDays] = useState(45);
+  const [blindTagSalt, setBlindTagSalt] = useState("GENOCHAIN_COHORT_SALT_V1");
   const [isPublishing, setIsPublishing] = useState(false);
   const [publishStep, setPublishStep] = useState(0);
 
@@ -285,6 +286,7 @@ export default function DragDropMintingStudio({ onPublishSuccess }) {
         ancestryRegion,
         priceGeno,
         durationDays,
+        blindTagSalt,
         onStepProgress: setPublishStep,
         onChunkProgress: (fraction, processed, total) => {
           setChunkProgress({
@@ -555,56 +557,83 @@ export default function DragDropMintingStudio({ onPublishSuccess }) {
               </div>
             </div>
 
+            <div className="form-field" style={{ marginTop: "10px" }}>
+              <label htmlFor="input-blind-salt" className="field-label" style={{ fontSize: "13px", fontWeight: 700, color: "var(--text-primary)" }}>
+                {t("blindSaltLabel")}
+              </label>
+              <input
+                id="input-blind-salt"
+                type="text"
+                className="field-input"
+                placeholder="GENOCHAIN_COHORT_SALT_V1"
+                aria-label={t("blindSaltLabel")}
+                value={blindTagSalt}
+                onChange={(e) => setBlindTagSalt(e.target.value)}
+              />
+            </div>
+
             <div
               style={{
                 margin: "14px 0 16px 0",
                 padding: "10px 14px",
-                background: isChunkedMode ? "rgba(56, 189, 248, 0.08)" : "rgba(255, 255, 255, 0.03)",
-                border: `1px solid ${isChunkedMode ? "rgba(56, 189, 248, 0.35)" : "var(--border-subtle)"}`,
+                background: isChunkedMode ? "rgba(56, 189, 248, 0.08)" : "var(--bg-surface-elevated)",
+                border: `1px solid ${isChunkedMode ? "var(--accent-cyan)" : "var(--border-subtle)"}`,
                 borderRadius: "var(--radius-sm)",
                 display: "flex",
                 alignItems: "center",
-                justifyContent: "space-between"
+                justifyContent: "space-between",
+                gap: "10px",
+                flexWrap: "wrap"
               }}
             >
               <label
+                htmlFor="checkbox-crypt4gh"
                 style={{
                   display: "flex",
                   alignItems: "center",
                   gap: "8px",
                   cursor: uploadedFileSize > MAX_PREVIEW_SIZE ? "default" : "pointer",
-                  fontSize: "12px",
-                  color: isChunkedMode ? "#38bdf8" : "var(--text-secondary)",
+                  fontSize: "12.5px",
+                  color: isChunkedMode ? "var(--accent-cyan)" : "var(--text-secondary)",
                   fontWeight: 600
                 }}
               >
                 <input
                   type="checkbox"
                   id="checkbox-crypt4gh"
-                  aria-label="GA4GH Crypt4GH Streaming Pipeline (64KB Slices)"
+                  aria-label={t("providerCrypt4ghLabel")}
                   checked={isChunkedMode}
                   disabled={uploadedFileSize > MAX_PREVIEW_SIZE}
                   onChange={(e) => setIsChunkedMode(e.target.checked)}
-                  style={{ accentColor: "#38bdf8", cursor: "pointer" }}
+                  style={{ accentColor: "var(--accent-cyan)", cursor: "pointer" }}
                 />
-                <span>GA4GH Crypt4GH Streaming Pipeline (64KB Slices)</span>
+                <span>{t("providerCrypt4ghLabel")}</span>
               </label>
               <span
                 style={{
-                  fontSize: "10px",
+                  fontSize: "10.5px",
                   fontFamily: "var(--font-mono)",
-                  padding: "2px 6px",
-                  borderRadius: "4px",
-                  background: isChunkedMode ? "rgba(56, 189, 248, 0.2)" : "rgba(255, 255, 255, 0.05)",
-                  color: isChunkedMode ? "#38bdf8" : "var(--text-muted)",
-                  fontWeight: 700
+                  padding: "3px 8px",
+                  borderRadius: "6px",
+                  background: isChunkedMode ? "rgba(56, 189, 248, 0.16)" : "var(--bg-input)",
+                  border: "1px solid var(--border-subtle)",
+                  color: isChunkedMode ? "var(--accent-cyan)" : "var(--text-muted)",
+                  fontWeight: 700,
+                  whiteSpace: "nowrap"
                 }}
               >
-                {uploadedFileSize > MAX_PREVIEW_SIZE ? "GUARD LOCKED (>10MB)" : isChunkedMode ? "ACTIVE (64KB CHUNKS)" : "STANDARD (MONOLITHIC)"}
+                {uploadedFileSize > MAX_PREVIEW_SIZE ? t("providerModeLocked") : isChunkedMode ? t("providerModeActive") : t("providerModeStandard")}
               </span>
             </div>
 
-            <button type="submit" className="mint-action-btn" disabled={isPublishing} style={{ height: "46px", fontSize: "15px", fontWeight: 800 }}>
+            <button
+              id="btn-mint-submit"
+              type="submit"
+              className="mint-action-btn"
+              title={t("btnSignAndMint")}
+              disabled={isPublishing}
+              style={{ height: "46px", fontSize: "15px", fontWeight: 800 }}
+            >
               {isPublishing ? (
                 <>
                   <RefreshSpinIcon size={16} className="spin" />

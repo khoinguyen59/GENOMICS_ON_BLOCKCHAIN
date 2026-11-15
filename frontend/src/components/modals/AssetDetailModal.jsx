@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { ethers } from "ethers";
 import { useWeb3 } from "../../context/Web3Context";
 import { useDatasets } from "../../context/DatasetContext";
 import { useLanguage } from "../../context/LanguageContext";
@@ -16,7 +17,8 @@ import {
   LayersIcon,
   CheckCircleIcon,
   LockOpenIcon,
-  LockClosedIcon
+  LockClosedIcon,
+  RefreshSpinIcon
 } from "../icons/GenoIcons";
 import GenomicVisualCover from "../common/GenomicVisualCover";
 import contractAddresses from "../../contracts/contractAddresses.json";
@@ -45,26 +47,54 @@ export default function AssetDetailModal({ onPurchase }) {
         active = false;
       };
     }
+    const canonicalCommitment =
+      selectedAssetModal.variantCommitment ||
+      (selectedAssetModal.geneSymbol && selectedAssetModal.owner
+        ? ethers.keccak256(
+            ethers.toUtf8Bytes(
+              `${selectedAssetModal.geneSymbol}:${selectedAssetModal.rsId || selectedAssetModal.clinvarId || "TRAIT"}:${selectedAssetModal.owner}`
+            )
+          )
+        : null);
+    const canonicalTraitId = selectedAssetModal.geneSymbol
+      ? ethers.keccak256(
+          ethers.toUtf8Bytes(
+            `${selectedAssetModal.geneSymbol}_${selectedAssetModal.rsId || "TRAIT"}`
+          )
+        )
+      : null;
     verifyDatasetTraitZkStatus({
       dataId: selectedAssetModal.dataId,
       contracts,
-      variantCommitment: selectedAssetModal.rawDataHash,
+      variantCommitment: canonicalCommitment,
+      targetTraitId: canonicalTraitId,
+      owner: selectedAssetModal.owner,
     }).then((res) => {
       if (active) setZkStatus(res);
     });
     return () => {
       active = false;
     };
-  }, [selectedAssetModal?.dataId, selectedAssetModal?.rawDataHash, contracts]);
+  }, [
+    selectedAssetModal?.dataId,
+    selectedAssetModal?.variantCommitment,
+    selectedAssetModal?.geneSymbol,
+    selectedAssetModal?.rsId,
+    selectedAssetModal?.clinvarId,
+    selectedAssetModal?.owner,
+    contracts,
+  ]);
 
   if (!selectedAssetModal) return null;
 
   const isOwner = Boolean(
     account && selectedAssetModal.owner && account.toLowerCase() === selectedAssetModal.owner.toLowerCase()
   );
-  const isPurchased = Boolean(
-    purchasedData && purchasedData.some((p) => p.dataId === selectedAssetModal.dataId)
-  );
+  const purchasedRecord = purchasedData?.find((p) => p.dataId === selectedAssetModal.dataId);
+  const isPurchased = Boolean(purchasedRecord);
+  const isEscrowPending = Boolean(purchasedRecord?.isEscrowPending || purchasedRecord?.escrowInfo?.isPending);
+  const displayTokenId = selectedAssetModal.tokenId ?? selectedAssetModal.dataId;
+  const royaltyPct = Number((((selectedAssetModal.royaltyBps ?? 1000)) / 100).toFixed(2));
 
   const displayTitle = getLocalizedTitle ? getLocalizedTitle(selectedAssetModal, lang) : selectedAssetModal.disease;
   const displayCategory = getLocalizedSignificance
@@ -84,7 +114,7 @@ export default function AssetDetailModal({ onPurchase }) {
     {
       type: t("propertyGene") || "TARGET GENE",
       value: selectedAssetModal.geneSymbol?.split(" ")?.[0] || selectedAssetModal.gene,
-      rarity: "9.1% (Gene Frequency)"
+      rarity: t("traitSubGeneFreq")
     },
     {
       type: t("propertyChrom") || "CHROMOSOME",
@@ -102,24 +132,24 @@ export default function AssetDetailModal({ onPurchase }) {
       rarity: t("rarityCommon") || "Verified Trait"
     },
     {
-      type: "CONSEQUENCE",
+      type: t("propertyConsequence") || "CONSEQUENCE",
       value: getLocalizedConsequence ? getLocalizedConsequence(selectedAssetModal.consequence, lang) : (selectedAssetModal.consequence || "missense_variant"),
-      rarity: "Molecular Impact"
+      rarity: t("traitSubImpact")
     },
     {
       type: t("propertyZygosity") || "ZYGOSITY",
       value: getLocalizedZygosity ? getLocalizedZygosity(selectedAssetModal.zygosity, lang) : (selectedAssetModal.zygosity || "0/1 (Het)"),
-      rarity: "Genotype Call"
+      rarity: t("traitSubCall")
     },
     {
       type: t("propertyAncestry") || "COHORT",
       value: selectedAssetModal.ancestry || selectedAssetModal.region || "Vietnamese Kinh (KHV)",
-      rarity: "1000 Genomes Project"
+      rarity: t("traitSubProject")
     },
     {
       type: t("propertyFormat") || "FORMAT",
       value: selectedAssetModal.format || "VCF v4.2",
-      rarity: "GA4GH Crypt4GH"
+      rarity: t("traitSubContainer")
     }
   ];
 
@@ -141,7 +171,7 @@ export default function AssetDetailModal({ onPurchase }) {
                 {selectedAssetModal.gene}
               </span>
               <span style={{ fontSize: "11px", color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
-                Token #{selectedAssetModal.dataId}
+                Token #{displayTokenId}
               </span>
             </div>
           </div>
@@ -161,16 +191,7 @@ export default function AssetDetailModal({ onPurchase }) {
           <div className="opensea-modal-left-col">
             {/* Visual Cover Container */}
             <div className="opensea-modal-artwork-box">
-              <GenomicVisualCover dataset={selectedAssetModal} height={250} showAvatar={true} />
-              <div className="opensea-artwork-badge-row">
-                <span className="opensea-overlay-chip">
-                  <VerifiedBadgeIcon size={12} color="var(--accent-cyan)" />
-                  <span>{selectedAssetModal.format || "VCF v4.2"}</span>
-                </span>
-                <span className="opensea-overlay-chip">
-                  <span>{selectedAssetModal.assembly || "GRCh38"}</span>
-                </span>
-              </div>
+              <GenomicVisualCover dataset={selectedAssetModal} height={215} showAvatar={false} />
             </div>
 
             {/* Smart Contract Specifications (OpenSea Details Accordion) */}
@@ -208,7 +229,7 @@ export default function AssetDetailModal({ onPurchase }) {
 
                 <div className="opensea-spec-row">
                   <span className="opensea-spec-key">{t("tokenIdLabel") || "Token ID"}</span>
-                  <span className="opensea-spec-val mono-hash">#{selectedAssetModal.dataId}</span>
+                  <span className="opensea-spec-val mono-hash">#{displayTokenId}</span>
                 </div>
 
                 <div className="opensea-spec-row">
@@ -219,7 +240,7 @@ export default function AssetDetailModal({ onPurchase }) {
                 <div className="opensea-spec-row">
                   <span className="opensea-spec-key">{t("creatorRoyaltyLabel") || "Creator Earnings"}</span>
                   <span className="opensea-spec-val" style={{ color: "var(--accent-amber)", fontWeight: 700 }}>
-                    {t("creatorRoyaltyVal") || "10% (EIP-2981 Enforced)"}
+                    {`${royaltyPct}% (${t("eip2981EnforcedSuffix")})`}
                   </span>
                 </div>
 
@@ -326,7 +347,7 @@ export default function AssetDetailModal({ onPurchase }) {
                     <span className="buybox-price-num">{selectedAssetModal.price}</span>
                     <span className="buybox-price-symbol">$GENO</span>
                     <span className="buybox-royalty-tag">
-                      {t("royaltyEip2981") || "10% EIP-2981 Royalty"}
+                      {`${royaltyPct}% ${t("eip2981RoyaltyTag")}`}
                     </span>
                   </div>
                 </div>
@@ -398,15 +419,33 @@ export default function AssetDetailModal({ onPurchase }) {
                   </button>
                 ) : isPurchased ? (
                   <button
-                    className="btn-terminal btn-terminal-success btn-opensea-large"
+                    className={`btn-terminal ${isEscrowPending ? "" : "btn-terminal-success"} btn-opensea-large`}
+                    style={
+                      isEscrowPending
+                        ? {
+                            color: "#f59e0b",
+                            borderColor: "rgba(245, 158, 11, 0.45)",
+                            background: "rgba(245, 158, 11, 0.14)"
+                          }
+                        : undefined
+                    }
                     type="button"
                     onClick={() => {
                       setSelectedAssetModal(null);
                       setResearcherTab("licensed");
                     }}
                   >
-                    <VerifiedBadgeIcon size={16} color="var(--accent-emerald)" />
-                    <span>{t("btnPurchased")} • {t("viewLicensedTab") || "Xem & Giải Mã"}</span>
+                    {isEscrowPending ? (
+                      <>
+                        <RefreshSpinIcon size={14} />
+                        <span>{t("escrowPendingDelivery")} • {t("viewLicensedTab")}</span>
+                      </>
+                    ) : (
+                      <>
+                        <VerifiedBadgeIcon size={16} color="var(--accent-emerald)" />
+                        <span>{t("btnPurchased")} • {t("viewLicensedTab") || "Xem & Giải Mã"}</span>
+                      </>
+                    )}
                   </button>
                 ) : (
                   <button
@@ -460,11 +499,11 @@ export default function AssetDetailModal({ onPurchase }) {
               >
                 <span style={{ color: "var(--text-muted)" }}>
                   {zkStatus.linked
-                    ? `BN254 ZK Verifier: ${zkStatus.verifierAddress.slice(0, 8)}... (${zkStatus.bountyCount} bounties)`
-                    : "BN254 ZK Verifier: Not Linked"}
+                    ? `${t("zkVerifierLinkedLabel")}: ${zkStatus.verifierAddress.slice(0, 8)}... (${zkStatus.bountyCount} ${t("zkBountiesUnit")})`
+                    : t("zkVerifierNotLinked")}
                 </span>
                 <span style={{ color: zkStatus.verified ? "var(--accent-emerald)" : "var(--accent-cyan)", fontWeight: 700 }}>
-                  {zkStatus.verified ? "✓ ZK TRAIT VERIFIED" : "ON-CHAIN ANCHORED"}
+                  {zkStatus.verified ? t("zkTraitVerifiedBadge") : t("zkAnchoredBadge")}
                 </span>
               </div>
             </div>

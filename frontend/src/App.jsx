@@ -11,15 +11,19 @@ import AssetDetailModal from "./components/modals/AssetDetailModal";
 import IpfsSettingsModal from "./components/modals/IpfsSettingsModal";
 import DonorPortal from "./features/donor/DonorPortal";
 import ResearcherMarketplace from "./features/researcher/ResearcherMarketplace";
+import AdminPortal from "./features/admin/AdminPortal";
 import {
   publishGenomicDataset,
   updateDatasetStatus,
   updateDatasetPrice,
   grantDirectDatasetAccess,
   dispatchCapsuleToBuyer,
+  setDatasetCapsuleWorker,
+  updateDatasetBlindTags,
   purchaseDatasetAccess,
   purchaseDatasetWithEscrow,
   claimDatasetEscrowRefund,
+  recordDatasetStudyReuse,
   decryptDatasetPayload,
   decryptSummaryReport,
   fetchPhenopacketMetadata
@@ -129,6 +133,46 @@ function AppContent() {
     }
   };
 
+  // Authorize Capsule Worker & Update Blinded Search Tags (Data Owner)
+  const handleAuthorizeWorker = async (dataId, workerAddress, authorized = true) => {
+    try {
+      showToast(`Broadcasting authorizeCapsuleWorker(${dataId}, ${workerAddress.slice(0, 8)}...)...`, "info");
+      await setDatasetCapsuleWorker({ dataId, workerAddress, authorized, signer });
+      showToast(`Capsule worker ${authorized ? "authorized" : "revoked"} on-chain for Dataset #${dataId}!`);
+      await fetchOnChainDatasets(account);
+      await refreshBalance(account);
+    } catch (err) {
+      showToast("Worker update failed: " + (err.shortMessage || err.message), "error");
+    }
+  };
+
+  const handleUpdateBlindTags = async (dataId, blindTags) => {
+    try {
+      showToast(`Anchoring ${blindTags.length} blinded trait tags on-chain for Dataset #${dataId}...`, "info");
+      await updateDatasetBlindTags({ dataId, blindTags, signer });
+      showToast(`Updated ${blindTags.length} blinded trait tags for Dataset #${dataId}!`);
+      await fetchOnChainDatasets(account);
+      await refreshBalance(account);
+    } catch (err) {
+      showToast("Blind tag update failed: " + (err.shortMessage || err.message), "error");
+    }
+  };
+
+  // Record Secondary Study Reuse (5% Fee + EIP-2981 Royalty Split)
+  const handleRecordStudyReuse = async (dataId, studyTitleOrId) => {
+    try {
+      showToast(`1/2: Approving 5% Study Reuse Fee for Dataset #${dataId}...`, "info");
+      const res = await recordDatasetStudyReuse({ dataId, studyTitleOrId, account, signer });
+      showToast(`Study Reuse recorded on-chain! Paid ${res.feeGeno} $GENO (5% Royalty Split).`);
+      await fetchOnChainDatasets(account);
+      await refreshBalance(account);
+      return res;
+    } catch (err) {
+      showToast("Study reuse failed: " + (err.shortMessage || err.message), "error");
+      throw err;
+    }
+  };
+
   // Escrow Purchase Access (Researcher)
   const handlePurchaseAccess = async (dataset, options = {}) => {
     try {
@@ -207,7 +251,10 @@ function AppContent() {
       if (ds.metadataCid) {
         showToast("3/4: Fetching GA4GH Phenopacket v2 JSON metadata...", "info");
         try {
-          phenopacketJson = await fetchPhenopacketMetadata({ metadataCid: ds.metadataCid });
+          phenopacketJson = await fetchPhenopacketMetadata({
+            metadataCid: ds.metadataCid,
+            expectedMetadataHash: ds.metadataHash
+          });
         } catch (e) {
           console.warn("Phenopacket metadata fetch notice:", e);
         }
@@ -274,13 +321,17 @@ function AppContent() {
 
       {/* Main Feature Layout */}
       <main className="terminal-main os2-main-content">
-        {userRole === "donor" ? (
+        {userRole === "admin" ? (
+          <AdminPortal />
+        ) : userRole === "donor" ? (
           <DonorPortal
             onPublishDataset={handlePublishDataset}
             onUpdateStatus={handleUpdateStatus}
             onUpdatePrice={handleUpdatePrice}
             onGrantDirectAccess={handleGrantDirectAccess}
             onDispatchCapsule={handleDispatchCapsule}
+            onAuthorizeWorker={handleAuthorizeWorker}
+            onUpdateBlindTags={handleUpdateBlindTags}
           />
         ) : (
           <ResearcherMarketplace
@@ -289,6 +340,7 @@ function AppContent() {
             onDownload={handleDownloadFile}
             onDownloadPdf={handleDownloadPdf}
             onClaimRefund={handleClaimEscrowRefund}
+            onRecordStudyReuse={handleRecordStudyReuse}
           />
         )}
       </main>

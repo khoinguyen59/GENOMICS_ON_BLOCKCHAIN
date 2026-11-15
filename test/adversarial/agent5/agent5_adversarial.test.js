@@ -263,10 +263,11 @@ describe("AGENT5 :: Independent Adversarial Suite", function () {
 
     it("C3 [DEFENCE] Revoked is terminal and blocks every reader/writer", async function () {
       await registry.connect(buyer1)["grantAccess(uint256)"](dataId).then((t) => t.wait());
-      await registry.connect(owner).storeTransformedCapsule(dataId, buyer1.address, "wrapped-session-key")
+      const wrappedCapsule = JSON.stringify({ version: "GENO-ASYM-RSA-OAEP-v2", tag: "wrapped-session-key", keyCipher: "ab".repeat(256) });
+      await registry.connect(owner).storeTransformedCapsule(dataId, buyer1.address, wrappedCapsule)
         .then((t) => t.wait());
       expect(await registry.connect(buyer1).getTransformedCapsule.staticCall(dataId, { from: buyer1.address }))
-        .to.equal("wrapped-session-key");
+        .to.equal(wrappedCapsule);
 
       await (await registry.connect(owner).updateDataStatus(dataId, 2)).wait(); // Revoked
       await expect(registry.connect(buyer1).getTransformedCapsule.staticCall(dataId, { from: buyer1.address }))
@@ -318,12 +319,13 @@ describe("AGENT5 :: Independent Adversarial Suite", function () {
 
     it("C6 [PoC DEFECT DEF5-12] emitTransformedCapsule settles escrow but writes NOTHING to _buyerCapsules", async function () {
       await registry.connect(buyer1)["grantAccessWithEscrow(uint256,uint256)"](dataId, 3600).then((t) => t.wait());
-      await registry.connect(owner).emitTransformedCapsule(dataId, buyer1.address, "capsule-event-only")
+      const eventCapsule = JSON.stringify({ version: "GENO-ASYM-RSA-OAEP-v2", tag: "capsule-event-only", keyCipher: "ab".repeat(256) });
+      await registry.connect(owner).emitTransformedCapsule(dataId, buyer1.address, eventCapsule)
         .then((t) => t.wait());
       // Funds already moved to the seller:
       expect(await token.balanceOf(registry.target), "escrow must still hold funds if nothing was stored").to.equal(0n);
       const stored = await registry.connect(buyer1).getTransformedCapsule.staticCall(dataId, { from: buyer1.address });
-      expect(stored, "escrow released while the on-chain capsule is empty string").to.equal("capsule-event-only");
+      expect(stored, "escrow released while the on-chain capsule is empty string").to.equal(eventCapsule);
       // buyerCapsules must be identical to getTransformedCapsule for the owner of the grant
       expect(await registry.buyerCapsules(dataId, buyer1.address)).to.equal(stored);
     });
@@ -515,7 +517,7 @@ describe("AGENT5 :: Independent Adversarial Suite", function () {
 
     it("E6 [DEFENCE] no double settlement: replaying release/refund after delivery is refused", async function () {
       await registry.connect(buyer1)["grantAccessWithEscrow(uint256,uint256)"](dataId, 3600).then((t) => t.wait());
-      await registry.connect(owner).storeTransformedCapsule(dataId, buyer1.address, "cap").then((t) => t.wait());
+      await registry.connect(owner).storeTransformedCapsule(dataId, buyer1.address, JSON.stringify({ version: "GENO-ASYM-RSA-OAEP-v2", tag: "cap", keyCipher: "ab".repeat(256) })).then((t) => t.wait());
       const sellerAfter = await token.balanceOf(owner.address);
       await expect(registry.connect(stranger).releaseEscrow(dataId, buyer1.address))
         .to.be.revertedWithCustomError(registry, "EscrowNotActive");

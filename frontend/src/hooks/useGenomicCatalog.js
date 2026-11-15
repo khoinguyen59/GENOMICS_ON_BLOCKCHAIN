@@ -64,6 +64,14 @@ export function useGenomicCatalog({ account, getContracts }) {
     try {
       const contracts = await getContracts();
       if (!contracts) return;
+      const activeProvider = contracts.registry.runner?.provider || contracts.registry.runner;
+      let chainNowSec = Math.floor(Date.now() / 1000);
+      try {
+        const latestBlock = await activeProvider?.getBlock?.("latest");
+        if (latestBlock?.timestamp !== undefined && latestBlock?.timestamp !== null) {
+          chainNowSec = Number(latestBlock.timestamp);
+        }
+      } catch {}
       let items;
       try {
         items = await contracts.registry.getAllDataItems();
@@ -94,14 +102,35 @@ export function useGenomicCatalog({ account, getContracts }) {
         const p = seedMatch ? (PRESET_BY_DATA_ID[dId] || null) : null;
         let originalCreator = dynamicOwner;
         let royaltyBps = 1000;
+        let onChainSummaryHash = null;
+        let onChainMetadataHash = null;
+        let reuseCount = 0;
+        let blindTagCount = 0;
+        let reuseFeeGeno = 0;
         try {
-          const [nftRec, royaltyInfoRes] = await Promise.all([
-            contracts.nft.getGenomicRecord(tId),
-            contracts.nft.royaltyInfo(tId, 10000n)
+          const [nftRec, royaltyInfoRes, artifactHashes, rawReuseCnt, rawTagCnt, rawReuseFee] = await Promise.all([
+            contracts.nft.getGenomicRecord(tId).catch(() => null),
+            contracts.nft.royaltyInfo(tId, 10000n).catch(() => null),
+            contracts.registry.getArtifactHashes(dId).catch(() => null),
+            contracts.registry.datasetReuseCount(dId).catch(() => 0n),
+            contracts.registry.datasetBlindTagCount(dId).catch(() => 0n),
+            contracts.registry.quoteReuseFee(dId).catch(() => 0n)
           ]);
           if (nftRec?.originalCreator) originalCreator = nftRec.originalCreator;
           if (royaltyInfoRes && royaltyInfoRes[1] !== undefined) royaltyBps = Number(royaltyInfoRes[1]);
+          if (artifactHashes) {
+            if (artifactHashes[1] && artifactHashes[1] !== ethers.ZeroHash) onChainSummaryHash = artifactHashes[1];
+            if (artifactHashes[2] && artifactHashes[2] !== ethers.ZeroHash) onChainMetadataHash = artifactHashes[2];
+          }
+          reuseCount = Number(rawReuseCnt || 0n);
+          blindTagCount = Number(rawTagCnt || 0n);
+          reuseFeeGeno = Number(ethers.formatUnits(rawReuseFee || 0n, 18));
         } catch {}
+
+        const resolvedSummaryHash = onChainSummaryHash || extractedSummaryHash;
+        const resolvedMetadataHash = onChainMetadataHash || seedMatch?.metadataHash || null;
+        const artifactHashCount = [raw.rawDataHash, resolvedSummaryHash, resolvedMetadataHash]
+          .filter((h) => h && h !== ethers.ZeroHash).length;
 
         const geneSym = seedMatch?.geneSymbol === "KHV_1000G" ? "KHV-WGS" : seedMatch?.geneSymbol || p?.geneSymbol?.split(" ")?.[0] || phenoGene || `GENO_${dId}`;
         const chrom = seedMatch?.chromosome || ipfsMeta?.interpretations?.[0]?.diagnosis?.genomicInterpretations?.[0]?.variantInterpretation?.variationDescriptor?.vcfRecord?.chrom || (p ? (dId === 1 ? "chr12" : dId === 2 ? "chr11" : dId === 3 ? "chr12" : dId === 4 ? "chr2" : dId === 5 ? "chr15" : dId === 6 ? "chr16" : dId === 7 ? "chr20" : dId === 8 ? "chr15" : dId === 9 ? "chr7" : "chr2") : `chr${((dId % 22) + 1)}`);
@@ -132,7 +161,9 @@ export function useGenomicCatalog({ account, getContracts }) {
           price: priceFmt, durationDays: durationDay, accessCount,
           accumulatedRoyalty: (priceFmt * accessCount * royaltyBps) / 10000, royaltyBps, status: statusStr, statusNum,
           rawCid: raw.rawCiphertextCid, summaryCid: raw.summaryCiphertextCid, metadataCid: raw.metadataCid,
-          rawDataHash: raw.rawDataHash, summaryDataHash: extractedSummaryHash,
+          rawDataHash: raw.rawDataHash, summaryDataHash: resolvedSummaryHash,
+          metadataHash: resolvedMetadataHash, artifactHashCount,
+          reuseCount, blindTagCount, reuseFeeGeno,
           registeredAt: new Date(Number(raw.registeredAt) * 1000).toLocaleDateString()
         };
       }));
@@ -151,7 +182,7 @@ export function useGenomicCatalog({ account, getContracts }) {
               const dep = await contracts.registry.escrowDeposits(d.dataId, currentAccount);
               if (dep && dep.amount > 0n) {
                 const depTime = Number(dep.depositTime), disputeWin = Number(dep.disputeWindow), deadline = depTime + disputeWin;
-                const canRefund = !dep.released && !dep.refunded && (d.statusNum === 1 || d.statusNum === 2 || Math.floor(Date.now() / 1000) >= deadline);
+                const canRefund = !dep.released && !dep.refunded && (d.statusNum === 1 || d.statusNum === 2 || chainNowSec >= deadline);
                 escrowInfo = {
                   amount: Number(ethers.formatUnits(dep.amount, 18)), depositTime: depTime, disputeWindow: disputeWin,
                   deadline, released: dep.released, refunded: dep.refunded, isPending: !dep.released && !dep.refunded, canRefund
@@ -171,7 +202,7 @@ export function useGenomicCatalog({ account, getContracts }) {
             if (isEscrowPending) {
               expiryLabel = escrowInfo.canRefund ? "Escrow Expired (Refund Ready)" : "Escrow Pending Delivery";
             } else if (!isOwner && grantData?.expiresAt) {
-              const remDays = Math.max(0, Math.ceil((Number(grantData.expiresAt) - Math.floor(Date.now() / 1000)) / 86400));
+              const remDays = Math.max(0, Math.ceil((Number(grantData.expiresAt) - chainNowSec) / 86400));
               expiryLabel = remDays > 0 ? `${remDays} days left` : "Expired";
             } else if (!isOwner) {
               expiryLabel = `${d.durationDays} days`;

@@ -12,6 +12,8 @@
 html {
   color-scheme: light dark;
   scroll-behavior: smooth;
+  overflow-x: hidden;
+  max-width: 100%;
 }
 
 body {
@@ -24,6 +26,8 @@ body {
   background-attachment: fixed;
   color: var(--text-primary);
   min-height: 100vh;
+  max-width: 100%;
+  overflow-x: hidden;
   font-size: 15.5px;
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;

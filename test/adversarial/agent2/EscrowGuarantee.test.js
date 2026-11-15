@@ -74,18 +74,21 @@ describe("AGENT2 :: Escrow guarantee: capsule validity, counterparty binding, re
     const delivered = await capture(() =>
       registry.connect(seller).storeTransformedCapsule(1n, buyer.address, garbage)
     );
+    expect(delivered.ok, "malformed capsule must be rejected").to.equal(false);
 
     const custody = await token.balanceOf(registry.target);
     const sellerGain = (await token.balanceOf(seller.address)) - preSeller;
     const dep = await registry.escrowDeposits(1n, buyer.address);
+    expect(dep.released).to.equal(false);
     const refund = await capture(() => registry.connect(buyer).claimEscrowRefund(1n));
-    const readable = await registry.connect(buyer).getTransformedCapsule.staticCall(1n);
+    const readable = await capture(() => registry.connect(buyer).getTransformedCapsule.staticCall(1n));
+    expect(readable.ok).to.equal(false);
 
     expect(
       custody,
       `garbage-capsule delivery drained the escrow: delivery ok=${delivered.ok}, ` +
       `custody=${custody}, sellerGain=${sellerGain}, capsuleDelivered=${dep.capsuleDelivered}, ` +
-      `released=${dep.released}, buyerRefund="${refund.error}", buyerIsServed="${readable}"`
+      `released=${dep.released}, buyerRefund="${refund.error}", buyerIsServed="${readable.error}"`
     ).to.equal(price);
   });
 

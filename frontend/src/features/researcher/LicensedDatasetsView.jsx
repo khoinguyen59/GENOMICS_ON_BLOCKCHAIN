@@ -6,16 +6,31 @@ import {
   InMemoryDecryptIcon,
   VerifiedBadgeIcon,
   GenoLogoIcon,
-  SealedCipherIcon
+  SealedCipherIcon,
+  RefreshSpinIcon,
+  AlertTriangleIcon,
+  LockClosedIcon
 } from "../../components/icons/GenoIcons";
 
 const sanitizeFileName = (name) => (!name ? "Genomic_Data" : name.replace(/[/\\?%*:|"<>]/g, "_").replace(/\s+/g, "_"));
 
-export default function LicensedDatasetsView({ onDecrypt, onDownload, onDownloadPdf, onClaimRefund }) {
+export default function LicensedDatasetsView({ onDecrypt, onDownload, onDownloadPdf, onClaimRefund, onRecordStudyReuse }) {
   const { setResearcherTab } = useWeb3();
   const { purchasedData, getLocalizedTitle } = useDatasets();
   const { t, language } = useLanguage();
   const [activePreviewTab, setActivePreviewTab] = useState({});
+  const [reuseInputs, setReuseInputs] = useState({});
+  const [busyReuseId, setBusyReuseId] = useState(null);
+
+  const handleTriggerReuse = async (dataId) => {
+    setBusyReuseId(dataId);
+    try {
+      const label = reuseInputs[dataId]?.trim() || `GWAS_STUDY_${dataId}_${Date.now()}`;
+      await onRecordStudyReuse?.(dataId, label);
+    } finally {
+      setBusyReuseId(null);
+    }
+  };
 
   const setTab = (dataId, tab) => {
     setActivePreviewTab((prev) => ({ ...prev, [dataId]: tab }));
@@ -88,10 +103,25 @@ export default function LicensedDatasetsView({ onDecrypt, onDownload, onDownload
                     >
                       {t("cohortPrefix")}{item.dataId} • {item.format || "VCF v4.2"} • {item.ancestry || item.region || "Global"}
                     </span>
-                    <span className="vault-status-active">
-                      <VerifiedBadgeIcon size={12} color="#10b981" />
-                      <span>{t("btnPurchased")}</span>
-                    </span>
+                    {item.isEscrowPending || item.escrowInfo?.isPending ? (
+                      <span
+                        className="vault-status-active"
+                        style={{
+                          color: "var(--accent-amber)",
+                          borderColor: "rgba(245, 158, 11, 0.35)",
+                          background: "rgba(245, 158, 11, 0.12)",
+                          whiteSpace: "nowrap"
+                        }}
+                      >
+                        <RefreshSpinIcon size={12} />
+                        <span>{t("escrowPendingDelivery")}</span>
+                      </span>
+                    ) : (
+                      <span className="vault-status-active" style={{ whiteSpace: "nowrap" }}>
+                        <VerifiedBadgeIcon size={12} color="var(--accent-emerald)" />
+                        <span>{t("btnPurchased")}</span>
+                      </span>
+                    )}
                   </div>
 
                   <div style={{ marginTop: "12px" }}>
@@ -102,15 +132,19 @@ export default function LicensedDatasetsView({ onDecrypt, onDownload, onDownload
                       style={{
                         fontFamily: "var(--font-mono)",
                         fontSize: "13px",
-                        color: "#38bdf8",
+                        color: "var(--accent-cyan)",
                         marginTop: "3px"
                       }}
                     >
-                      Target: {item.gene}
+                      {t("licensedTargetLabel")} {item.gene}
                     </div>
                     <div style={{ fontSize: "12px", color: "var(--text-muted)", marginTop: "4px" }}>
                       {t("licenseDurationLabel")} {item.durationDays} {t("durationDays")} • {t("ipfsCidLabel")}{" "}
                       {item.rawCid ? item.rawCid.substring(0, 10) : "N/A"}...
+                    </div>
+                    <div style={{ fontSize: "11px", fontFamily: "var(--font-mono)", color: "var(--accent-emerald-text)", marginTop: "4px" }}>
+                      {item.artifactHashCount || 1}/3 {t("licensedArtifactHashes")} • {t("licensedReusesLabel")} {item.reuseCount || 0} • 5% {language === "vi" ? "Phí" : "Fee"}:{" "}
+                      {item.reuseFeeGeno ?? Number(((item.price || 0) * 0.05).toFixed(4))} $GENO
                     </div>
                   </div>
                 </div>
@@ -129,8 +163,18 @@ export default function LicensedDatasetsView({ onDecrypt, onDownload, onDownload
                     }}
                   >
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                      <span style={{ color: item.escrowInfo.canRefund ? "#ef4444" : "#10b981", fontWeight: 700 }}>
-                        {item.escrowInfo.canRefund ? "⚠ " + t("escrowRefundEligible") : "🔒 " + t("escrowStatusActive")}
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: "5px", color: item.escrowInfo.canRefund ? "var(--accent-rose)" : "var(--accent-emerald-text)", fontWeight: 700 }}>
+                        {item.escrowInfo.canRefund ? (
+                          <>
+                            <AlertTriangleIcon size={12} color="var(--accent-rose)" />
+                            <span>{t("escrowRefundEligible")}</span>
+                          </>
+                        ) : (
+                          <>
+                            <LockClosedIcon size={12} color="var(--accent-emerald-text)" />
+                            <span>{t("escrowStatusActive")}</span>
+                          </>
+                        )}
                       </span>
                       <span style={{ color: "var(--text-muted)" }}>{item.escrowInfo.amount} GENO</span>
                     </div>
@@ -168,8 +212,8 @@ export default function LicensedDatasetsView({ onDecrypt, onDownload, onDownload
                           textAlign: "center",
                           borderRadius: "var(--radius-xs)",
                           background: "rgba(245, 158, 11, 0.12)",
-                          border: "1px dashed rgba(245, 158, 11, 0.4)",
-                          color: "#fbbf24",
+                          border: "1px dashed rgba(245, 158, 11, 0.45)",
+                          color: "var(--accent-amber)",
                           fontSize: "12px",
                           fontWeight: 600,
                           display: "flex",
@@ -178,16 +222,18 @@ export default function LicensedDatasetsView({ onDecrypt, onDownload, onDownload
                           gap: "6px"
                         }}
                       >
-                        <SealedCipherIcon size={14} color="#fbbf24" />
-                        <span>{t("escrowPendingDelivery") || "Đang Chờ Người Bán Giao Khóa (Escrow Pending)"}</span>
+                        <SealedCipherIcon size={14} color="var(--accent-amber)" />
+                        <span>{t("escrowPendingDelivery")}</span>
                       </div>
                     ) : (
                       <button
+                        id={`btn-decrypt-dataset-${item.dataId}`}
+                        type="button"
                         className="btn-terminal btn-terminal-success"
+                        title={t("btnDecryptPayload")}
                         style={{ width: "100%", height: "38px", justifyContent: "center", fontSize: "13px" }}
                         disabled={item.escrowInfo?.isPending}
                         onClick={() => onDecrypt?.(item.dataId)}
-                        type="button"
                       >
                         <InMemoryDecryptIcon size={15} />
                         <span>{t("btnDecryptPayload")}</span>
@@ -218,8 +264,6 @@ export default function LicensedDatasetsView({ onDecrypt, onDownload, onDownload
                               width: "100%",
                               height: "34px",
                               justifyContent: "center",
-                              border: "1px solid #38bdf8",
-                              color: "#38bdf8",
                               fontSize: "12px"
                             }}
                             onClick={() =>
@@ -241,8 +285,6 @@ export default function LicensedDatasetsView({ onDecrypt, onDownload, onDownload
                               width: "100%",
                               height: "34px",
                               justifyContent: "center",
-                              border: "1px solid #10b981",
-                              color: "#10b981",
                               fontSize: "12px"
                             }}
                             onClick={() =>
@@ -273,15 +315,16 @@ export default function LicensedDatasetsView({ onDecrypt, onDownload, onDownload
                       <div
                         style={{
                           display: "flex",
+                          flexWrap: "wrap",
                           gap: "6px",
-                          marginBottom: "6px",
+                          marginBottom: "8px",
                           borderBottom: "1px solid var(--border-subtle)",
-                          paddingBottom: "4px"
+                          paddingBottom: "6px"
                         }}
                       >
                         <button
                           className={`btn-terminal ${currentTab === "vcf" ? "btn-terminal-primary" : "btn-terminal-ghost"}`}
-                          style={{ padding: "2px 8px", fontSize: "11px", height: "24px" }}
+                          style={{ padding: "3px 10px", fontSize: "11px", height: "26px", whiteSpace: "nowrap" }}
                           onClick={() => setTab(item.dataId, "vcf")}
                           type="button"
                         >
@@ -290,7 +333,7 @@ export default function LicensedDatasetsView({ onDecrypt, onDownload, onDownload
                         {item.phenopacketJson && (
                           <button
                             className={`btn-terminal ${currentTab === "json" ? "btn-terminal-primary" : "btn-terminal-ghost"}`}
-                            style={{ padding: "2px 8px", fontSize: "11px", height: "24px" }}
+                            style={{ padding: "3px 10px", fontSize: "11px", height: "26px", whiteSpace: "nowrap" }}
                             onClick={() => setTab(item.dataId, "json")}
                             type="button"
                           >
@@ -300,7 +343,7 @@ export default function LicensedDatasetsView({ onDecrypt, onDownload, onDownload
                         {item.decryptedPdfBytes && (
                           <button
                             className={`btn-terminal ${currentTab === "pdf" ? "btn-terminal-primary" : "btn-terminal-ghost"}`}
-                            style={{ padding: "2px 8px", fontSize: "11px", height: "24px" }}
+                            style={{ padding: "3px 10px", fontSize: "11px", height: "26px", whiteSpace: "nowrap" }}
                             onClick={() => setTab(item.dataId, "pdf")}
                             type="button"
                           >
@@ -364,6 +407,47 @@ export default function LicensedDatasetsView({ onDecrypt, onDownload, onDownload
                           </div>
                         </div>
                       )}
+                    </div>
+                  )}
+
+                  {/* Secondary Study Reuse 5% Royalty Payment Panel */}
+                  {!item.isOwner && !item.isEscrowPending && item.hasActiveAccess && (
+                    <div
+                      id={`reuse-study-box-${item.dataId}`}
+                      style={{
+                        marginTop: "12px",
+                        padding: "10px 12px",
+                        borderRadius: "var(--radius-xs)",
+                        border: "1px solid var(--border-subtle)",
+                        background: "var(--bg-input)"
+                      }}
+                    >
+                      <div style={{ fontSize: "11.5px", fontWeight: 700, color: "var(--text-primary)", marginBottom: "6px" }}>
+                        {t("reuseSectionTitle")} ({item.reuseFeeGeno ?? Number(((item.price || 0) * 0.05).toFixed(4))} $GENO)
+                      </div>
+                      <div style={{ display: "flex", gap: "6px" }}>
+                        <input
+                          id={`input-reuse-study-${item.dataId}`}
+                          type="text"
+                          className="field-input"
+                          style={{ flex: 1, height: "34px", fontSize: "12px" }}
+                          placeholder={t("licensedReusePlaceholder")}
+                          aria-label={t("reuseStudyLabel")}
+                          value={reuseInputs[item.dataId] || ""}
+                          onChange={(e) => setReuseInputs((prev) => ({ ...prev, [item.dataId]: e.target.value }))}
+                        />
+                        <button
+                          id={`btn-record-reuse-${item.dataId}`}
+                          type="button"
+                          className="btn-terminal btn-terminal-primary"
+                          style={{ height: "34px", padding: "0 12px", fontSize: "12px", flexShrink: 0, whiteSpace: "nowrap" }}
+                          title={t("reuseRecordBtn")}
+                          disabled={busyReuseId === item.dataId}
+                          onClick={() => handleTriggerReuse(item.dataId)}
+                        >
+                          <span>{busyReuseId === item.dataId ? "..." : t("reuseRecordBtn")}</span>
+                        </button>
+                      </div>
                     </div>
                   )}
                 </div>

@@ -276,11 +276,12 @@ describe("AGENT3 ADVERSARIAL: GenoChain Registry / Token / NFT / zk-Verifier", f
 
       // --- first (free) direct grant, capsule delivered normally -----------
       await registry.connect(dataOwner).grantDirectAccess(dataId, buyer.address);
+      const CAPSULE_V1_LEGACY = JSON.stringify({ version: "GENO-ASYM-RSA-OAEP-v2", tag: "CAPSULE-V1-LEGACY", keyCipher: "ab".repeat(256) });
       await registry
         .connect(dataOwner)
-        .storeTransformedCapsule(dataId, buyer.address, "CAPSULE-V1-LEGACY");
+        .storeTransformedCapsule(dataId, buyer.address, CAPSULE_V1_LEGACY);
       expect(await registry.buyerCapsules.staticCall(dataId, buyer.address)).to.equal(
-        "CAPSULE-V1-LEGACY"
+        CAPSULE_V1_LEGACY
       );
 
       // --- the direct grant now expires -----------------------------------
@@ -313,7 +314,7 @@ describe("AGENT3 ADVERSARIAL: GenoChain Registry / Token / NFT / zk-Verifier", f
 
       // stale capsule from an earlier, already-consumed direct grant
       await registry.connect(dataOwner).grantDirectAccess(dataId, buyer.address);
-      await registry.connect(dataOwner).storeTransformedCapsule(dataId, buyer.address, "CAPSULE-V1");
+      await registry.connect(dataOwner).storeTransformedCapsule(dataId, buyer.address, JSON.stringify({ version: "GENO-ASYM-RSA-OAEP-v2", tag: "CAPSULE-V1", keyCipher: "ab".repeat(256) }));
       await bumpTime(DURATION + 10);
 
       await approveCtx(ctx, buyer, PRICE);
@@ -392,7 +393,7 @@ describe("AGENT3 ADVERSARIAL: GenoChain Registry / Token / NFT / zk-Verifier", f
       await registry.connect(dataOwner).grantDirectAccess(dataId, buyer.address);
       await registry
         .connect(dataOwner)
-        .storeTransformedCapsule(dataId, buyer.address, "CAPSULE-REVOKABLE");
+        .storeTransformedCapsule(dataId, buyer.address, JSON.stringify({ version: "GENO-ASYM-RSA-OAEP-v2", tag: "CAPSULE-REVOKABLE", keyCipher: "ab".repeat(256) }));
 
       await registry.connect(dataOwner).updateDataStatus(dataId, 2); // Revoked
 
@@ -453,10 +454,11 @@ describe("AGENT3 ADVERSARIAL: GenoChain Registry / Token / NFT / zk-Verifier", f
       expect(await nonStd.balanceOf(reg2.target)).to.equal(PRICE);
 
       // void-return transfer must be accepted by SafeERC20 on delivery
-      await reg2.connect(dataOwner).storeTransformedCapsule(1, buyer.address, "CAPSULE-NONSTD");
+      const CAPSULE_NONSTD = JSON.stringify({ version: "GENO-ASYM-RSA-OAEP-v2", tag: "CAPSULE-NONSTD", keyCipher: "ab".repeat(256) });
+      await reg2.connect(dataOwner).storeTransformedCapsule(1, buyer.address, CAPSULE_NONSTD);
       expect(await nonStd.balanceOf(reg2.target)).to.equal(0n);
       expect(await nonStd.balanceOf(dataOwner.address)).to.equal(PRICE);
-      expect(await reg2.connect(buyer).getTransformedCapsule.staticCall(1)).to.equal("CAPSULE-NONSTD");
+      expect(await reg2.connect(buyer).getTransformedCapsule.staticCall(1)).to.equal(CAPSULE_NONSTD);
     });
   });
 
@@ -764,11 +766,12 @@ describe("AGENT3 ADVERSARIAL: GenoChain Registry / Token / NFT / zk-Verifier", f
       const { registry } = ctx;
       const { dataId } = await registerDataset(ctx);
       await registry.connect(dataOwner).grantDirectAccess(dataId, buyer.address);
+      const SECRET_CAPSULE = JSON.stringify({ version: "GENO-ASYM-RSA-OAEP-v2", tag: "SECRET-CAPSULE", keyCipher: "ab".repeat(256) });
       await registry
         .connect(dataOwner)
-        .storeTransformedCapsule(dataId, buyer.address, "SECRET-CAPSULE");
+        .storeTransformedCapsule(dataId, buyer.address, SECRET_CAPSULE);
       expect(await registry.connect(buyer).getTransformedCapsule.staticCall(dataId)).to.equal(
-        "SECRET-CAPSULE"
+        SECRET_CAPSULE
       );
 
       await registry.connect(dataOwner).updateDataStatus(dataId, 2);

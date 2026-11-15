@@ -91,7 +91,7 @@ describe("AGENT2 :: Non-Standard (void-return) ERC20 through the escrow lifecycl
     const preSeller = await token.balanceOf(seller.address);
     const t = await registry
       .connect(seller)
-      .storeTransformedCapsule(1n, buyer1.address, '{"capsule":"NST-REAL-DELIVERY"}');
+      .storeTransformedCapsule(1n, buyer1.address, JSON.stringify({ version: "GENO-ASYM-RSA-OAEP-v2", capsule: "NST-REAL-DELIVERY", keyCipher: "ab".repeat(256) }));
     expect((await t.wait()).status).to.equal(1);
 
     expect(await token.balanceOf(registryAddr)).to.equal(0n);

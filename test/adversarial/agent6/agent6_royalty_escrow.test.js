@@ -270,7 +270,7 @@ describe("AGENT6 :: royalty, escrow & reentrancy adversarial suite", function ()
       await (
         await reg3
           .connect(owner)
-          .storeTransformedCapsule(1, buyers[0].address, '{"keyCipher":"deadbeef"}')
+          .storeTransformedCapsule(1, buyers[0].address, JSON.stringify({ version: "GENO-ASYM-RSA-OAEP-v2", keyCipher: "ab".repeat(256) }))
       ).wait();
       const dep = await reg3.escrowDeposits(1, buyers[0].address);
       expect(dep.released).to.equal(true);

@@ -99,6 +99,22 @@ contract GenomicsRegistry is ReentrancyGuard, Ownable, IGenomicsRegistryWorkerSy
     // tokenId => dataId
     mapping(uint256 => uint256) public tokenToDataId;
 
+    uint256 public constant MAX_BLIND_TAGS_PER_DATASET = 16;
+    uint256 public constant REUSE_FEE_BPS = 500;
+
+    // 3-Artifact integrity hashes (raw ciphertext already stored in GenomicData.rawDataHash)
+    mapping(uint256 => bytes32) public summaryDataHashes;
+    mapping(uint256 => bytes32) public metadataHashes;
+
+    // Serverless Privacy-Preserving Blinded Keccak-256 Trait Tag Search
+    mapping(uint256 => mapping(bytes32 => bool)) public datasetBlindTags;
+    mapping(uint256 => uint256) public datasetBlindTagCount;
+    mapping(uint256 => bytes32[]) internal _datasetBlindTagList;
+
+    // On-chain study reuse fee receipts (5% reuse fee + secondary EIP-2981 royalty split)
+    mapping(uint256 => mapping(bytes32 => bool)) public studyReuseReceipts;
+    mapping(uint256 => uint256) public datasetReuseCount;
+
     // Custom Errors (Gas optimization)
     error NotDataOwner();
     error DataNotActive();
@@ -126,6 +142,11 @@ contract GenomicsRegistry is ReentrancyGuard, Ownable, IGenomicsRegistryWorkerSy
     error SelfAccessNotAllowed();
     error PriceExceedsMax(uint256 currentPrice, uint256 maxPrice);
     error CannotRescuePaymentToken();
+    error InvalidCapsuleFormat();
+    error ArtifactHashesAlreadyAnchored();
+    error InvalidBlindTag();
+    error InvalidStudyCommitment();
+    error StudyReuseAlreadyRecorded();
 
     // Events
     event TokensRescued(
@@ -218,6 +239,25 @@ contract GenomicsRegistry is ReentrancyGuard, Ownable, IGenomicsRegistryWorkerSy
         uint256 amount
     );
 
+    event ArtifactHashesAnchored(
+        uint256 indexed dataId,
+        bytes32 summaryHash,
+        bytes32 metadataHash
+    );
+
+    event BlindTagRegistered(
+        uint256 indexed dataId,
+        bytes32 indexed blindTag
+    );
+
+    event StudyReuseRecorded(
+        uint256 indexed dataId,
+        address indexed researcher,
+        bytes32 indexed studyCommitment,
+        uint256 totalFee,
+        uint256 royaltyPaid
+    );
+
     modifier onlyDataOwner(uint256 dataId) {
         _checkDataOwner(dataId);
         _;
@@ -295,63 +335,117 @@ contract GenomicsRegistry is ReentrancyGuard, Ownable, IGenomicsRegistryWorkerSy
      */
     function registerGenomicData(
         bytes32 rawDataHash,
-        string memory rawCid,
-        string memory summaryCid,
-        string memory metadataCid,
-        string memory tokenUri,
+        string calldata rawCid,
+        string calldata summaryCid,
+        string calldata metadataCid,
+        string calldata tokenUri,
         uint256 price,
         uint256 accessDuration,
         uint96 royaltyBps
-    ) external nonReentrant returns (uint256) {
+    ) external nonReentrant returns (uint256 dataId) {
+        dataId = _validateAndInitData(
+            rawDataHash,
+            rawCid,
+            summaryCid,
+            metadataCid,
+            bytes(tokenUri).length,
+            price,
+            accessDuration
+        );
+        _mintStoredNft(dataId, tokenUri, royaltyBps);
+    }
+
+    function registerGenomicDataBundle(
+        bytes32[3] calldata hashes,
+        string[4] calldata cidsAndUri,
+        uint256 priceInGeno,
+        uint256 accessDurationSeconds,
+        uint96 royaltyBps,
+        bytes32[] calldata blindTags
+    ) external nonReentrant returns (uint256 newDataId) {
+        if (hashes[1] == bytes32(0) || hashes[2] == bytes32(0)) revert InvalidDataHashOrCid();
+        newDataId = _validateAndInitData(
+            hashes[0],
+            cidsAndUri[0],
+            cidsAndUri[1],
+            cidsAndUri[2],
+            bytes(cidsAndUri[3]).length,
+            priceInGeno,
+            accessDurationSeconds
+        );
+        summaryDataHashes[newDataId] = hashes[1];
+        metadataHashes[newDataId] = hashes[2];
+        if (blindTags.length > 0) {
+            _setBlindTagsInternal(newDataId, blindTags);
+        }
+        emit ArtifactHashesAnchored(newDataId, hashes[1], hashes[2]);
+        _mintStoredNft(newDataId, cidsAndUri[3], royaltyBps);
+    }
+
+    function _validateAndInitData(
+        bytes32 rawDataHash,
+        string calldata rawCid,
+        string calldata summaryCid,
+        string calldata metadataCid,
+        uint256 tokenUriLen,
+        uint256 price,
+        uint256 accessDuration
+    ) internal returns (uint256 newDataId) {
         if (
             rawDataHash == bytes32(0) ||
             !_isValidCid(rawCid) ||
             !_isValidCid(summaryCid) ||
             !_isValidCid(metadataCid) ||
-            bytes(tokenUri).length == 0
+            tokenUriLen == 0
         ) revert InvalidDataHashOrCid();
         if (registeredRawDataHashes[rawDataHash]) revert DataAlreadyRegistered();
         if (price == 0) revert InvalidPrice();
         if (accessDuration == 0) revert InvalidDuration();
 
         registeredRawDataHashes[rawDataHash] = true;
-
-        // Predict the exact token ID from GenomicNFT before minting
         uint256 expectedTokenId = genomicNFT.nextTokenId();
         dataCount++;
-        uint256 newDataId = dataCount;
+        newDataId = dataCount;
 
-        // CHECKS-EFFECTS: Persist all state variables BEFORE triggering external interactions (CEI Pattern)
         tokenToDataId[expectedTokenId] = newDataId;
-        genomicDataItems[newDataId] = GenomicData({
-            dataId: newDataId,
-            tokenId: expectedTokenId,
-            currentOwner: msg.sender,
-            rawDataHash: rawDataHash,
-            rawCiphertextCid: rawCid,
-            summaryCiphertextCid: summaryCid,
-            metadataCid: metadataCid,
-            price: price,
-            accessDuration: accessDuration,
-            status: DataStatus.Active,
-            accessCount: 0,
-            registeredAt: block.timestamp
-        });
+        GenomicData storage item = genomicDataItems[newDataId];
+        item.dataId = newDataId;
+        item.tokenId = expectedTokenId;
+        item.currentOwner = msg.sender;
+        item.rawDataHash = rawDataHash;
+        item.rawCiphertextCid = rawCid;
+        item.summaryCiphertextCid = summaryCid;
+        item.metadataCid = metadataCid;
+        item.price = price;
+        item.accessDuration = accessDuration;
+        item.status = DataStatus.Active;
+        item.registeredAt = block.timestamp;
+    }
 
-        // INTERACTION: Mint Data Ownership NFT directly to contributor
+    function _mintStoredNft(
+        uint256 dataId,
+        string calldata tokenUri,
+        uint96 royaltyBps
+    ) internal {
+        GenomicData storage item = genomicDataItems[dataId];
         uint256 mintedTokenId = genomicNFT.mintGenomicNFT(
             msg.sender,
             tokenUri,
-            rawDataHash,
-            rawCid,
-            summaryCid,
-            metadataCid,
+            item.rawDataHash,
+            item.rawCiphertextCid,
+            item.summaryCiphertextCid,
+            item.metadataCid,
             royaltyBps
         );
-        if (mintedTokenId != expectedTokenId) revert TokenIdMismatch();
-
-        emit GenomicDataRegistered(newDataId, mintedTokenId, msg.sender, rawDataHash, price, metadataCid);
-        return newDataId;
+        if (mintedTokenId != item.tokenId) revert TokenIdMismatch();
+        emit GenomicDataRegistered(
+            dataId,
+            mintedTokenId,
+            msg.sender,
+            item.rawDataHash,
+            item.price,
+            item.metadataCid
+        );
     }
 
     /**
@@ -374,19 +468,26 @@ contract GenomicsRegistry is ReentrancyGuard, Ownable, IGenomicsRegistryWorkerSy
         _grantAccessInternal(dataId, maxPrice);
     }
 
-    function _grantAccessInternal(uint256 dataId, uint256 maxPrice) internal {
+    function _validatePurchase(
+        uint256 dataId,
+        uint256 maxPrice
+    ) internal view returns (GenomicData storage data, address seller) {
         _requireValidDataId(dataId);
-        GenomicData storage data = genomicDataItems[dataId];
+        data = genomicDataItems[dataId];
         if (data.status != DataStatus.Active) revert DataNotActive();
         if (data.price > maxPrice) revert PriceExceedsMax(data.price, maxPrice);
 
-        address seller = genomicNFT.ownerOf(data.tokenId);
+        seller = genomicNFT.ownerOf(data.tokenId);
         if (msg.sender == seller) revert OwnerCannotBuyOwnData();
 
         AccessGrant storage grant = accessGrants[dataId][msg.sender];
         if (grant.isGranted && block.timestamp < grant.expiresAt) {
             revert AccessAlreadyActive();
         }
+    }
+
+    function _grantAccessInternal(uint256 dataId, uint256 maxPrice) internal {
+        (GenomicData storage data, address seller) = _validatePurchase(dataId, maxPrice);
 
         EscrowDeposit storage existingDeposit = escrowDeposits[dataId][msg.sender];
         if (existingDeposit.amount > 0) {
@@ -396,17 +497,6 @@ contract GenomicsRegistry is ReentrancyGuard, Ownable, IGenomicsRegistryWorkerSy
 
         uint256 totalPrice = data.price;
 
-        // Query EIP-2981 Royalty information on-chain
-        (address royaltyReceiver, uint256 royaltyAmount) = genomicNFT.royaltyInfo(
-            data.tokenId,
-            totalPrice
-        );
-
-        uint256 sellerProceeds = totalPrice;
-        if (royaltyAmount > 0 && royaltyReceiver != address(0)) {
-            sellerProceeds = totalPrice - royaltyAmount;
-        }
-
         // CHECKS-EFFECTS-INTERACTIONS: Update all state variables BEFORE making external calls
         uint256 expires = block.timestamp + data.accessDuration;
         data.accessCount++;
@@ -414,29 +504,18 @@ contract GenomicsRegistry is ReentrancyGuard, Ownable, IGenomicsRegistryWorkerSy
 
         delete _buyerCapsules[dataId][msg.sender];
 
-        accessGrants[dataId][msg.sender] = AccessGrant({
-            isGranted: true,
-            grantedAt: block.timestamp,
-            expiresAt: expires
-        });
+        AccessGrant storage grant = accessGrants[dataId][msg.sender];
+        grant.isGranted = true;
+        grant.grantedAt = block.timestamp;
+        grant.expiresAt = expires;
 
-        // Safe token transfers using SafeERC20 (prevents reentrancy & handles non-standard tokens)
-        if (royaltyReceiver == seller) {
-            // Gas optimization: Creator is selling their own data, single transfer of total price
-            paymentToken.safeTransferFrom(msg.sender, seller, totalPrice);
-            if (royaltyAmount > 0) {
-                emit RoyaltyPaid(dataId, seller, royaltyAmount);
-            }
-        } else {
-            // Secondary sale: Disburse royalty to creator, proceeds to secondary seller
-            if (royaltyAmount > 0 && royaltyReceiver != address(0)) {
-                paymentToken.safeTransferFrom(msg.sender, royaltyReceiver, royaltyAmount);
-                emit RoyaltyPaid(dataId, royaltyReceiver, royaltyAmount);
-            }
-            if (sellerProceeds > 0) {
-                paymentToken.safeTransferFrom(msg.sender, seller, sellerProceeds);
-            }
-        }
+        (, uint256 royaltyAmount) = _settleRoyaltyPayment(
+            dataId,
+            data.tokenId,
+            msg.sender,
+            seller,
+            totalPrice
+        );
 
         emit AccessGranted(dataId, msg.sender, totalPrice, royaltyAmount, expires);
     }
@@ -463,22 +542,11 @@ contract GenomicsRegistry is ReentrancyGuard, Ownable, IGenomicsRegistryWorkerSy
     }
 
     function _grantAccessWithEscrowInternal(uint256 dataId, uint256 disputeWindow, uint256 maxPrice) internal {
-        _requireValidDataId(dataId);
-        GenomicData storage data = genomicDataItems[dataId];
-        if (data.status != DataStatus.Active) revert DataNotActive();
-        if (data.price > maxPrice) revert PriceExceedsMax(data.price, maxPrice);
+        (GenomicData storage data, address seller) = _validatePurchase(dataId, maxPrice);
 
-        address seller = genomicNFT.ownerOf(data.tokenId);
-        if (msg.sender == seller) revert OwnerCannotBuyOwnData();
-
-        AccessGrant storage grant = accessGrants[dataId][msg.sender];
-        if (grant.isGranted && block.timestamp < grant.expiresAt) {
-            revert AccessAlreadyActive();
-        }
-
-        EscrowDeposit storage existingDeposit = escrowDeposits[dataId][msg.sender];
-        if (existingDeposit.amount > 0 && !existingDeposit.released && !existingDeposit.refunded) {
-            if (block.timestamp < existingDeposit.depositTime + data.accessDuration) {
+        EscrowDeposit storage dep = escrowDeposits[dataId][msg.sender];
+        if (dep.amount > 0 && !dep.released && !dep.refunded) {
+            if (block.timestamp < dep.depositTime + data.accessDuration) {
                 revert AccessAlreadyActive();
             }
             revert EscrowAlreadyActive();
@@ -491,23 +559,16 @@ contract GenomicsRegistry is ReentrancyGuard, Ownable, IGenomicsRegistryWorkerSy
         data.currentOwner = seller;
 
         delete _buyerCapsules[dataId][msg.sender];
+        delete accessGrants[dataId][msg.sender];
 
-        accessGrants[dataId][msg.sender] = AccessGrant({
-            isGranted: false,
-            grantedAt: 0,
-            expiresAt: 0
-        });
-
-        escrowDeposits[dataId][msg.sender] = EscrowDeposit({
-            buyer: msg.sender,
-            seller: seller,
-            amount: totalPrice,
-            depositTime: block.timestamp,
-            disputeWindow: disputeWindow,
-            released: false,
-            refunded: false,
-            capsuleDelivered: false
-        });
+        dep.buyer = msg.sender;
+        dep.seller = seller;
+        dep.amount = totalPrice;
+        dep.depositTime = block.timestamp;
+        dep.disputeWindow = disputeWindow;
+        dep.released = false;
+        dep.refunded = false;
+        dep.capsuleDelivered = false;
 
         paymentToken.safeTransferFrom(msg.sender, address(this), totalPrice);
 
@@ -582,33 +643,15 @@ contract GenomicsRegistry is ReentrancyGuard, Ownable, IGenomicsRegistryWorkerSy
         address seller = deposit.seller != address(0) ? deposit.seller : genomicNFT.ownerOf(data.tokenId);
         data.currentOwner = _safeOwnerOf(data.tokenId, seller);
         uint256 totalPrice = deposit.amount;
-
-        (address royaltyReceiver, uint256 royaltyAmount) = genomicNFT.royaltyInfo(
-            data.tokenId,
-            totalPrice
-        );
-
-        uint256 sellerProceeds = totalPrice;
-        if (royaltyAmount > 0 && royaltyReceiver != address(0)) {
-            sellerProceeds = totalPrice - royaltyAmount;
-        }
-
         deposit.released = true;
 
-        if (royaltyReceiver == seller) {
-            paymentToken.safeTransfer(seller, totalPrice);
-            if (royaltyAmount > 0) {
-                emit RoyaltyPaid(dataId, seller, royaltyAmount);
-            }
-        } else {
-            if (royaltyAmount > 0 && royaltyReceiver != address(0)) {
-                paymentToken.safeTransfer(royaltyReceiver, royaltyAmount);
-                emit RoyaltyPaid(dataId, royaltyReceiver, royaltyAmount);
-            }
-            if (sellerProceeds > 0) {
-                paymentToken.safeTransfer(seller, sellerProceeds);
-            }
-        }
+        (uint256 sellerProceeds, uint256 royaltyAmount) = _settleRoyaltyPayment(
+            dataId,
+            data.tokenId,
+            address(this),
+            seller,
+            totalPrice
+        );
 
         emit EscrowReleased(dataId, buyer, seller, sellerProceeds, royaltyAmount);
     }
@@ -686,7 +729,7 @@ contract GenomicsRegistry is ReentrancyGuard, Ownable, IGenomicsRegistryWorkerSy
      * @notice Register persistent asymmetric public key (RSA-OAEP) for recipient key wrapping
      * @param publicKey Serialized JWK or SPKI representation of the researcher's public key
      */
-    function registerResearcherPublicKey(string memory publicKey) external {
+    function registerResearcherPublicKey(string calldata publicKey) external {
         if (bytes(publicKey).length == 0) revert EmptyPublicKey();
         researcherPublicKeys[msg.sender] = publicKey;
         emit ResearcherKeyRegistered(msg.sender, publicKey);
@@ -759,9 +802,6 @@ contract GenomicsRegistry is ReentrancyGuard, Ownable, IGenomicsRegistryWorkerSy
     function resetAuthorizedWorkersForToken(uint256 tokenId) external {
         if (msg.sender != address(genomicNFT)) revert NotDataOwner();
         uint256 dataId = tokenToDataId[tokenId];
-        if (dataId == 0 && tokenId <= dataCount && genomicDataItems[tokenId].tokenId == tokenId) {
-            dataId = tokenId;
-        }
         if (dataId != 0 && dataId <= dataCount) {
             genomicDataItems[dataId].currentOwner = _safeOwnerOf(tokenId, genomicDataItems[dataId].currentOwner);
             _clearWorkers(dataId);
@@ -788,7 +828,7 @@ contract GenomicsRegistry is ReentrancyGuard, Ownable, IGenomicsRegistryWorkerSy
     function storeTransformedCapsule(
         uint256 dataId,
         address researcher,
-        string memory capsule
+        string calldata capsule
     ) external nonReentrant onlyDataOwnerOrDispatcher(dataId) {
         _deliverCapsule(dataId, researcher, capsule, false);
     }
@@ -807,7 +847,7 @@ contract GenomicsRegistry is ReentrancyGuard, Ownable, IGenomicsRegistryWorkerSy
     function _deliverCapsule(
         uint256 dataId,
         address researcher,
-        string memory capsule,
+        string calldata capsule,
         bool emitEvent
     ) internal {
         if (researcher == address(0)) revert InvalidAddress();
@@ -816,20 +856,21 @@ contract GenomicsRegistry is ReentrancyGuard, Ownable, IGenomicsRegistryWorkerSy
 
         EscrowDeposit storage deposit = escrowDeposits[dataId][researcher];
         GenomicData storage data = genomicDataItems[dataId];
-        bool validFormat = _isValidCapsule(capsule);
 
         if (deposit.amount > 0) {
             if (deposit.released || deposit.refunded) revert EscrowNotActive();
-            accessGrants[dataId][researcher].isGranted = true;
-            accessGrants[dataId][researcher].grantedAt = block.timestamp;
-            accessGrants[dataId][researcher].expiresAt = block.timestamp + data.accessDuration;
-            if (validFormat) {
-                deposit.capsuleDelivered = true;
-            }
         } else {
-            AccessGrant memory grant = accessGrants[dataId][researcher];
-            if (!grant.isGranted) revert AccessNotGranted();
-            if (block.timestamp >= grant.expiresAt) revert AccessExpired();
+            _requireActiveGrant(dataId, researcher);
+        }
+
+        if (!_isValidCapsule(capsule)) revert InvalidCapsuleFormat();
+
+        if (deposit.amount > 0) {
+            AccessGrant storage grant = accessGrants[dataId][researcher];
+            grant.isGranted = true;
+            grant.grantedAt = block.timestamp;
+            grant.expiresAt = block.timestamp + data.accessDuration;
+            deposit.capsuleDelivered = true;
         }
 
         _buyerCapsules[dataId][researcher] = capsule;
@@ -837,14 +878,15 @@ contract GenomicsRegistry is ReentrancyGuard, Ownable, IGenomicsRegistryWorkerSy
             emit CapsuleStored(dataId, researcher, capsule);
         }
 
-        if (
-            validFormat &&
-            deposit.amount > 0 &&
-            !deposit.released &&
-            !deposit.refunded
-        ) {
+        if (deposit.amount > 0) {
             _releaseEscrowInternal(dataId, researcher);
         }
+    }
+
+    function _requireActiveGrant(uint256 dataId, address researcher) internal view {
+        AccessGrant storage grant = accessGrants[dataId][researcher];
+        if (!grant.isGranted) revert AccessNotGranted();
+        if (block.timestamp >= grant.expiresAt) revert AccessExpired();
     }
 
     /**
@@ -852,12 +894,10 @@ contract GenomicsRegistry is ReentrancyGuard, Ownable, IGenomicsRegistryWorkerSy
      */
     function getTransformedCapsule(uint256 dataId) external view returns (string memory) {
         _requireValidDataId(dataId);
-        GenomicData memory data = genomicDataItems[dataId];
+        GenomicData storage data = genomicDataItems[dataId];
         if (data.status != DataStatus.Active) revert DataNotActive();
 
-        AccessGrant memory grant = accessGrants[dataId][msg.sender];
-        if (!grant.isGranted) revert AccessNotGranted();
-        if (block.timestamp >= grant.expiresAt) revert AccessExpired();
+        _requireActiveGrant(dataId, msg.sender);
         return _buyerCapsules[dataId][msg.sender];
     }
 
@@ -865,7 +905,7 @@ contract GenomicsRegistry is ReentrancyGuard, Ownable, IGenomicsRegistryWorkerSy
      * @notice Data owner can view buyer's capsule
      */
     function getCapsuleForBuyer(uint256 dataId, address researcher) external view onlyDataOwner(dataId) returns (string memory) {
-        GenomicData memory data = genomicDataItems[dataId];
+        GenomicData storage data = genomicDataItems[dataId];
         if (data.status != DataStatus.Active) revert DataNotActive();
         return _buyerCapsules[dataId][researcher];
     }
@@ -877,16 +917,16 @@ contract GenomicsRegistry is ReentrancyGuard, Ownable, IGenomicsRegistryWorkerSy
      */
     function buyerCapsules(uint256 dataId, address researcher) external view returns (string memory) {
         _requireValidDataId(dataId);
-        GenomicData memory data = genomicDataItems[dataId];
+        GenomicData storage data = genomicDataItems[dataId];
         if (data.status == DataStatus.Paused) revert DataNotActive();
         if (data.status != DataStatus.Active) return "";
 
-        AccessGrant memory grant = accessGrants[dataId][researcher];
         if (msg.sender == researcher) {
-            if (!grant.isGranted) revert AccessNotGranted();
-            if (block.timestamp >= grant.expiresAt) revert AccessExpired();
+            _requireActiveGrant(dataId, researcher);
+        } else {
+            AccessGrant storage grant = accessGrants[dataId][researcher];
+            if (!grant.isGranted || block.timestamp >= grant.expiresAt) return "";
         }
-        if (!grant.isGranted || block.timestamp >= grant.expiresAt) return "";
 
         address nftOwner = _safeOwnerOf(data.tokenId, data.currentOwner);
         bool isAuthorizedWorker = authorizedCapsuleWorkers[dataId][msg.sender] &&
@@ -906,18 +946,18 @@ contract GenomicsRegistry is ReentrancyGuard, Ownable, IGenomicsRegistryWorkerSy
     /**
      * @notice Check whether an address has active permission to access a dataset
      */
-    function hasActiveAccess(uint256 dataId, address researcher) external view returns (bool) {
+    function hasActiveAccess(uint256 dataId, address researcher) public view returns (bool) {
         _requireValidDataId(dataId);
-        GenomicData memory data = genomicDataItems[dataId];
+        GenomicData storage data = genomicDataItems[dataId];
         if (data.status != DataStatus.Active) return false;
 
         // The current NFT owner always has access to their own data
         if (_safeOwnerOf(data.tokenId, address(0)) == researcher) return true;
 
-        EscrowDeposit memory deposit = escrowDeposits[dataId][researcher];
+        EscrowDeposit storage deposit = escrowDeposits[dataId][researcher];
         if (deposit.amount > 0 && !deposit.released && !deposit.refunded) return false;
 
-        AccessGrant memory grant = accessGrants[dataId][researcher];
+        AccessGrant storage grant = accessGrants[dataId][researcher];
         if (grant.isGranted && block.timestamp < grant.expiresAt) return true;
 
         return false;
@@ -962,11 +1002,7 @@ contract GenomicsRegistry is ReentrancyGuard, Ownable, IGenomicsRegistryWorkerSy
      * @notice Retrieve all registered genomic datasets (for marketplace catalog)
      */
     function getAllDataItems() external view returns (GenomicData[] memory) {
-        GenomicData[] memory items = new GenomicData[](dataCount);
-        for (uint256 i = 1; i <= dataCount; i++) {
-            items[i - 1] = genomicDataItems[i];
-            items[i - 1].currentOwner = _safeOwnerOf(items[i - 1].tokenId, items[i - 1].currentOwner);
-        }
+        (GenomicData[] memory items, ) = _paginate(0, dataCount);
         return items;
     }
 
@@ -980,6 +1016,14 @@ contract GenomicsRegistry is ReentrancyGuard, Ownable, IGenomicsRegistryWorkerSy
         view
         returns (GenomicData[] memory items, uint256 total)
     {
+        return _paginate(offset, limit);
+    }
+
+    function _paginate(uint256 offset, uint256 limit)
+        internal
+        view
+        returns (GenomicData[] memory items, uint256 total)
+    {
         total = dataCount;
         if (offset >= total || limit == 0) {
             return (new GenomicData[](0), total);
@@ -987,11 +1031,14 @@ contract GenomicsRegistry is ReentrancyGuard, Ownable, IGenomicsRegistryWorkerSy
         uint256 remaining = total - offset;
         uint256 resultSize = limit > remaining ? remaining : limit;
         items = new GenomicData[](resultSize);
-        for (uint256 i = 0; i < resultSize; i++) {
-            items[i] = genomicDataItems[offset + i + 1];
-            items[i].currentOwner = _safeOwnerOf(items[i].tokenId, items[i].currentOwner);
+        for (uint256 i = 0; i < resultSize; ) {
+            GenomicData storage stored = genomicDataItems[offset + i + 1];
+            items[i] = stored;
+            items[i].currentOwner = _safeOwnerOf(stored.tokenId, stored.currentOwner);
+            unchecked {
+                ++i;
+            }
         }
-        return (items, total);
     }
 
     /**
@@ -1008,17 +1055,181 @@ contract GenomicsRegistry is ReentrancyGuard, Ownable, IGenomicsRegistryWorkerSy
         emit TokensRescued(tokenAddress, to, amount);
     }
 
-    function _isValidCid(string memory cid) internal pure returns (bool) {
-        bytes memory b = bytes(cid);
+    /**
+     * @notice Anchor summary report & GA4GH Phenopacket metadata SHA-256 hashes for an existing dataset
+     */
+    function anchorArtifactHashes(
+        uint256 dataId,
+        bytes32 summaryHash,
+        bytes32 metadataHash
+    ) external onlyDataOwner(dataId) {
+        if (summaryHash == bytes32(0) || metadataHash == bytes32(0)) revert InvalidDataHashOrCid();
+        if (uint256(summaryDataHashes[dataId]) > 0 || uint256(metadataHashes[dataId]) > 0) {
+            revert ArtifactHashesAlreadyAnchored();
+        }
+        summaryDataHashes[dataId] = summaryHash;
+        metadataHashes[dataId] = metadataHash;
+        emit ArtifactHashesAnchored(dataId, summaryHash, metadataHash);
+    }
+
+    /**
+     * @notice Retrieve all 3 anchored cryptographic SHA-256 hashes (raw, summary, metadata)
+     */
+    function getArtifactHashes(uint256 dataId)
+        external
+        view
+        returns (bytes32 rawDataHash, bytes32 summaryDataHash, bytes32 metadataHash)
+    {
+        _requireValidDataId(dataId);
+        return (genomicDataItems[dataId].rawDataHash, summaryDataHashes[dataId], metadataHashes[dataId]);
+    }
+
+    /**
+     * @notice Compute domain-separated salted keccak256 blind trait tag off-chain or on-chain
+     */
+    function computeBlindTag(
+        string calldata traitKey,
+        string calldata traitValue,
+        bytes32 datasetSalt
+    ) public pure returns (bytes32) {
+        return keccak256(abi.encode("GENOCHAIN_BLIND_TAG_V1", traitKey, traitValue, datasetSalt));
+    }
+
+    /**
+     * @notice Replace or clear blinded trait search tags for a dataset (max 16 tags)
+     */
+    function setDatasetBlindTags(
+        uint256 dataId,
+        bytes32[] calldata blindTags
+    ) external onlyDataOwner(dataId) {
+        _setBlindTagsInternal(dataId, blindTags);
+    }
+
+    /**
+     * @notice Serverless on-chain blind tag query enforcing Active lifecycle symmetry
+     */
+    function matchesBlindTag(uint256 dataId, bytes32 blindTag) external view returns (bool) {
+        _requireValidDataId(dataId);
+        if (genomicDataItems[dataId].status != DataStatus.Active) return false;
+        return datasetBlindTags[dataId][blindTag];
+    }
+
+    /**
+     * @notice Quote 5% follow-on study reuse fee (minimum 1 wei)
+     */
+    function quoteReuseFee(uint256 dataId) public view returns (uint256) {
+        _requireValidDataId(dataId);
+        uint256 fee = (genomicDataItems[dataId].price * REUSE_FEE_BPS) / 10_000;
+        return fee < 1 ? 1 : fee;
+    }
+
+    /**
+     * @notice Record a follow-on study reuse payment (5% fee with EIP-2981 secondary creator split)
+     */
+    function recordStudyReuse(uint256 dataId, bytes32 studyCommitment) external nonReentrant {
+        _requireValidDataId(dataId);
+        GenomicData storage data = genomicDataItems[dataId];
+        if (data.status != DataStatus.Active) revert DataNotActive();
+        if (!hasActiveAccess(dataId, msg.sender)) {
+            _requireActiveGrant(dataId, msg.sender);
+            revert AccessNotGranted();
+        }
+        if (studyCommitment == bytes32(0)) revert InvalidStudyCommitment();
+        if (studyReuseReceipts[dataId][studyCommitment]) revert StudyReuseAlreadyRecorded();
+
+        uint256 reuseFee = quoteReuseFee(dataId);
+        address seller = _safeOwnerOf(data.tokenId, data.currentOwner);
+        data.currentOwner = seller;
+        studyReuseReceipts[dataId][studyCommitment] = true;
+        datasetReuseCount[dataId] += 1;
+
+        (, uint256 royaltyAmount) = _settleRoyaltyPayment(
+            dataId,
+            data.tokenId,
+            msg.sender,
+            seller,
+            reuseFee
+        );
+
+        emit StudyReuseRecorded(dataId, msg.sender, studyCommitment, reuseFee, royaltyAmount);
+    }
+
+    function _transferToken(address from, address to, uint256 amount) internal {
+        if (amount < 1) return;
+        if (from == address(this)) {
+            paymentToken.safeTransfer(to, amount);
+        } else {
+            paymentToken.safeTransferFrom(from, to, amount);
+        }
+    }
+
+    function _settleRoyaltyPayment(
+        uint256 dataId,
+        uint256 tokenId,
+        address from,
+        address seller,
+        uint256 totalPrice
+    ) internal returns (uint256 sellerProceeds, uint256 royaltyAmount) {
+        (address royaltyReceiver, uint256 rawRoyalty) = genomicNFT.royaltyInfo(tokenId, totalPrice);
+        royaltyAmount = rawRoyalty;
+        sellerProceeds = totalPrice;
+        if (royaltyAmount > 0 && royaltyReceiver != address(0)) {
+            sellerProceeds = totalPrice - royaltyAmount;
+        }
+        if (royaltyReceiver == seller) {
+            if (from == address(this)) {
+                _transferToken(from, seller, totalPrice);
+            } else if (totalPrice > 0) {
+                paymentToken.safeTransferFrom(msg.sender, seller, totalPrice);
+            }
+            if (royaltyAmount > 0) {
+                emit RoyaltyPaid(dataId, seller, royaltyAmount);
+            }
+        } else {
+            if (royaltyAmount > 0 && royaltyReceiver != address(0)) {
+                _transferToken(from, royaltyReceiver, royaltyAmount);
+                emit RoyaltyPaid(dataId, royaltyReceiver, royaltyAmount);
+            }
+            if (sellerProceeds > 0) {
+                _transferToken(from, seller, sellerProceeds);
+            }
+        }
+    }
+
+    function _setBlindTagsInternal(uint256 dataId, bytes32[] calldata blindTags) internal {
+        uint256 len = blindTags.length;
+        if (len > MAX_BLIND_TAGS_PER_DATASET) revert InvalidBlindTag();
+
+        bytes32[] storage existing = _datasetBlindTagList[dataId];
+        uint256 prevLen = existing.length;
+        for (uint256 i = 0; i < prevLen; ) {
+            datasetBlindTags[dataId][existing[i]] = false;
+            unchecked {
+                ++i;
+            }
+        }
+        delete _datasetBlindTagList[dataId];
+
+        for (uint256 i = 0; i < len; ) {
+            bytes32 tag = blindTags[i];
+            if (tag == bytes32(0) || datasetBlindTags[dataId][tag]) revert InvalidBlindTag();
+            datasetBlindTags[dataId][tag] = true;
+            existing.push(tag);
+            emit BlindTagRegistered(dataId, tag);
+            unchecked {
+                ++i;
+            }
+        }
+        datasetBlindTagCount[dataId] = len;
+    }
+
+    function _isValidCid(string calldata cid) internal pure returns (bool) {
+        bytes calldata b = bytes(cid);
         if (b.length < 14 || b.length > 128) return false;
         if (b[0] == "Q" && b[1] == "m") {
             if (b[2] == "0") return false;
             // Reject explicitly crafted fake test vectors (e.g. QmGenoFake...) without choking valid Base58 prefixes
-            bytes8 prefix;
-            assembly {
-                prefix := mload(add(add(b, 32), 2))
-            }
-            if (prefix == "GenoFake") return false;
+            if (b.length >= 10 && keccak256(b[2:10]) == keccak256("GenoFake")) return false;
             return true;
         }
         if (b[0] == "b" && b[1] == "a" && b[2] == "f" && b[3] == "y") {
@@ -1027,14 +1238,30 @@ contract GenomicsRegistry is ReentrancyGuard, Ownable, IGenomicsRegistryWorkerSy
         return false;
     }
 
-    function _isValidCapsule(string memory capsule) internal pure returns (bool) {
-        bytes memory b = bytes(capsule);
-        if (b.length < 3) return false;
-        if (b[0] == "{") return b.length >= 16 && b[b.length - 1] == "}";
-        if (b.length >= 64) return true;
-        if ((b[0] == "G" || b[0] == "R") && b.length >= 16) return true;
-        if ((b[0] == "C" || b[0] == "c") && (b[1] == "A" || b[1] == "a") && (b[2] == "P" || b[2] == "p")) {
-            return true;
+    function _isValidCapsule(string calldata capsule) internal pure returns (bool) {
+        bytes calldata b = bytes(capsule);
+        uint256 len = b.length;
+        if (len < 528 || len > 8192) return false;
+        if (b[0] != "{" || b[len - 1] != "}") return false;
+
+        uint256 hexRun = 0;
+        for (uint256 i = 1; i < len - 1; ) {
+            bytes1 ch = b[i];
+            if (
+                (ch >= 0x30 && ch <= 0x39) ||
+                (ch >= 0x41 && ch <= 0x46) ||
+                (ch >= 0x61 && ch <= 0x66)
+            ) {
+                unchecked {
+                    ++hexRun;
+                }
+                if (hexRun >= 512) return true;
+            } else {
+                hexRun = 0;
+            }
+            unchecked {
+                ++i;
+            }
         }
         return false;
     }

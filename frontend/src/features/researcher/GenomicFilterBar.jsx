@@ -20,8 +20,10 @@ import {
   ListIcon,
   CloseCrossIcon,
   ChevronDownIcon,
-  ChevronUpIcon
+  ChevronUpIcon,
+  SealedCipherIcon
 } from "../../components/icons/GenoIcons";
+import { searchDatasetsByBlindTag } from "../../services/datasetService";
 import DatasetCatalogGrid from "./DatasetCatalogGrid";
 import DatasetCatalogTable from "./DatasetCatalogTable";
 
@@ -57,6 +59,8 @@ export default function GenomicFilterBar({ children, onPurchase }) {
     setFilterStatus,
     filterDuration,
     setFilterDuration,
+    blindMatchIds,
+    setBlindMatchIds,
     sortBy,
     setSortBy,
     resetFilters,
@@ -64,8 +68,45 @@ export default function GenomicFilterBar({ children, onPurchase }) {
     datasets
   } = useDatasets();
 
-  const { viewMode, setViewMode } = useWeb3();
-  const { t } = useLanguage();
+  const { viewMode, setViewMode, contracts, showToast } = useWeb3();
+  const { t, lang } = useLanguage();
+
+  const [blindKey, setBlindKey] = useState("gene");
+  const [blindVal, setBlindVal] = useState("");
+  const [blindSalt, setBlindSalt] = useState("GENOCHAIN_COHORT_SALT_V1");
+  const [blindTagHex, setBlindTagHex] = useState("");
+  const [searchingBlind, setSearchingBlind] = useState(false);
+
+  const handleBlindSearch = async () => {
+    if (!blindVal.trim()) {
+      setBlindMatchIds(null);
+      setBlindTagHex("");
+      return;
+    }
+    setSearchingBlind(true);
+    try {
+      const res = await searchDatasetsByBlindTag({
+        traitKey: blindKey,
+        traitValue: blindVal.trim(),
+        datasetSalt: blindSalt.trim() || "GENOCHAIN_COHORT_SALT_V1",
+        datasets,
+        contracts
+      });
+      setBlindMatchIds(res.matchingIds);
+      setBlindTagHex(res.blindTag);
+      showToast(`On-Chain Blind Search: ${res.matchingIds.length} dataset(s) matched (${res.blindTag.slice(0, 12)}...)`);
+    } catch (err) {
+      showToast("Blind tag query failed: " + (err.shortMessage || err.message), "error");
+    } finally {
+      setSearchingBlind(false);
+    }
+  };
+
+  const handleClearBlindSearch = () => {
+    setBlindMatchIds(null);
+    setBlindTagHex("");
+    setBlindVal("");
+  };
 
   // OpenSea Left Sidebar state (Default open on wide desktop)
   const [showSidebar, setShowSidebar] = useState(true);
@@ -175,7 +216,7 @@ export default function GenomicFilterBar({ children, onPurchase }) {
   if (minPrice || maxPrice) {
     activeChips.push({
       id: "priceRange",
-      label: `${minPrice || 0} - ${maxPrice || "∞"} $GENO`,
+      label: `${minPrice || 0} - ${maxPrice || t("filterMaxPlaceholder")} $GENO`,
       clear: handleClearPrice
     });
   }
@@ -203,41 +244,9 @@ export default function GenomicFilterBar({ children, onPurchase }) {
 
   const isFiltersActive = activeChips.length > 0 || (sortBy && sortBy !== "newest");
 
-  const categories = [
-    { id: "All", label: t("catAll") || "All Cohorts", icon: DnaHelixIcon, color: "var(--accent-cyan)" },
-    { id: "Population Genetics", label: t("cat1000G") || "1000 Genomes", icon: PopulationGlobeIcon, color: "#f472b6" },
-    { id: "Physical Traits & Performance", label: t("catTraits") || "Traits & Physical", icon: GeneticTraitIcon, color: "var(--accent-cyan)" },
-    { id: "Sensory & Metabolism", label: t("catSensory") || "Metabolism", icon: MetabolismIcon, color: "var(--accent-amber)" },
-    { id: "Pharmacogenomics", label: t("catPharmaco") || "Pharmacogenomics", icon: SequencingIcon, color: "var(--accent-purple)" },
-    { id: "Reference Benchmark", label: t("catBenchmarks") || "GIAB Benchmarks", icon: BenchmarkIcon, color: "var(--accent-emerald)" }
-  ];
-
   return (
     <div className="opensea-filter-system">
-      {/* ─── 1. Category Quick Pills Row ─── */}
-      <div className="opensea-category-pills-row">
-        {categories.map((cat) => {
-          const Icon = cat.icon;
-          const isActive =
-            cat.id === "All"
-              ? filterSignificance === "All"
-              : filterSignificance === cat.id;
-
-          return (
-            <button
-              key={cat.id}
-              type="button"
-              className={`opensea-filter-pill ${isActive ? "active" : ""}`}
-              onClick={() => setFilterSignificance(cat.id === "All" ? "All" : cat.id)}
-            >
-              <Icon size={14} color={isActive ? "currentColor" : cat.color} />
-              <span>{cat.label}</span>
-            </button>
-          );
-        })}
-      </div>
-
-      {/* ─── 2. OpenSea Main Control Toolbar ─── */}
+      {/* ─── 1. GenoChain Main Control Toolbar ─── */}
       <div className="opensea-toolbar-row">
         {/* Left: Sidebar Toggle + Search */}
         <div className="toolbar-left">
@@ -326,6 +335,89 @@ export default function GenomicFilterBar({ children, onPurchase }) {
             </button>
           </div>
         </div>
+      </div>
+
+      {/* ─── 2b. Serverless On-Chain Blinded Keccak-256 Trait Search ─── */}
+      <div
+        id="blind-search-panel"
+        style={{
+          display: "flex",
+          flexWrap: "wrap",
+          alignItems: "center",
+          gap: "8px",
+          padding: "10px 14px",
+          marginBottom: "12px",
+          borderRadius: "10px",
+          border: "1px solid var(--border-subtle)",
+          background: "var(--bg-surface)"
+        }}
+      >
+        <div style={{ display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "12px", fontWeight: 700, color: "var(--accent-cyan)", whiteSpace: "nowrap" }}>
+          <SealedCipherIcon size={14} color="var(--accent-cyan)" />
+          <span>{t("blindSearchTitle")}:</span>
+        </div>
+        <select
+          id="blind-search-key"
+          className="field-select"
+          style={{ width: "auto", minWidth: "155px", height: "34px", padding: "0 10px", fontSize: "12px" }}
+          aria-label={t("blindSearchKey")}
+          value={blindKey}
+          onChange={(e) => setBlindKey(e.target.value)}
+        >
+          <option value="gene">{t("filterSearchKeyGene")}</option>
+          <option value="disease">{t("filterSearchKeyDisease")}</option>
+          <option value="hpo">{t("filterSearchKeyHpo")}</option>
+          <option value="ancestry">{t("filterSearchKeyAncestry")}</option>
+        </select>
+        <input
+          id="blind-search-val"
+          type="text"
+          className="field-input"
+          style={{ flex: "1 1 180px", maxWidth: "240px", height: "34px" }}
+          placeholder={t("blindSearchVal")}
+          aria-label={t("blindSearchVal")}
+          value={blindVal}
+          onChange={(e) => setBlindVal(e.target.value)}
+        />
+        <input
+          id="blind-search-salt"
+          type="text"
+          className="field-input"
+          style={{ width: "210px", height: "34px", fontFamily: "var(--font-mono)", fontSize: "11.5px" }}
+          placeholder="GENOCHAIN_COHORT_SALT_V1"
+          aria-label={t("blindSaltLabel")}
+          value={blindSalt}
+          onChange={(e) => setBlindSalt(e.target.value)}
+        />
+        <button
+          id="blind-search-submit-btn"
+          type="button"
+          className="btn-terminal btn-terminal-primary"
+          style={{ height: "34px", padding: "0 12px", fontSize: "12px", whiteSpace: "nowrap" }}
+          title={t("blindSearchBtn")}
+          disabled={searchingBlind}
+          onClick={handleBlindSearch}
+        >
+          <SearchGlassIcon size={13} />
+          <span>{searchingBlind ? "..." : t("blindSearchBtn")}</span>
+        </button>
+        {Array.isArray(blindMatchIds) && (
+          <>
+            <span style={{ fontSize: "11.5px", fontFamily: "var(--font-mono)", color: "var(--accent-emerald-text)", whiteSpace: "nowrap" }}>
+              {lang === "vi" ? "Khớp" : "Match"}: {blindMatchIds.length} ({blindTagHex.slice(0, 10)}...)
+            </span>
+            <button
+              id="blind-search-clear-btn"
+              type="button"
+              className="btn-terminal"
+              style={{ height: "34px", padding: "0 10px", fontSize: "12px", whiteSpace: "nowrap" }}
+              title={t("blindSearchClear")}
+              onClick={handleClearBlindSearch}
+            >
+              {t("blindSearchClear")}
+            </button>
+          </>
+        )}
       </div>
 
       {/* ─── 3. OpenSea Active Removable Filter Chips Bar ─── */}
@@ -417,7 +509,8 @@ export default function GenomicFilterBar({ children, onPurchase }) {
                         <input
                           type="number"
                           className="price-num-input"
-                          placeholder="Min"
+                          aria-label={t("filterMinPlaceholder")}
+                          placeholder={t("filterMinPlaceholder")}
                           value={localMin}
                           onChange={(e) => setLocalMin(e.target.value)}
                         />
@@ -425,7 +518,8 @@ export default function GenomicFilterBar({ children, onPurchase }) {
                         <input
                           type="number"
                           className="price-num-input"
-                          placeholder="Max"
+                          aria-label={t("filterMaxPlaceholder")}
+                          placeholder={t("filterMaxPlaceholder")}
                           value={localMax}
                           onChange={(e) => setLocalMax(e.target.value)}
                         />
@@ -647,7 +741,7 @@ export default function GenomicFilterBar({ children, onPurchase }) {
         )}
 
         {/* Right Main Catalog Content */}
-        <main className={`opensea-catalog-main ${!showSidebar ? "full-width" : ""}`}>
+        <div className={`opensea-catalog-main ${!showSidebar ? "full-width" : ""}`}>
           {children ? (
             children
           ) : viewMode === "table" ? (
@@ -655,7 +749,7 @@ export default function GenomicFilterBar({ children, onPurchase }) {
           ) : (
             <DatasetCatalogGrid onPurchase={onPurchase} />
           )}
-        </main>
+        </div>
       </div>
     </div>
   );

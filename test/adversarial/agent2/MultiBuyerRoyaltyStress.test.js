@@ -192,7 +192,7 @@ describe("AGENT2 :: Concurrent Multi-Buyer Stress & Royalty Split Conservation (
     for (const b of four) {
       const t = await registry
         .connect(owner)
-        .storeTransformedCapsule(1n, b.address, `{"capsule":"A2-REAL-${b.address}"}`);
+        .storeTransformedCapsule(1n, b.address, JSON.stringify({ version: "GENO-ASYM-RSA-OAEP-v2", capsule: `A2-REAL-${b.address}`, keyCipher: "ab".repeat(256) }));
       expect((await t.wait()).status).to.equal(1);
     }
 

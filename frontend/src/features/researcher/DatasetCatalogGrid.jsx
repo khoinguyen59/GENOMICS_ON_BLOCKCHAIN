@@ -162,7 +162,7 @@ export default function DatasetCatalogGrid({ onPurchase }) {
             {t("noDatasetsFound") || "No Genomic Datasets Found"}
           </h3>
           <p className="empty-desc">
-            Không tìm thấy bộ dữ liệu di truyền phù hợp với bộ lọc hiện tại. Vui lòng thử lại với từ khóa khác hoặc xóa bộ lọc.
+            {t("noDatasetsFoundDesc")}
           </p>
         </div>
       )}

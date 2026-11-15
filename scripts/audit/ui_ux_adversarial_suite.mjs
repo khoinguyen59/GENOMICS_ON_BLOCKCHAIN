@@ -237,6 +237,62 @@ assert(
   `Verified unmount listeners and cleanup handlers in ${effectsWithCleanupOrEmptyDeps} components.`
 );
 
+console.log('\n' + '-'.repeat(80));
+console.log('MODULE 5: Domain Brand Hygiene, Emoji Prohibition & Style Token Completeness');
+console.log('-'.repeat(80));
+
+const reactComponentFiles = jsxFiles.filter(f => f.endsWith('.jsx'));
+const allCssText = cssFiles.map(f => fs.readFileSync(f, 'utf8')).join('\n');
+
+// Test 13: Zero residual OpenSea UI wordmarks or fake portfolio strings
+const brandLeaks = [];
+for (const file of reactComponentFiles) {
+  const rel = path.relative(rootDir, file);
+  const content = fs.readFileSync(file, 'utf8');
+  if (/>\s*OpenSea\s*</.test(content) || /(?:title|aria-label)\s*=\s*"[^"]*OpenSea[^"]*"/i.test(content) || content.includes('2,392.71')) {
+    brandLeaks.push(rel);
+  }
+}
+assert(
+  brandLeaks.length === 0,
+  'BRAND-01',
+  'Zero OpenSea branding wordmarks or fake portfolio ticker values leak into rendered JSX components',
+  brandLeaks.length === 0
+    ? `Verified 0 domain brand leaks across ${reactComponentFiles.length} JSX components.`
+    : `Leaked files: ${brandLeaks.join(', ')}`
+);
+
+// Test 14: Zero bare Unicode emojis or dingbat glyphs in JSX UI components
+const emojiRe = /[\u{1F300}-\u{1FAFF}\u23F3\u26A0\u263E\u2600\u2637\u25CE\u221E\u2666]/u;
+const emojiHits = [];
+for (const file of reactComponentFiles) {
+  const rel = path.relative(rootDir, file);
+  const lines = fs.readFileSync(file, 'utf8').split(/\r?\n/);
+  lines.forEach((line, idx) => {
+    if (emojiRe.test(line)) {
+      emojiHits.push(`${rel}:${idx + 1}`);
+    }
+  });
+}
+assert(
+  emojiHits.length === 0,
+  'EMOJI-01',
+  'All interactive JSX components use crisp vector GenoIcons SVGs rather than raw Unicode emojis/dingbats',
+  emojiHits.length === 0
+    ? `Verified 0 raw emoji/dingbat occurrences across ${reactComponentFiles.length} JSX files.`
+    : `Found emojis at: ${emojiHits.join(', ')}`
+);
+
+// Test 15: Core shared input class (.terminal-input) and Light-mode overrides exist in CSS
+const hasTerminalInputRule = /\.terminal-input\b/.test(allCssText);
+const lightOverrideCount = (allCssText.match(/\[data-theme="light"\]/g) || []).length;
+assert(
+  hasTerminalInputRule && lightOverrideCount >= 20,
+  'STYLE-01',
+  'Shared .terminal-input class and comprehensive [data-theme="light"] overrides exist in CSS architecture',
+  `Found .terminal-input rule=${hasTerminalInputRule}, light-mode override blocks=${lightOverrideCount}.`
+);
+
 console.log('\n' + '='.repeat(80));
 console.log('[UI/UX AUDIT] EXECUTION SUMMARY');
 console.log('='.repeat(80));

@@ -13,7 +13,8 @@ import {
   LockClosedIcon,
   ShieldCheckIcon,
   DnaHelixIcon,
-  SparklesIcon
+  SparklesIcon,
+  AlertTriangleIcon
 } from "../../components/icons/GenoIcons";
 import GenomicVisualCover from "../../components/common/GenomicVisualCover";
 import contractAddresses from "../../contracts/contractAddresses.json";
@@ -269,8 +270,8 @@ export default function OpenSeaActivityFeed() {
                 <td colSpan={7} style={{ textAlign: "center", padding: "32px 20px", color: "var(--accent-rose)", fontFamily: "var(--font-mono)", fontSize: "13px", background: "rgba(244, 63, 94, 0.05)" }}>
                   <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "8px" }}>
                     <div style={{ fontWeight: 700, fontSize: "14px", display: "flex", alignItems: "center", gap: "6px" }}>
-                      <span>⚠️</span>
-                      <span>{t("rpcErrorOccurred") || "Lỗi truy vấn RPC nguyên bản (EVM / Node Error):"}</span>
+                      <AlertTriangleIcon size={15} color="var(--accent-rose)" />
+                      <span>{t("rpcErrorOccurred")}</span>
                     </div>
                     <div style={{ color: "var(--text-secondary)", maxWidth: "800px", wordBreak: "break-word", fontSize: "12px" }}>
                       {rpcError}
@@ -309,15 +310,16 @@ export default function OpenSeaActivityFeed() {
               </tr>
             ) : (
               filteredEvents.map((ev) => {
-                const dataset = datasets.find((d) => d.dataId === ev.dataId) || datasets[0] || {};
-                const title = getLocalizedTitle ? getLocalizedTitle(dataset, lang) : dataset.disease;
+                const dataset = datasets.find((d) => d.dataId === ev.dataId) || { dataId: ev.dataId };
+                const title = (getLocalizedTitle ? getLocalizedTitle(dataset, lang) : dataset.disease) || `${t("cohortPrefix")}${ev.dataId}`;
+                const dsRoyaltyPct = Number((((dataset.royaltyBps ?? 1000)) / 100).toFixed(2));
                 const typeLabel =
                   ev.type === "purchase"
                     ? t("eventPurchase") || "Access Purchased"
                     : ev.type === "escrow"
                     ? t("eventEscrow") || "Escrow Deposited"
                     : ev.type === "royalty"
-                    ? t("eventRoyalty") || "10% EIP-2981 Royalty"
+                    ? `${dsRoyaltyPct}% ${t("eip2981RoyaltyTag")}`
                     : t("eventMint") || "Dataset Listed";
 
                 return (

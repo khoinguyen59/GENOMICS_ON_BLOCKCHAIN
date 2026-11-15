@@ -6,7 +6,8 @@ import {
   InMemoryDecryptIcon,
   IpfsMeshIcon,
   GridIcon,
-  ActivityPulseIcon
+  ActivityPulseIcon,
+  AlertTriangleIcon
 } from "../../components/icons/GenoIcons";
 import OpenSeaSpotlightShowcase from "./OpenSeaSpotlightShowcase";
 import GenomicFilterBar from "./GenomicFilterBar";
@@ -15,7 +16,14 @@ import DatasetCatalogGrid from "./DatasetCatalogGrid";
 import LicensedDatasetsView from "./LicensedDatasetsView";
 import OpenSeaActivityFeed from "./OpenSeaActivityFeed";
 
-export default function ResearcherMarketplace({ onPurchase, onDecrypt, onDownload, onDownloadPdf, onClaimRefund }) {
+export default function ResearcherMarketplace({
+  onPurchase,
+  onDecrypt,
+  onDownload,
+  onDownloadPdf,
+  onClaimRefund,
+  onRecordStudyReuse
+}) {
   const {
     researcherTab,
     setResearcherTab,
@@ -32,12 +40,14 @@ export default function ResearcherMarketplace({ onPurchase, onDecrypt, onDownloa
 
   return (
     <div className="os2-marketplace-wrapper">
+      <h1 className="sr-only">{t("showcaseTabDatasets")}</h1>
       {/* Public Key On-Chain Registration Banner (compact bar when connected & unregistered) */}
       {account && !isPubKeyRegisteredOnChain && (
         <div className="os2-pubkey-alert-bar">
           <div style={{ display: "flex", alignItems: "center", gap: "8px", flex: 1, minWidth: "260px" }}>
-            <span style={{ fontSize: "12px", color: "var(--accent-amber)", lineHeight: "1.4" }}>
-              ⚠ {t("registerKeyBanner")}
+            <AlertTriangleIcon size={15} color="var(--accent-amber-text)" style={{ flexShrink: 0 }} />
+            <span style={{ fontSize: "12.5px", fontWeight: 600, color: "var(--accent-amber-text)", lineHeight: "1.4" }}>
+              {t("registerKeyBanner")}
             </span>
           </div>
           <button
@@ -61,8 +71,8 @@ export default function ResearcherMarketplace({ onPurchase, onDecrypt, onDownloa
           <div id="os2-collections-section" className="os2-collections-divider">
             <div className="os2-section-header" style={{ marginBottom: 0 }}>
               <div>
-                <h3 className="os2-section-title">Explore All Genomic Cohorts</h3>
-                <p className="os2-section-subtitle"> Filter by chromosome, dbSNP rsID, variant consequence & on-chain escrow status</p>
+                <h3 className="os2-section-title">{t("exploreAllCohorts")}</h3>
+                <p className="os2-section-subtitle">{t("exploreAllCohortsDesc")}</p>
               </div>
             </div>
 
@@ -90,8 +100,10 @@ export default function ResearcherMarketplace({ onPurchase, onDecrypt, onDownloa
                 </button>
 
                 <button
+                  id="btn-tab-licensed"
                   type="button"
                   className="collection-subtab-btn"
+                  title={t("tabLicensedDatasets")}
                   onClick={() => setResearcherTab("licensed")}
                 >
                   <InMemoryDecryptIcon size={14} />
@@ -147,6 +159,7 @@ export default function ResearcherMarketplace({ onPurchase, onDecrypt, onDownloa
             onDownload={onDownload}
             onDownloadPdf={onDownloadPdf}
             onClaimRefund={onClaimRefund}
+            onRecordStudyReuse={onRecordStudyReuse}
           />
         </section>
       )}

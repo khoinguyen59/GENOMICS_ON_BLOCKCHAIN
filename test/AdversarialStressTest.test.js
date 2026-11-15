@@ -360,7 +360,7 @@ describe("Adversarial Stress Testing & Edge Cases Audit (Genomics on Blockchain)
       await registry.connect(researcher1).grantAccess(1);
 
       // Store capsule
-      const sampleCapsule = '{"version":"GENO-ASYM-RSA-OAEP-v2","keyCipher":"abcdef"}';
+      const sampleCapsule = JSON.stringify({ version: "GENO-ASYM-RSA-OAEP-v2", keyCipher: "ab".repeat(256) });
       await registry.connect(owner).storeTransformedCapsule(1, researcher1.address, sampleCapsule);
 
       // 1. Data owner can query

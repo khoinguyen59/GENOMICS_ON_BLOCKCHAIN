@@ -16,6 +16,7 @@ export function useGenomicFilters({ datasets = [] } = {}) {
   const [maxPrice, setMaxPrice] = useState("");
   const [filterStatus, setFilterStatus] = useState("All");
   const [filterDuration, setFilterDuration] = useState("All");
+  const [blindMatchIds, setBlindMatchIds] = useState(null);
   const [sortBy, setSortBy] = useState("newest");
 
   const resetFilters = useCallback(() => {
@@ -23,7 +24,9 @@ export function useGenomicFilters({ datasets = [] } = {}) {
     setFilterSignificance("All"); setFilterConsequence("All"); setFilterZygosity("All");
     setFilterRegion("All"); setFilterFormat("All"); setFilterAssembly("All");
     setFilterPlatform("All"); setFilterPriceTier("All"); setMinPrice("");
-    setMaxPrice(""); setFilterStatus("All"); setFilterDuration("All"); setSortBy("newest");
+    setMaxPrice(""); setFilterStatus("All"); setFilterDuration("All");
+    setBlindMatchIds(null);
+    setSortBy("newest");
   }, []);
 
   const filteredDatasets = useMemo(() => {
@@ -52,12 +55,13 @@ export function useGenomicFilters({ datasets = [] } = {}) {
       const matchesMaxPrice = maxPrice === "" || isNaN(Number(maxPrice)) || Number(d.price) <= Number(maxPrice);
       const matchesStatus = filterStatus === "All" || d.status === filterStatus;
       const matchesDuration = filterDuration === "All" || String(d.durationDays) === String(filterDuration);
+      const matchesBlind = !Array.isArray(blindMatchIds) || blindMatchIds.includes(d.dataId);
 
       return (
         matchesKeyword && matchesChrom && matchesGene && matchesSig &&
         matchesCons && matchesZyg && matchesRegion && matchesFormat &&
         matchesAssembly && matchesPlatform && matchesPriceTier &&
-        matchesMinPrice && matchesMaxPrice && matchesStatus && matchesDuration
+        matchesMinPrice && matchesMaxPrice && matchesStatus && matchesDuration && matchesBlind
       );
     });
 
@@ -72,7 +76,7 @@ export function useGenomicFilters({ datasets = [] } = {}) {
     datasets, filterKeyword, filterChromosome, filterGene, filterSignificance,
     filterConsequence, filterZygosity, filterRegion, filterFormat,
     filterAssembly, filterPlatform, filterPriceTier, minPrice, maxPrice,
-    filterStatus, filterDuration, sortBy
+    filterStatus, filterDuration, blindMatchIds, sortBy
   ]);
 
   const getActiveLang = (lang) => {
@@ -153,7 +157,7 @@ export function useGenomicFilters({ datasets = [] } = {}) {
     filterAssembly, setFilterAssembly, filterPlatform, setFilterPlatform,
     filterPriceTier, setFilterPriceTier, minPrice, setMinPrice,
     maxPrice, setMaxPrice, filterStatus, setFilterStatus,
-    filterDuration, setFilterDuration, sortBy, setSortBy,
+    filterDuration, setFilterDuration, blindMatchIds, setBlindMatchIds, sortBy, setSortBy,
     resetFilters, filteredDatasets, getLocalizedTitle, getLocalizedTrait,
     getLocalizedSignificance, getLocalizedConsequence, getLocalizedZygosity
   };

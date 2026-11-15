@@ -1083,11 +1083,14 @@
 
 .price-num-input {
   flex: 1;
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
   height: 34px;
   background: var(--bg-input);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
-  padding: 0 10px;
+  padding: 0 8px;
   font-size: 12px;
   color: var(--text-primary);
   font-family: var(--font-mono);
@@ -1116,8 +1119,17 @@
   transition: background var(--transition-fast);
 }
 
+[data-theme="light"] .btn-apply-price {
+  background: #0369a1;
+  color: #ffffff;
+}
+
 .btn-apply-price:hover {
   background: var(--accent-cyan-light);
+}
+
+[data-theme="light"] .btn-apply-price:hover {
+  background: #075985;
 }
 
 .btn-clear-price {
@@ -1130,6 +1142,10 @@
   font-size: 11.5px;
   cursor: pointer;
   transition: all var(--transition-fast);
+}
+
+[data-theme="light"] .btn-clear-price {
+  color: #475569;
 }
 
 .btn-clear-price:hover {
@@ -1566,6 +1582,10 @@
   color: var(--text-muted);
 }
 
+[data-theme="light"] .nft-trait-pill.subtle {
+  color: #475569;
+}
+
 /* Card Footer: Price & Action */
 .nft-card-footer {
   padding: 12px 18px;
@@ -1876,5 +1896,69 @@
 [data-theme="light"] .activity-thumb-box {
   background: #f1f5f9;
   border-color: #e2e8f0;
+}
+
+[data-theme="light"] .chrom-chip,
+[data-theme="light"] .sig-chip.sig-trait {
+  background: #e0f2fe;
+  border-color: #7dd3fc;
+  color: #0369a1;
+}
+
+[data-theme="light"] .sig-chip.sig-trait::before {
+  background: #0284c7;
+  box-shadow: none;
+}
+
+[data-theme="light"] .sig-chip.sig-pathogenic {
+  background: #fef2f2;
+  border-color: #fecaca;
+  color: #b91c1c;
+}
+
+[data-theme="light"] .sig-chip.sig-pharmaco {
+  background: #f5f3ff;
+  border-color: #ddd6fe;
+  color: #6d28d9;
+}
+
+[data-theme="light"] .sig-chip.sig-carrier {
+  background: #fffbeb;
+  border-color: #fde68a;
+  color: #b45309;
+}
+
+[data-theme="light"] .sig-chip.sig-benchmark {
+  background: #ecfdf5;
+  border-color: #a7f3d0;
+  color: #047857;
+}
+
+[data-theme="light"] .sidebar-chip.active {
+  background: #eff6ff;
+  border-color: #93c5fd;
+  color: #1d4ed8;
+}
+
+@media (max-width: 768px) {
+  .collection-info-block,
+  .toolbar-left,
+  .opensea-search-inner-toolbar {
+    min-width: 0 !important;
+    max-width: 100% !important;
+  }
+
+  .opensea-collection-nav-bar,
+  .collection-subtabs-group,
+  .opensea-marketplace-toolbar,
+  .toolbar-right {
+    flex-wrap: wrap !important;
+    gap: 8px;
+    max-width: 100%;
+  }
+
+  .opensea-nft-grid {
+    grid-template-columns: 1fr !important;
+  }
 }
 

@@ -74,6 +74,8 @@ export function DatasetProvider({ children }) {
       setFilterStatus: filters.setFilterStatus,
       filterDuration: filters.filterDuration,
       setFilterDuration: filters.setFilterDuration,
+      blindMatchIds: filters.blindMatchIds,
+      setBlindMatchIds: filters.setBlindMatchIds,
       sortBy: filters.sortBy,
       setSortBy: filters.setSortBy,
       resetFilters: filters.resetFilters,

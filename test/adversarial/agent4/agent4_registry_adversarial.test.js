@@ -363,14 +363,15 @@ describe("AGENT4 / PART1 — adversarial controls that HOLD", function () {
       expect((await reg3.accessGrants(1n, buyerA.address)).isGranted).to.equal(false);
 
       const seller0 = await nst.balanceOf(owner.address);
-      await (await reg3.storeTransformedCapsule(1n, buyerA.address, "GNC1|capsule-nst")).wait();
+      const capsuleNst = JSON.stringify({ version: "GENO-ASYM-RSA-OAEP-v2", tag: "GNC1|capsule-nst", keyCipher: "ab".repeat(256) });
+      await (await reg3.storeTransformedCapsule(1n, buyerA.address, capsuleNst)).wait();
       const dep = await reg3.escrowDeposits(1n, buyerA.address);
       expect(dep.released).to.equal(true);
       expect(dep.capsuleDelivered).to.equal(true);
       expect(dep.amount).to.equal(PRICE, "DEPOSIT NOT ZEROED -> dead storage, documented");
       expect(await nst.balanceOf(owner.address)).to.equal(seller0 + PRICE);
       expect(await nst.balanceOf(reg3.target)).to.equal(escrow0, "escrow fully drained -> conservation holds");
-      expect(await reg3.connect(buyerA).getTransformedCapsule(1n)).to.equal("GNC1|capsule-nst");
+      expect(await reg3.connect(buyerA).getTransformedCapsule(1n)).to.equal(capsuleNst);
       // no double refund / no double release
       await expect(reg3.connect(buyerA).claimEscrowRefund(1n)).to.be.revertedWithCustomError(
         reg3,
@@ -520,7 +521,7 @@ describe("AGENT4 / PART1 — adversarial controls that HOLD", function () {
     it("delivery and refund are mutually exclusive (no double-spend of the same escrow)", async function () {
       const { dataId } = await register("mutual-exclusion");
       await (await registry.connect(buyerA).grantAccessWithEscrow(dataId, 2n * 86400n)).wait();
-      await (await registry.storeTransformedCapsule(dataId, buyerA.address, "caps-1")).wait();
+      await (await registry.storeTransformedCapsule(dataId, buyerA.address, JSON.stringify({ version: "GENO-ASYM-RSA-OAEP-v2", tag: "caps-1", keyCipher: "ab".repeat(256) }))).wait();
       await expect(registry.connect(buyerA).claimEscrowRefund(dataId)).to.be.revertedWithCustomError(
         registry,
         "CapsuleAlreadyDelivered"
@@ -591,7 +592,7 @@ describe("AGENT4 / PART1 — adversarial controls that HOLD", function () {
       expect(await registry.getCapsuleForBuyer(dataId, buyerA.address)).to.equal("", "empty before any purchase");
 
       await (await registry.connect(buyerA).grantAccess(dataId)).wait();
-      await (await registry.storeTransformedCapsule(dataId, buyerA.address, "caps-b")).wait();
+      await (await registry.storeTransformedCapsule(dataId, buyerA.address, JSON.stringify({ version: "GENO-ASYM-RSA-OAEP-v2", tag: "caps-b", keyCipher: "ab".repeat(256) }))).wait();
       expect(await registry.hasActiveAccess(dataId, buyerA.address)).to.equal(true);
       // re-purchase while the grant is live
       await expect(registry.connect(buyerA).grantAccess(dataId)).to.be.revertedWithCustomError(
@@ -685,8 +686,9 @@ describe("AGENT4 / PART1 — adversarial controls that HOLD", function () {
       expect(await registry.capsuleWorkerAuthorizer(dataId, stranger.address)).to.equal(owner.address);
       // the authorised worker may deliver a capsule while the authoriser still owns the NFT
       await (await registry.connect(buyerA).grantAccess(dataId)).wait();
-      await (await registry.connect(stranger).storeTransformedCapsule(dataId, buyerA.address, "by-worker")).wait();
-      expect(await registry.connect(buyerA).getTransformedCapsule(dataId)).to.equal("by-worker");
+      const workerCapsule = JSON.stringify({ version: "GENO-ASYM-RSA-OAEP-v2", tag: "by-worker", keyCipher: "ab".repeat(256) });
+      await (await registry.connect(stranger).storeTransformedCapsule(dataId, buyerA.address, workerCapsule)).wait();
+      expect(await registry.connect(buyerA).getTransformedCapsule(dataId)).to.equal(workerCapsule);
 
       await (await nft.transferFrom(owner.address, buyerB.address, 1n)).wait();
       expect(await registry.authorizedCapsuleWorkers(dataId, stranger.address)).to.equal(false);
@@ -719,8 +721,9 @@ describe("AGENT4 / PART1 — adversarial controls that HOLD", function () {
         "AccessNotGranted"
       );
       // direct grant without payment still allows the owner path to deliver a capsule
-      await (await registry.storeTransformedCapsule(dataId, buyerA.address, "c")).wait();
-      expect(await registry.connect(buyerA).getTransformedCapsule(dataId)).to.equal("c");
+      const directCapsule = JSON.stringify({ version: "GENO-ASYM-RSA-OAEP-v2", tag: "c", keyCipher: "ab".repeat(256) });
+      await (await registry.storeTransformedCapsule(dataId, buyerA.address, directCapsule)).wait();
+      expect(await registry.connect(buyerA).getTransformedCapsule(dataId)).to.equal(directCapsule);
     });
   });
 

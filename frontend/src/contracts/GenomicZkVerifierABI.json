@@ -581,6 +581,35 @@
     "inputs": [
       {
         "internalType": "bytes32",
+        "name": "targetTraitId",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "variantCommitment",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "address",
+        "name": "donor",
+        "type": "address"
+      }
+    ],
+    "name": "hasVerifiedTraitVariant",
+    "outputs": [
+      {
+        "internalType": "bool",
+        "name": "",
+        "type": "bool"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
         "name": "variantCommitment",
         "type": "bytes32"
       },
@@ -748,12 +777,12 @@
     "inputs": [
       {
         "internalType": "bytes32",
-        "name": "",
+        "name": "variantCommitment",
         "type": "bytes32"
       },
       {
         "internalType": "address",
-        "name": "",
+        "name": "donor",
         "type": "address"
       }
     ],
@@ -763,6 +792,19 @@
         "internalType": "bool",
         "name": "",
         "type": "bool"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "vkEpoch",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
       }
     ],
     "stateMutability": "view",

@@ -43,11 +43,12 @@ export default function Navbar() {
             id="nav-search-input"
             type="text"
             className="os2-search-input"
-            placeholder="Search OpenSea"
+            placeholder={t("searchPlaceholderNav")}
+            aria-label={t("searchPlaceholderNav")}
             value={filterKeyword}
-            onChange={(e) => {
-              setFilterKeyword(e.target.value);
-              if (userRole !== "researcher") {
+            onChange={(e) => setFilterKeyword(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && userRole !== "researcher") {
                 setUserRole("researcher");
                 setResearcherTab("catalog");
               }
@@ -58,7 +59,7 @@ export default function Navbar() {
               type="button"
               className="os2-search-clear"
               onClick={() => setFilterKeyword("")}
-              title="Clear search"
+              title={t("clearAll")}
             >
               <CloseCrossIcon size={12} color="var(--text-muted)" />
             </button>
@@ -68,8 +69,44 @@ export default function Navbar() {
         </div>
       </div>
 
-      {/* Right: Sign in / Wallet Cluster & Profile Circle */}
+      {/* Right: Role Switcher, Sign in / Wallet Cluster & Profile Circle */}
       <div className="os2-top-right">
+        <div className="os2-role-switch-group" role="group" aria-label="Role Switcher">
+          <button
+            id="navbar-role-researcher"
+            type="button"
+            className={`os2-role-btn ${userRole === "researcher" ? "active" : ""}`}
+            title={t("roleNavResearcher") || "Researcher"}
+            onClick={() => {
+              setUserRole("researcher");
+              setResearcherTab("catalog");
+            }}
+          >
+            {t("roleNavResearcher") || "Researcher"}
+          </button>
+          <button
+            id="navbar-role-donor"
+            type="button"
+            className={`os2-role-btn ${userRole === "donor" ? "active" : ""}`}
+            title={t("roleNavProvider") || "Provider"}
+            onClick={() => {
+              setUserRole("donor");
+              setDonorTab("upload");
+            }}
+          >
+            {t("roleNavProvider") || "Provider"}
+          </button>
+          <button
+            id="navbar-role-admin"
+            type="button"
+            className={`os2-role-btn ${userRole === "admin" ? "active" : ""}`}
+            title={t("roleNavAdmin") || "Admin"}
+            onClick={() => setUserRole("admin")}
+          >
+            {t("roleNavAdmin") || "Admin"}
+          </button>
+        </div>
+
         {account ? (
           <div className="os2-wallet-cluster">
             <button
@@ -128,26 +165,69 @@ export default function Navbar() {
           <button
             type="button"
             className="os2-signin-btn"
-            onClick={connectWallet}
+            onClick={() => connectWallet()}
           >
-            Sign in
+            {t("connectWallet")}
           </button>
         )}
 
-        {/* OpenSea OS2 Profile Circle Icon */}
+        {/* Language & Theme Switchers */}
+        <div className="os2-pill-group os2-lang-group" role="group" aria-label="Language Switcher">
+          <button
+            id="navbar-lang-vi"
+            type="button"
+            className={`os2-lang-btn ${lang === "vi" ? "active" : ""}`}
+            title={t("langVi")}
+            onClick={() => changeLanguage("vi")}
+          >
+            VI
+          </button>
+          <button
+            id="navbar-lang-en"
+            type="button"
+            className={`os2-lang-btn ${lang === "en" ? "active" : ""}`}
+            title={t("langEn")}
+            onClick={() => changeLanguage("en")}
+          >
+            EN
+          </button>
+        </div>
+
         <button
+          id="navbar-theme-toggle"
+          type="button"
+          className="os2-lang-mini-btn hide-sm"
+          title={t("themeToggleTitle")}
+          aria-label={t("themeToggleTitle")}
+          onClick={() => setTheme(theme === "light" ? "dark" : "light")}
+        >
+          {theme === "light" ? (
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+            </svg>
+          ) : (
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <circle cx="12" cy="12" r="5" />
+              <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" />
+            </svg>
+          )}
+        </button>
+
+        {/* GenoChain Profile / Sovereign Vault Shortcut */}
+        <button
+          id="navbar-profile-btn"
           type="button"
           className="os2-profile-avatar-btn"
+          title={t("navProfile")}
+          aria-label={t("navProfile")}
           onClick={() => {
-            if (userRole === "donor") {
-              setUserRole("researcher");
-              setResearcherTab("catalog");
-            } else {
-              setUserRole("donor");
-              setDonorTab("vault");
+            if (account && navigator.clipboard) {
+              navigator.clipboard.writeText(account).catch(() => {});
+              showToast(t("profileCopiedMsg"));
             }
+            setUserRole("donor");
+            setDonorTab("vault");
           }}
-          title={userRole === "donor" ? "Switch to Discover Marketplace" : "Open Sovereign Vault & Studio"}
         >
           <svg viewBox="0 -960 960 960" width="22" height="22" fill="currentColor">
             <path d="M234-276q51-39 114-61.5T480-360q69 0 132 22.5T726-276q35-41 54.5-93T800-480q0-133-93.5-226.5T480-800q-133 0-226.5 93.5T160-480q0 59 19.5 111t54.5 93Zm246-164q-59 0-99.5-40.5T340-580q0-59 40.5-99.5T480-720q59 0 99.5 40.5T620-580q0 59-40.5 99.5T480-440Zm0 360q-83 0-156-31.5T197-197q-54-54-85.5-127T80-480q0-83 31.5-156T197-763q54-54 127-85.5T480-880q83 0 156 31.5T763-763q54 54 85.5 127T880-480q0 83-31.5 156T763-197q-54 54-127 85.5T480-80Z" />

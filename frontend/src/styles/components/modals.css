@@ -114,14 +114,29 @@
 /* ─── OpenSea 2-Column Responsive Modal Content Grid ─── */
 .opensea-modal-content-grid {
   display: grid;
-  grid-template-columns: 400px 1fr;
-  gap: 26px;
-  padding: 24px;
+  grid-template-columns: 360px 1fr;
+  gap: 20px;
+  padding: 18px 22px;
 }
 
 @media (max-width: 860px) {
   .opensea-modal-content-grid {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 768px) {
+  .terminal-modal-backdrop {
+    padding: 10px;
+  }
+
+  .opensea-modal-content-grid {
+    padding: 14px;
+    gap: 14px;
+  }
+
+  .opensea-spec-row {
+    flex-wrap: wrap;
   }
 }
 
@@ -246,11 +261,12 @@
 .opensea-modal-right-col {
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 12px;
+  min-width: 0;
 }
 
 .opensea-modal-title {
-  font-size: 25px;
+  font-size: 22px;
   font-weight: 800;
   letter-spacing: -0.02em;
   color: var(--text-primary);
@@ -293,8 +309,14 @@
 
 .opensea-traits-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+@media (max-width: 900px) {
+  .opensea-traits-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 .opensea-trait-card {
@@ -324,12 +346,12 @@
 }
 
 .opensea-trait-val {
-  font-size: 14.5px;
+  font-size: 13px;
   font-weight: 700;
   color: var(--text-primary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.25;
 }
 
 .opensea-trait-rarity {
@@ -508,33 +530,59 @@
   gap: 12px;
 }
 
-/* ─── Floating Toast Notifications (Floating Glass Pills) ─── */
+/* ─── Floating Toast Notifications (Bottom-Right Above Footer Bar, Clear of Alert Strip) ─── */
 .terminal-toast {
   position: fixed;
-  bottom: 28px;
-  right: 28px;
-  background: rgba(14, 22, 38, 0.92);
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  padding: 12px 20px;
-  border-radius: var(--radius-full);
-  font-size: 14px;
+  bottom: 38px;
+  right: 24px;
+  max-width: 420px;
+  background: rgba(14, 22, 38, 0.94);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  padding: 10px 14px;
+  border-radius: var(--radius-md);
+  font-size: 13px;
   font-family: var(--font-sans);
   font-weight: 600;
   color: #ffffff;
   display: flex;
   align-items: center;
   gap: 10px;
-  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.6), 0 0 20px rgba(56, 189, 248, 0.15);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45), 0 0 16px rgba(56, 189, 248, 0.15);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
-  z-index: 9999;
-  animation: toastSlideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  z-index: 1200;
+  animation: toastSlideUp 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.terminal-toast-msg {
+  flex: 1;
+  min-width: 0;
+  line-height: 1.35;
+}
+
+.toast-close-btn {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: color var(--transition-fast), background var(--transition-fast);
+}
+
+.toast-close-btn:hover {
+  color: var(--text-primary);
+  background: rgba(148, 163, 184, 0.18);
 }
 
 @keyframes toastSlideUp {
   from {
     opacity: 0;
-    transform: translateY(20px) scale(0.95);
+    transform: translateY(10px) scale(0.98);
   }
   to {
     opacity: 1;
@@ -630,5 +678,29 @@
   background: rgba(255, 255, 255, 0.98);
   border: 1px solid var(--border-medium);
   color: var(--text-primary);
-  box-shadow: var(--shadow-modal);
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.14);
+}
+
+[data-theme="light"] .toast-info {
+  border-color: #93c5fd;
+  color: #0f172a;
+}
+
+[data-theme="light"] .toast-success {
+  border-color: #6ee7b7;
+  color: #065f46;
+}
+
+[data-theme="light"] .toast-error {
+  border-color: #fca5a5;
+  color: #991b1b;
+}
+
+@media (max-width: 768px) {
+  .terminal-toast {
+    left: 12px;
+    right: 12px;
+    bottom: 38px;
+    max-width: none;
+  }
 }

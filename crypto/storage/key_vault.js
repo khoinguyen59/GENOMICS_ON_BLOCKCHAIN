@@ -47,7 +47,7 @@ async function withStore(name, mode, fn) {
   return new Promise((resolve, reject) => {
     const tx = db.transaction(name, mode);
     const req = fn(tx.objectStore(name));
-    req.onsuccess = () => resolve(req.result !== undefined ? req.result : true);
+    req.onsuccess = () => resolve(req.result !== undefined ? req.result : (mode === "readwrite" ? true : null));
     req.onerror = () => reject(req.error);
   });
 }
@@ -72,7 +72,7 @@ export async function loadOwnerCapsulePersistent(rawCid, account = null) {
   const scopedKey = makeScopedCidKey(rawCid, account);
   try {
     const idb = await withStore("vault_capsules", "readonly", (s) => s.get(scopedKey));
-    if (idb) return idb;
+    if (typeof idb === "string" && idb.length > 0) return idb;
   } catch (e) { console.warn("IndexedDB capsule read error:", e); }
   if (memCapsuleStore.has(scopedKey)) return memCapsuleStore.get(scopedKey);
   if (!account) {
@@ -208,7 +208,8 @@ export async function loadPersistentKeyPair(account) {
   const norm = account.toLowerCase();
   activeVaultAccount = norm;
   const res = await withStore("keypairs", "readonly", (s) => s.get(norm));
-  return res !== null ? (res || memKeyStore.get(norm) || null) : (memKeyStore.get(norm) || null);
+  if (res && typeof res === "object" && res.publicKey && res.privateKey) return res;
+  return memKeyStore.get(norm) || null;
 }
 async function deriveSigAesKey(signer, account) {
   const sig = await signer.signMessage(`GENOMICS_IDENTITY_KEY_BACKUP:${account.toLowerCase()}:v1`);

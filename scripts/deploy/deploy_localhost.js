@@ -4,6 +4,7 @@ import path from "node:path";
 import { encryptGenomicData, generateClinicalPdfReport } from "../../crypto/client_crypto.js";
 import { buildPhenopacket } from "../../ipfs/phenopacket_builder.js";
 import { computeIpfsCidV0, cacheLocalIpfsContent } from "../../ipfs/pinata_uploader.js";
+import { pinFileToKubo, pinJsonToKubo } from "../../ipfs/kubo_client.js";
 
 async function main() {
   console.log("==================================================");
@@ -43,6 +44,11 @@ async function main() {
   await zkVerifier.waitForDeployment();
   console.log(`[OK] GenomicZkVerifier deployed at: ${zkVerifier.target}`);
 
+  // Link GenomicZkVerifier in GenomicsRegistry (zk-Genomics Verification Engine)
+  const linkZkTx = await registry.connect(deployer).setZkVerifier(zkVerifier.target);
+  await linkZkTx.wait();
+  console.log(`[OK] GenomicsRegistry linked to GenomicZkVerifier at: ${zkVerifier.target}`);
+
   // 4. Authorize Registry in NFT
   console.log("\n4. Authorizing GenomicsRegistry in GenomicNFT...");
   const authTx = await nft.connect(deployer).setRegistryContract(registry.target);
@@ -58,9 +64,19 @@ async function main() {
   // 5. Seed On-chain Data
   console.log("\n5. Seeding authenticated genomic datasets...");
 
-  // Seed 1: 1000 Genomes Vietnamese Kinh (KHV)
-  const seedVcf1 =
-    "##fileformat=VCFv4.2\n#CHROM\tPOS\tID\tREF\tALT\tINFO\nchr12\t111803962\trs671\tG\tA\tAF=0.38000;GENE=ALDH2;TRAIT=1000G_KHV_WGS";
+  const loadVcf = (relPath, fallback) => {
+    const fullPath = path.resolve(relPath);
+    if (fs.existsSync(fullPath)) {
+      return fs.readFileSync(fullPath, "utf8");
+    }
+    return fallback;
+  };
+
+  // Seed 1: 1000 Genomes Vietnamese Kinh (KHV) Authentic WGS VCF
+  const seedVcf1 = loadVcf(
+    "data/diverse_real_datasets/KHV_chr12_1000genomes.vcf",
+    "##fileformat=VCFv4.2\n##fileDate=20260919\n##source=1000Genomes_Phase3_KHV_WGS\n##reference=GRCh38\n##contig=<ID=chr12,length=133275309,assembly=GRCh38>\n##INFO=<ID=AF,Number=A,Type=Float,Description=\"Global Allele Frequency\">\n##INFO=<ID=GENE,Number=1,Type=String,Description=\"Gene Symbol\">\n##INFO=<ID=TRAIT,Number=1,Type=String,Description=\"Genomic Trait\">\n##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">\n#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tKHV01\nchr12\t111803962\trs671\tG\tA\t100\tPASS\tAF=0.38000;GENE=ALDH2;TRAIT=1000G_KHV_WGS\tGT\t0/1\n"
+  );
   const enc1 = await encryptGenomicData(seedVcf1);
   const rawCid1 = await computeIpfsCidV0(enc1.payload);
 
@@ -70,7 +86,11 @@ async function main() {
     gene: "ALDH2 / ADH1B Multi-locus Loci (chr12)",
     variant: "rs671 (c.1510G>A)",
   });
-  const encPdf1 = await encryptGenomicData(pdfBytes1);
+  const cleanKeyHex1 = enc1.keyHex.replace(/^0x/, "").toLowerCase();
+  const summaryKeyHex1 = ethers
+    .sha256(ethers.toUtf8Bytes(`GENOCHAIN_SUMMARY_PDF_DOMAIN_V1:${cleanKeyHex1}`))
+    .slice(2);
+  const encPdf1 = await encryptGenomicData(pdfBytes1, summaryKeyHex1);
   const summaryCid1 = await computeIpfsCidV0(encPdf1.payload);
 
   const pheno1 = buildPhenopacket({
@@ -90,6 +110,15 @@ async function main() {
   cacheLocalIpfsContent(summaryCid1, encPdf1.payload);
   cacheLocalIpfsContent(metaCid1, new TextEncoder().encode(metaJson1));
 
+  try {
+    await pinFileToKubo(enc1.payload, "seed1_1000g_raw.enc", "application/octet-stream");
+    await pinFileToKubo(encPdf1.payload, "seed1_1000g_report.enc", "application/pdf");
+    await pinJsonToKubo(pheno1, "phenopacket_1000g.json");
+    console.log("[IPFS] Seed #1 pinned to local Kubo daemon");
+  } catch (kuboErr) {
+    console.warn("[IPFS] Kubo daemon pin note for Seed #1:", kuboErr?.message || kuboErr);
+  }
+
   const tx1 = await registry.connect(deployer).registerGenomicData(
     enc1.rawDataHash,
     rawCid1,
@@ -103,9 +132,11 @@ async function main() {
   await tx1.wait();
   console.log(`[OK] Seed #1 (1000G KHV) registered on-chain: dataId=1`);
 
-  // Seed 2: ACTN3 Muscle Performance
-  const seedVcf2 =
-    "##fileformat=VCFv4.2\n#CHROM\tPOS\tID\tREF\tALT\tINFO\nchr11\t66560624\trs1815739\tC\tT\tGENE=ACTN3;TRAIT=Fast_twitch_muscle_power";
+  // Seed 2: ACTN3 Muscle Performance Authentic VCF
+  const seedVcf2 = loadVcf(
+    "data/diverse_real_datasets/ACTN3_muscle_performance_rs1815739.vcf",
+    "##fileformat=VCFv4.2\n##fileDate=20260919\n##source=NCBI_dbSNP_Build155_ACTN3\n##reference=GRCh38\n##contig=<ID=chr11,length=135086622,assembly=GRCh38>\n##INFO=<ID=AF,Number=A,Type=Float,Description=\"Global Allele Frequency\">\n##INFO=<ID=GENE,Number=1,Type=String,Description=\"Gene Symbol\">\n##INFO=<ID=TRAIT,Number=1,Type=String,Description=\"Genomic Trait\">\n##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">\n#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tSUBJECT01\nchr11\t66560624\trs1815739\tC\tT\t100\tPASS\tAF=0.42000;GENE=ACTN3;TRAIT=Fast_twitch_muscle_power\tGT\t0/1\n"
+  );
   const enc2 = await encryptGenomicData(seedVcf2);
   const rawCid2 = await computeIpfsCidV0(enc2.payload);
 
@@ -115,7 +146,11 @@ async function main() {
     gene: "ACTN3 (c.1729C>T, rs1815739, p.Arg577Ter)",
     variant: "c.1729C>T (rs1815739)",
   });
-  const encPdf2 = await encryptGenomicData(pdfBytes2);
+  const cleanKeyHex2 = enc2.keyHex.replace(/^0x/, "").toLowerCase();
+  const summaryKeyHex2 = ethers
+    .sha256(ethers.toUtf8Bytes(`GENOCHAIN_SUMMARY_PDF_DOMAIN_V1:${cleanKeyHex2}`))
+    .slice(2);
+  const encPdf2 = await encryptGenomicData(pdfBytes2, summaryKeyHex2);
   const summaryCid2 = await computeIpfsCidV0(encPdf2.payload);
 
   const pheno2 = buildPhenopacket({
@@ -134,6 +169,15 @@ async function main() {
   cacheLocalIpfsContent(rawCid2, enc2.payload);
   cacheLocalIpfsContent(summaryCid2, encPdf2.payload);
   cacheLocalIpfsContent(metaCid2, new TextEncoder().encode(metaJson2));
+
+  try {
+    await pinFileToKubo(enc2.payload, "seed2_actn3_raw.enc", "application/octet-stream");
+    await pinFileToKubo(encPdf2.payload, "seed2_actn3_report.enc", "application/pdf");
+    await pinJsonToKubo(pheno2, "phenopacket_actn3.json");
+    console.log("[IPFS] Seed #2 pinned to local Kubo daemon");
+  } catch (kuboErr) {
+    console.warn("[IPFS] Kubo daemon pin note for Seed #2:", kuboErr?.message || kuboErr);
+  }
 
   const tx2 = await registry.connect(deployer).registerGenomicData(
     enc2.rawDataHash,
@@ -209,16 +253,61 @@ async function main() {
   fs.writeFileSync(path.join(outputDir, "seedMetadata.json"), JSON.stringify(publicSeedDataStore, null, 2));
   console.log("[FILE] Public seed metadata saved (Zero keys leaked)");
 
-  // Private keys -> scripts only
+  // Encapsulated seed key capsules stored strictly in .local/ runtime vault (zero frontend or plaintext leakage)
+  const cryptoMod = await import("node:crypto");
+  const { generateAsymmetricKeyPair, exportPublicKey, packageKeyCapsule } = await import("../../crypto/client_crypto.js");
+  const localVaultDir = path.resolve(".local");
+  if (!fs.existsSync(localVaultDir)) fs.mkdirSync(localVaultDir, { recursive: true, mode: 0o700 });
+  const vaultKeyPath = path.join(localVaultDir, "dispatcher_vault.key");
+  let vaultKey;
+  if (process.env.GENOCHAIN_SEED_VAULT_SECRET) {
+    vaultKey = cryptoMod.default.createHash("sha256").update(process.env.GENOCHAIN_SEED_VAULT_SECRET, "utf8").digest();
+  } else if (fs.existsSync(vaultKeyPath)) {
+    const existingHex = fs.readFileSync(vaultKeyPath, "utf8").trim();
+    if (!/^[0-9a-fA-F]{64}$/.test(existingHex)) {
+      throw new Error("Invalid .local/dispatcher_vault.key format (expected 64 hex chars).");
+    }
+    vaultKey = Buffer.from(existingHex, "hex");
+  } else {
+    vaultKey = cryptoMod.default.randomBytes(32);
+    fs.writeFileSync(vaultKeyPath, vaultKey.toString("hex"), { mode: 0o600 });
+  }
+
+  const deployerKp = await generateAsymmetricKeyPair(false);
+  const deployerPubJwk = await exportPublicKey(deployerKp.publicKey);
+  const wrapKey = (keyHex) => {
+    const nonce = cryptoMod.default.randomBytes(12);
+    const cipher = cryptoMod.default.createCipheriv("aes-256-gcm", vaultKey, nonce);
+    const rawBytes = Buffer.from(keyHex.replace(/^0x/, ""), "hex");
+    const encrypted = Buffer.concat([cipher.update(rawBytes), cipher.final(), cipher.getAuthTag()]);
+    return Buffer.concat([nonce, encrypted]).toString("hex");
+  };
   const secretKeyStore = {
     deployerAddress: deployer.address,
+    deployerPublicKeyJwk: typeof deployerPubJwk === "string" ? JSON.parse(deployerPubJwk) : deployerPubJwk,
     seeds: [
-      { dataId: 1, rawCid: rawCid1, aesKeyHex: enc1.keyHex, ivHex: enc1.ivHex, rawDataHash: enc1.rawDataHash },
-      { dataId: 2, rawCid: rawCid2, aesKeyHex: enc2.keyHex, ivHex: enc2.ivHex, rawDataHash: enc2.rawDataHash },
+      {
+        dataId: 1,
+        rawCid: rawCid1,
+        summaryCid: summaryCid1,
+        encryptedCapsule: await packageKeyCapsule(enc1.keyHex, deployerPubJwk, deployer.address, deployer.address),
+        encryptedKeyEnvelopeHex: wrapKey(enc1.keyHex),
+        rawDataHash: enc1.rawDataHash,
+      },
+      {
+        dataId: 2,
+        rawCid: rawCid2,
+        summaryCid: summaryCid2,
+        encryptedCapsule: await packageKeyCapsule(enc2.keyHex, deployerPubJwk, deployer.address, deployer.address),
+        encryptedKeyEnvelopeHex: wrapKey(enc2.keyHex),
+        rawDataHash: enc2.rawDataHash,
+      },
     ],
   };
-  fs.writeFileSync(path.resolve("scripts/deploy/seed_keys.json"), JSON.stringify(secretKeyStore, null, 2));
-  console.log("[SECURITY] Seed keys saved to scripts/deploy/seed_keys.json");
+
+  const localSeedVaultPath = path.join(localVaultDir, "dispatcher_seed_vault.json");
+  fs.writeFileSync(localSeedVaultPath, JSON.stringify(secretKeyStore, null, 2), { mode: 0o600 });
+  console.log("[SECURITY] Seed capsules & AES-256-GCM envelopes saved strictly to .local/dispatcher_seed_vault.json");
 
   console.log("\n==================================================");
   console.log("[SUCCESS] LOCALHOST DEPLOYMENT COMPLETE!");

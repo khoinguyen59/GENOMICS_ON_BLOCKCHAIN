@@ -35,7 +35,7 @@ GenoChain follows a **Tri-Tier Synergy Architecture** bridging sovereign data ow
 │   │   W3C Web Crypto API (SubtleCrypto Native C++)                                  │  │
 │   │   - Symmetrical: AES-256-GCM Authenticated Encryption (NIST SP 800-38D)         │  │
 │   │   - Asymmetrical: RSA-OAEP 2048-bit Key Capsule Packaging                       │  │
-│   │   - Streaming: 64KB Discrete Chunked Encryption (GA4GH Crypt4GH compliant)      │  │
+│   │   - Streaming: 64KB Discrete Chunked AEAD (GA4GH Crypt4GH-Inspired Architecture) │  │
 │   │   - Key Vault: Non-Extractable Keypairs (extractable: false) in IndexedDB        │  │
 │   │   IPFS Dual-Engine Decentralized Storage                                        │  │
 │   │   - Primary: Pinata Cloud REST API (High Availability Pinning)                  │  │
@@ -65,15 +65,17 @@ GenoChain follows a **Tri-Tier Synergy Architecture** bridging sovereign data ow
 - Private keys are stored with `extractable: false` in browser **IndexedDB**, mitigating memory extraction and XSS threats.
 - Plaintext data never touches any centralized backend, proxy server, or public node.
 
-### 2. GA4GH Crypt4GH-Inspired 64KB Discrete Chunk Streaming
-- Implements a stream processor that partitions multi-gigabyte genomic files into discrete **64KB chunks** ($65,536\text{ bytes}$).
+### 2. GA4GH Crypt4GH-Inspired 64KB Discrete Chunk Streaming Architecture
+- Implements the core streaming principles of the **GA4GH Crypt4GH** standard by partitioning genomic streams into discrete **64KB chunks** ($65,536\text{ bytes}$).
+- Uses hardware-accelerated **AES-256-GCM** via the browser's native **W3C Web Crypto API** (leveraging Intel AES-NI / ARMv8 Crypto), keeping memory bounded during chunk processing.
 - Each chunk contains a 12-byte initialization vector (`IV`) and a 16-byte authentication tag (`GMAC`), maintaining a fixed $28\text{-byte}$ overhead per block with $O(1)$ RAM consumption.
 - Meets **NIST FIPS 140-3** standards with native hardware acceleration (`AES-NI` / `ARMv8 Crypto`), achieving encryption throughput exceeding $1.2\text{ GB/s}$.
+- *Architectural Demarcation:* While GenoChain currently employs Web Crypto AES-256-GCM + RSA-OAEP with a lightweight `GNC1` container for native zero-dependency browser performance, full binary container compatibility with official `.c4gh` files (Curve25519 X25519 + ChaCha20-Poly1305 for direct SAMTools/htsget integration) is designated as a Production Roadmap Milestone powered by WebAssembly.
 
-### 3. Atomic Timelocked Escrow & Enforced EIP-2981 Royalties
+### 3. Atomic Timelocked Escrow & Active Marketplace Royalty Enforcement (EIP-2981)
 - Eliminates counterparty risk via a 3-stage non-custodial state machine:
   $$\text{DEPOSIT\_LOCKED} \longrightarrow \text{CAPSULE\_DELIVERED} \longrightarrow \text{RELEASED / DISPUTED}$$
-- **Atomic Royalty Enforcement:** Whenever access rights or secondary NFT transfers occur, the contract calculates and transfers a **10% royalty** directly to the original genetic contributor (`originCreator`), addressing royalty-bypass vulnerabilities seen in static NFT marketplaces.
+- **Active Royalty Enforcement Architecture:** EIP-2981 is intentionally an informational inquiry standard (`royaltyInfo(tokenId, salePrice)`). In GenoChain, rather than relying on optional third-party compliance, the sovereign marketplace contract (`GenomicsRegistry.sol`) acts as the active enforcement agent. Whenever access purchases or escrow releases occur, `GenomicsRegistry` queries `royaltyInfo()` from `GenomicNFT`, computes the 10% royalty share, and executes an atomic transfer directly to the original data contributor (`originCreator`), completely eliminating the royalty-bypass vulnerabilities prevalent on zero-royalty NFT exchanges.
 
 ### 4. Zero-Knowledge Variant Verification (Groth16 on BN254)
 - Enables data owners to cryptographically prove the presence of a specific molecular variant (e.g., $TAS2R38$ bitter taste or $ALDH2$ metabolism) **without revealing their raw DNA sequence**.

@@ -198,6 +198,8 @@ export default function PatientSovereignVault({
               type="file"
               ref={fileInputRef}
               accept=".json"
+              aria-label="Import Sovereign Vault JSON"
+              id="vault-file-import"
               style={{ display: "none" }}
               onChange={handleImportVaultFile}
             />
@@ -322,6 +324,8 @@ export default function PatientSovereignVault({
                         min="1"
                         step="1"
                         value={newPriceInput}
+                        placeholder="GENO"
+                        aria-label={t("tableColPrice")}
                         onChange={(e) => setNewPriceInput(e.target.value)}
                         style={{
                           width: "70px",

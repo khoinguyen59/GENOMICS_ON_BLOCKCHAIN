@@ -28,7 +28,7 @@ jobs:
       - name: Compile Smart Contracts
         run: npx hardhat compile
 
-      - name: Run 106-Case Hardhat Test Suite
+      - name: Run 439-Case Hardhat & Adversarial Verification Suite
         run: npm test
 
       - name: Run 24-Case Independent Adversarial Stress Suite
@@ -52,16 +52,21 @@ jobs:
         with:
           node-version: 20
 
-      - name: Install Dependencies & Solhint
+      - name: Install Dependencies, Solhint & Slither
         run: |
           npm ci
           npm install -g solhint
+          python -m pip install --upgrade pip
+          pip install slither-analyzer
 
       - name: Run Solhint Linter
         run: solhint "contracts/**/*.sol"
 
+      - name: Run Slither Static Analyzer
+        run: slither . --compile-force-framework hardhat --exclude-dependencies --json slither_results.json || true
+
       - name: Run Static Security Check
-        run: python scripts/audit/parse_slither.py
+        run: python scripts/audit/parse_slither.py slither_results.json
 
   frontend-build-and-audit:
     name: 3. Frontend Production Build & Zero-Vulnerability Audit
@@ -87,6 +92,11 @@ jobs:
         working-directory: ./frontend
         run: npm run build
 
+      - name: Verify i18n Dictionaries & Frontend Structure
+        run: |
+          node scripts/audit/verify_frontend_dictionaries.mjs
+          node scripts/audit/i18n_parity.mjs
+
   academic-and-web3-hygiene:
     name: 4. Academic Hygiene & Web3.py Compatibility
     runs-on: ubuntu-latest
@@ -106,4 +116,4 @@ jobs:
         run: python scripts/audit/academic_hygiene_toolkit.py --selftest
 
       - name: Run Web3.py Contract ABI Verification
-        run: python scripts/demo/web3_demo.py
+        run: python scripts/demo/web3_demo.py --offline-demo

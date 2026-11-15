@@ -10,8 +10,22 @@ if (!cryptoObj || !cryptoObj.subtle) {
 
 const memKeyStore = new Map();
 const memCapsuleStore = new Map();
+let activeVaultAccount = "";
 const toHex = (arr) => Array.from(arr).map((b) => b.toString(16).padStart(2, "0")).join("");
 const fromHex = (hex) => new Uint8Array(hex.match(/.{1,2}/g).map((b) => parseInt(b, 16)));
+
+function resolveScopeAccount(account) {
+  if (account && typeof account === "string" && account.trim().length > 0) {
+    activeVaultAccount = account.trim().toLowerCase();
+    return activeVaultAccount;
+  }
+  return activeVaultAccount || "global";
+}
+
+function makeScopedCidKey(rawCid, account) {
+  const scope = resolveScopeAccount(account);
+  return `${scope}:${rawCid}`;
+}
 
 function openKeyDatabase() {
   if (typeof indexedDB === "undefined") return Promise.resolve(null);
@@ -38,42 +52,53 @@ async function withStore(name, mode, fn) {
   });
 }
 
-export async function saveOwnerCapsulePersistent(rawCid, capsule) {
+export async function saveOwnerCapsulePersistent(rawCid, capsule, account = null) {
   if (!rawCid || !capsule) return false;
-  memCapsuleStore.set(rawCid, capsule);
-  if (typeof window !== "undefined" && window.localStorage) {
-    try { window.localStorage.setItem(`GENO_OWNER_CAPSULE_${rawCid}`, capsule); } catch (e) { console.warn("localStorage capsule write warning:", e); }
+  let ownerAccount = account;
+  if (!ownerAccount && typeof capsule === "string" && capsule.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(capsule);
+      if (parsed && typeof parsed.owner === "string") ownerAccount = parsed.owner;
+    } catch { /* ignore */ }
   }
-  const res = await withStore("vault_capsules", "readwrite", (s) => s.put(capsule, rawCid));
+  const scopedKey = makeScopedCidKey(rawCid, ownerAccount);
+  memCapsuleStore.set(scopedKey, capsule);
+  const res = await withStore("vault_capsules", "readwrite", (s) => s.put(capsule, scopedKey));
   return res !== null ? res : true;
 }
 
-export async function loadOwnerCapsulePersistent(rawCid) {
+export async function loadOwnerCapsulePersistent(rawCid, account = null) {
   if (!rawCid) return null;
+  const scopedKey = makeScopedCidKey(rawCid, account);
   try {
-    const idb = await withStore("vault_capsules", "readonly", (s) => s.get(rawCid));
+    const idb = await withStore("vault_capsules", "readonly", (s) => s.get(scopedKey));
     if (idb) return idb;
   } catch (e) { console.warn("IndexedDB capsule read error:", e); }
-  if (typeof window !== "undefined" && window.localStorage) {
-    const ls = window.localStorage.getItem(`GENO_OWNER_CAPSULE_${rawCid}`);
-    if (ls) return ls;
+  if (memCapsuleStore.has(scopedKey)) return memCapsuleStore.get(scopedKey);
+  if (!account) {
+    for (const [k, v] of memCapsuleStore.entries()) {
+      if (k === rawCid || k.endsWith(`:${rawCid}`)) return v;
+    }
   }
-  return memCapsuleStore.get(rawCid) || null;
+  return null;
 }
 
-export async function getAllOwnerCapsulesPersistent() {
+export async function getAllOwnerCapsulesPersistent(account = null) {
+  const scopePrefix = account ? `${account.trim().toLowerCase()}:` : (activeVaultAccount ? `${activeVaultAccount}:` : null);
+  const matchesAccount = (key, capStr) => {
+    if (!scopePrefix) return true;
+    if (typeof key === "string" && key.startsWith(scopePrefix)) return true;
+    if (typeof capStr === "string" && capStr.startsWith("{")) {
+      try {
+        const parsed = JSON.parse(capStr);
+        if (parsed?.owner && `${parsed.owner.toLowerCase()}:` === scopePrefix) return true;
+      } catch { /* ignore */ }
+    }
+    return false;
+  };
+  const stripScope = (key) => (typeof key === "string" && key.includes(":") ? key.slice(key.indexOf(":") + 1) : key);
+
   const capsuleMap = new Map();
-  if (typeof window !== "undefined" && window.localStorage) {
-    try {
-      for (let i = 0; i < window.localStorage.length; i++) {
-        const k = window.localStorage.key(i);
-        if (k && k.startsWith("GENO_OWNER_CAPSULE_")) {
-          const cap = window.localStorage.getItem(k);
-          if (cap) capsuleMap.set(k.replace("GENO_OWNER_CAPSULE_", ""), cap);
-        }
-      }
-    } catch (e) { console.warn("localStorage scan warning:", e); }
-  }
   const db = await openKeyDatabase();
   if (db) {
     try {
@@ -81,14 +106,20 @@ export async function getAllOwnerCapsulesPersistent() {
         const req = db.transaction("vault_capsules", "readonly").objectStore("vault_capsules").openCursor();
         req.onsuccess = (e) => {
           const c = e.target.result;
-          if (c) { capsuleMap.set(c.key, c.value); c.continue(); } else resolve();
+          if (c) {
+            if (matchesAccount(c.key, c.value)) capsuleMap.set(stripScope(c.key), c.value);
+            c.continue();
+          } else resolve();
         };
         req.onerror = () => reject(req.error);
       });
     } catch (e) { console.warn("IndexedDB scan warning:", e); }
   }
   for (const [k, v] of memCapsuleStore.entries()) {
-    if (!capsuleMap.has(k)) capsuleMap.set(k, v);
+    if (matchesAccount(k, v)) {
+      const bareCid = stripScope(k);
+      if (!capsuleMap.has(bareCid)) capsuleMap.set(bareCid, v);
+    }
   }
   return Array.from(capsuleMap.entries()).map(([rawCid, capsule]) => ({ rawCid, capsule }));
 }
@@ -109,7 +140,8 @@ async function deriveVaultKey(usage, { signer, account, password, salt }) {
 export async function exportSovereignKeyVault({ signer, account, password = null }) {
   if (!account) throw new Error("Account is required to export key vault.");
   const normAccount = account.toLowerCase();
-  const capsules = await getAllOwnerCapsulesPersistent();
+  activeVaultAccount = normAccount;
+  const capsules = await getAllOwnerCapsulesPersistent(normAccount);
   const payloadBytes = new TextEncoder().encode(JSON.stringify({
     version: "GENOCHAIN-SOVEREIGN-VAULT-v2", account: normAccount, capsuleCount: capsules.length, capsules, exportedAt: Date.now()
   }));
@@ -128,6 +160,7 @@ export async function exportSovereignKeyVault({ signer, account, password = null
 export async function importSovereignKeyVault({ signer, account, backupData, password = null }) {
   if (!account) throw new Error("Account is required to import key vault.");
   const norm = account.toLowerCase();
+  activeVaultAccount = norm;
   let b;
   try { b = typeof backupData === "string" ? JSON.parse(backupData) : backupData; } catch { throw new Error("Malformed backup file: Invalid JSON syntax."); }
   if (!b || b.format !== "GENOCHAIN-ENCRYPTED-KEY-VAULT-v2") throw new Error("Invalid backup format: Not a Genochain Sovereign Key Vault backup.");
@@ -157,7 +190,7 @@ export async function importSovereignKeyVault({ signer, account, backupData, pas
   if (Array.isArray(payload.capsules)) {
     for (const item of payload.capsules) {
       if (item.rawCid && item.capsule) {
-        await saveOwnerCapsulePersistent(item.rawCid, item.capsule);
+        await saveOwnerCapsulePersistent(item.rawCid, item.capsule, norm);
         restoredCids.push(item.rawCid);
       }
     }
@@ -166,14 +199,16 @@ export async function importSovereignKeyVault({ signer, account, backupData, pas
 }
 export async function savePersistentKeyPair(account, keyPair) {
   const norm = account.toLowerCase();
-  const res = await withStore("keypairs", "readwrite", (s) => s.put(keyPair, norm));
-  if (res === null) memKeyStore.set(norm, keyPair);
+  activeVaultAccount = norm;
+  memKeyStore.set(norm, keyPair);
+  await withStore("keypairs", "readwrite", (s) => s.put(keyPair, norm));
   return true;
 }
 export async function loadPersistentKeyPair(account) {
   const norm = account.toLowerCase();
+  activeVaultAccount = norm;
   const res = await withStore("keypairs", "readonly", (s) => s.get(norm));
-  return res !== null ? (res || null) : (memKeyStore.get(norm) || null);
+  return res !== null ? (res || memKeyStore.get(norm) || null) : (memKeyStore.get(norm) || null);
 }
 async function deriveSigAesKey(signer, account) {
   const sig = await signer.signMessage(`GENOMICS_IDENTITY_KEY_BACKUP:${account.toLowerCase()}:v1`);
@@ -181,16 +216,37 @@ async function deriveSigAesKey(signer, account) {
   return await cryptoObj.subtle.importKey("raw", hKey, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
 }
 export async function createWalletKeyBackup(signer, account, keyPair) {
+  if (!account) throw new Error("Account is required for wallet key backup.");
+  if (!keyPair || !keyPair.publicKey || !keyPair.privateKey) throw new Error("Valid asymmetric keyPair is required.");
   const norm = account.toLowerCase();
   const aesKey = await deriveSigAesKey(signer, norm);
-  if (!keyPair.privateKey || !keyPair.privateKey.extractable) {
-    throw new Error("Security Policy Enforcement: Private key is not extractable. WebCrypto API blocks raw private key material extraction; the key is securely anchored in browser IndexedDB.");
-  }
   const pubJwk = await cryptoObj.subtle.exportKey("jwk", keyPair.publicKey);
-  const privJwk = await cryptoObj.subtle.exportKey("jwk", keyPair.privateKey);
+  let privJwk = null;
+  let nonExtractableAnchored = false;
+  if (keyPair.privateKey.extractable) {
+    privJwk = await cryptoObj.subtle.exportKey("jwk", keyPair.privateKey);
+  } else {
+    if (!signer || typeof signer.getAddress !== "function") {
+      throw new Error("Private key is not extractable (INVARIANT-09 enforced)");
+    }
+    nonExtractableAnchored = true;
+    await savePersistentKeyPair(norm, keyPair);
+  }
+  const capsules = await getAllOwnerCapsulesPersistent(norm);
   const iv = cryptoObj.getRandomValues(new Uint8Array(12));
-  const enc = await cryptoObj.subtle.encrypt({ name: "AES-GCM", iv }, aesKey, new TextEncoder().encode(JSON.stringify({ pubJwk, privJwk, account: norm })));
-  return JSON.stringify({ version: "GENO-WALLET-BACKUP-v1", account: norm, ivHex: toHex(iv), ciphertextHex: toHex(new Uint8Array(enc)), createdAt: Date.now() }, null, 2);
+  const enc = await cryptoObj.subtle.encrypt(
+    { name: "AES-GCM", iv },
+    aesKey,
+    new TextEncoder().encode(JSON.stringify({ pubJwk, privJwk, nonExtractableAnchored, capsules, account: norm }))
+  );
+  return JSON.stringify({
+    version: "GENO-WALLET-BACKUP-v1",
+    account: norm,
+    nonExtractableAnchored,
+    ivHex: toHex(iv),
+    ciphertextHex: toHex(new Uint8Array(enc)),
+    createdAt: Date.now()
+  }, null, 2);
 }
 export async function restoreWalletKeyBackup(signer, account, backupData) {
   const backup = typeof backupData === "string" ? JSON.parse(backupData) : backupData;
@@ -198,16 +254,44 @@ export async function restoreWalletKeyBackup(signer, account, backupData) {
   if (backup.account.toLowerCase() !== norm) throw new Error("Backup does not match current wallet address.");
   const aesKey = await deriveSigAesKey(signer, norm);
   const dec = await cryptoObj.subtle.decrypt({ name: "AES-GCM", iv: fromHex(backup.ivHex) }, aesKey, fromHex(backup.ciphertextHex));
-  const { pubJwk, privJwk } = JSON.parse(new TextDecoder().decode(dec));
-  const publicKey = await cryptoObj.subtle.importKey("jwk", pubJwk, { name: "RSA-OAEP", hash: "SHA-256" }, true, ["encrypt"]);
+  const { pubJwk, privJwk, capsules } = JSON.parse(new TextDecoder().decode(dec));
+  let publicKey = await cryptoObj.subtle.importKey("jwk", pubJwk, { name: "RSA-OAEP", hash: "SHA-256" }, true, ["encrypt"]);
   let privateKey = null;
+  let keyRotated = false;
   if (privJwk) {
     privateKey = await cryptoObj.subtle.importKey("jwk", privJwk, { name: "RSA-OAEP", hash: "SHA-256" }, false, ["decrypt"]);
   } else {
     const existing = await loadPersistentKeyPair(norm);
-    if (existing && existing.privateKey) privateKey = existing.privateKey;
+    if (existing && existing.privateKey) {
+      privateKey = existing.privateKey;
+      if (existing.publicKey) {
+        publicKey = existing.publicKey;
+      }
+    } else {
+      // Non-extractable private keys (INVARIANT-09) cannot be exported across devices; rotate to a fresh device-bound pair and flag on-chain re-registration.
+      const freshPair = await cryptoObj.subtle.generateKey(
+        { name: "RSA-OAEP", modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" },
+        false,
+        ["encrypt", "decrypt"]
+      );
+      publicKey = freshPair.publicKey;
+      privateKey = freshPair.privateKey;
+      keyRotated = true;
+    }
   }
-  const restoredKeyPair = { publicKey, privateKey };
-  if (privateKey) await savePersistentKeyPair(norm, restoredKeyPair);
+  if (!keyRotated && Array.isArray(capsules)) {
+    for (const item of capsules) {
+      if (item.rawCid && item.capsule) {
+        await saveOwnerCapsulePersistent(item.rawCid, item.capsule, norm);
+      }
+    }
+  }
+  const restoredKeyPair = {
+    publicKey,
+    privateKey,
+    keyRotated,
+    requiresPublicKeyReRegistration: keyRotated
+  };
+  if (privateKey) await savePersistentKeyPair(norm, { publicKey, privateKey });
   return restoredKeyPair;
 }

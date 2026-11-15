@@ -7,7 +7,7 @@ import { useDatasetDecryption } from "../hooks/useDatasetDecryption";
 const DatasetContext = createContext(null);
 
 export function DatasetProvider({ children }) {
-  const { account, contracts, getContracts, researcherKeyPair } = useWeb3();
+  const { account, contracts, getContracts, researcherKeyPair, showToast } = useWeb3();
 
   const catalog = useGenomicCatalog({ account, getContracts });
   const filters = useGenomicFilters({ datasets: catalog.datasets });
@@ -16,7 +16,8 @@ export function DatasetProvider({ children }) {
     setPurchasedData: catalog.setPurchasedData,
     account,
     contracts,
-    researcherKeyPair
+    researcherKeyPair,
+    showToast
   });
 
   const { setPurchasedData } = catalog;

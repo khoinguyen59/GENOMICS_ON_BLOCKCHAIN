@@ -1,0 +1,11 @@
+UA=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.0.0 Safari/537.36
+[2] imported key_vault.js exports: createWalletKeyBackup,exportSovereignKeyVault,getAllOwnerCapsulesPersistent,importSovereignKeyVault,loadOwnerCapsulePersistent,loadPersistentKeyPair,restoreWalletKeyBackup,saveOwnerCapsulePersistent,savePersistentKeyPair
+[2] loadPersistentKeyPair(NEVER saved) => typeof=boolean value=true
+[2] VERDICT: DEFECT: returns true; Web3Context.jsx:125 "if (!kp)" is FALSE -> app treats `true` as a keypair
+[2] loadOwnerCapsulePersistent(NEVER saved) => typeof=boolean value=true
+[2] VERDICT: DEFECT: truthy sentinel true -> datasetService.js:205/386 "if (ownerCapsule)" passes `true` into decryptKeyCapsule
+[3] RSA-OAEP 2048 generateKey(extractable=false) starting
+[3] elapsed=82ms priv.extractable=false pub.extractable=true
+[3] exportKey(jwk, RSA publicKey of NON-EXTRACTABLE pair) => OK n.len=342 -> INV-09 + registerPublicKeyOnChain works
+[2/INV-09] after save+get: isObject=true priv.extractable=false
+END

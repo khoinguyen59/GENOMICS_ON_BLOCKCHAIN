@@ -1,7 +1,8 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useWeb3 } from "../../context/Web3Context";
 import { useDatasets } from "../../context/DatasetContext";
 import { useLanguage } from "../../context/LanguageContext";
+import { verifyDatasetTraitZkStatus } from "../../services/datasetService";
 import {
   GenoLogoIcon,
   GenoTokenIcon,
@@ -30,10 +31,31 @@ export default function AssetDetailModal({ onPurchase }) {
     getLocalizedConsequence,
     getLocalizedZygosity
   } = useDatasets();
-  const { account, showToast, setResearcherTab } = useWeb3();
+  const { account, contracts, showToast, setResearcherTab } = useWeb3();
   const { t, lang } = useLanguage();
   const [useEscrow, setUseEscrow] = useState(true);
   const [copiedKey, setCopiedKey] = useState(null);
+  const [zkStatus, setZkStatus] = useState({ linked: false, verifierAddress: "", bountyCount: 0, verified: false });
+
+  useEffect(() => {
+    let active = true;
+    if (!selectedAssetModal?.dataId || !contracts?.registry) {
+      setZkStatus({ linked: false, verifierAddress: "", bountyCount: 0, verified: false });
+      return () => {
+        active = false;
+      };
+    }
+    verifyDatasetTraitZkStatus({
+      dataId: selectedAssetModal.dataId,
+      contracts,
+      variantCommitment: selectedAssetModal.rawDataHash,
+    }).then((res) => {
+      if (active) setZkStatus(res);
+    });
+    return () => {
+      active = false;
+    };
+  }, [selectedAssetModal?.dataId, selectedAssetModal?.rawDataHash, contracts]);
 
   if (!selectedAssetModal) return null;
 
@@ -423,6 +445,27 @@ export default function AssetDetailModal({ onPurchase }) {
               </div>
               <div style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: "6px", lineHeight: "1.4" }}>
                 {t("provenanceZeroPlaintext")}
+              </div>
+              <div
+                style={{
+                  marginTop: "8px",
+                  paddingTop: "8px",
+                  borderTop: "1px dashed rgba(148, 163, 184, 0.25)",
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  fontSize: "11px",
+                  fontFamily: "var(--font-mono)"
+                }}
+              >
+                <span style={{ color: "var(--text-muted)" }}>
+                  {zkStatus.linked
+                    ? `BN254 ZK Verifier: ${zkStatus.verifierAddress.slice(0, 8)}... (${zkStatus.bountyCount} bounties)`
+                    : "BN254 ZK Verifier: Not Linked"}
+                </span>
+                <span style={{ color: zkStatus.verified ? "var(--accent-emerald)" : "var(--accent-cyan)", fontWeight: 700 }}>
+                  {zkStatus.verified ? "✓ ZK TRAIT VERIFIED" : "ON-CHAIN ANCHORED"}
+                </span>
               </div>
             </div>
           </div>

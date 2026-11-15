@@ -64,6 +64,7 @@ export function Web3Provider({ children }) {
   // Toast Notification
   const [toast, setToast] = useState(null);
   const toastTimeoutRef = useRef(null);
+  const manualDisconnectRef = useRef(false);
 
   const showToast = useCallback((message, type = "success") => {
     if (toastTimeoutRef.current) {
@@ -93,16 +94,27 @@ export function Web3Provider({ children }) {
           const s = await p.getSigner();
           return { provider: p, signer: s };
         }
-      } catch {
-        // Fallback directly to Local Hardhat RPC Node
+      } catch (rpcErr) {
+        console.warn("[Web3Context] Browser wallet provider failed; falling back to read-only Local Hardhat RPC:", rpcErr?.message || rpcErr);
       }
     }
+    if (signer) {
+      return { provider: provider || LOCAL_RPC_PROVIDER, signer };
+    }
     return { provider: LOCAL_RPC_PROVIDER, signer: null };
-  }, [account]);
+  }, [account, signer, provider]);
 
   // Contract Instances Resolver
-  const getContracts = useCallback(async () => {
-    const { provider: p, signer: s } = await getProviderAndSigner();
+  const getContracts = useCallback(async (explicitSigner = null, explicitProvider = null) => {
+    let p, s;
+    if (explicitSigner) {
+      s = explicitSigner;
+      p = explicitProvider || LOCAL_RPC_PROVIDER;
+    } else {
+      const resolved = await getProviderAndSigner();
+      p = resolved.provider;
+      s = resolved.signer;
+    }
     const runner = s || p;
     if (!runner) return null;
 
@@ -112,8 +124,8 @@ export function Web3Provider({ children }) {
 
     const c = { token, nft, registry, signer: s, provider: p };
     setContracts(c);
-    setSigner(s);
-    setProvider(p);
+    if (s) setSigner(s);
+    if (p) setProvider(p);
     return c;
   }, [getProviderAndSigner]);
 
@@ -140,13 +152,16 @@ export function Web3Provider({ children }) {
 
   // Connect Wallet Action (MetaMask with automatic fallback to Local Hardhat RPC)
   const connectWallet = useCallback(async (customIdx) => {
+    manualDisconnectRef.current = false;
     const connectLocalHardhat = async () => {
       const jsonRpc = new ethers.JsonRpcProvider("http://127.0.0.1:8545");
       const targetIdx = typeof customIdx === "number" ? customIdx : 1;
       const s = await jsonRpc.getSigner(targetIdx);
       const addr = await s.getAddress();
       setAccount(addr);
-      const c = await getContracts();
+      setSigner(s);
+      setProvider(jsonRpc);
+      const c = await getContracts(s, jsonRpc);
       if (c) {
         const balWei = await c.token.balanceOf(addr);
         setGenoBalance(Number(ethers.formatUnits(balWei, 18)));
@@ -170,8 +185,11 @@ export function Web3Provider({ children }) {
         const accounts = await p.send("eth_requestAccounts", []);
         if (accounts.length > 0) {
           const userAddr = accounts[0];
+          const s = await p.getSigner();
           setAccount(userAddr);
-          const c = await getContracts();
+          setSigner(s);
+          setProvider(p);
+          const c = await getContracts(s, p);
           if (c) {
             const balWei = await c.token.balanceOf(userAddr);
             setGenoBalance(Number(ethers.formatUnits(balWei, 18)));
@@ -199,8 +217,12 @@ export function Web3Provider({ children }) {
 
   // Disconnect Wallet Action
   const disconnectWallet = useCallback(() => {
+    manualDisconnectRef.current = true;
     setAccount("");
     setGenoBalance(0);
+    setSigner(null);
+    setProvider(null);
+    setContracts(null);
     setResearcherKeyPair(null);
     setIsPubKeyRegisteredOnChain(false);
     showToast("Wallet disconnected.", "info");
@@ -299,7 +321,15 @@ export function Web3Provider({ children }) {
       showToast("Sign challenge in wallet to decrypt and restore key...", "info");
       const restoredKp = await restoreWalletKeyBackup(s, account, backupData);
       setResearcherKeyPair(restoredKp);
-      showToast("Identity Key successfully restored from Wallet Signature!");
+      if (restoredKp?.requiresPublicKeyReRegistration) {
+        setIsPubKeyRegisteredOnChain(false);
+        showToast(
+          "Identity Key rotated on this device — please re-register your Public Key on-chain for new capsules.",
+          "warning"
+        );
+      } else {
+        showToast("Identity Key successfully restored from Wallet Signature!");
+      }
       return restoredKp;
     } catch (err) {
       showToast("Restore error: " + err.message, "error");
@@ -355,15 +385,29 @@ export function Web3Provider({ children }) {
 
     const handleAccountsChanged = async (accounts) => {
       if (!accounts || accounts.length === 0) {
+        manualDisconnectRef.current = true;
         setAccount("");
         setGenoBalance(0);
+        setSigner(null);
+        setProvider(null);
+        setContracts(null);
         setResearcherKeyPair(null);
         setIsPubKeyRegisteredOnChain(false);
         showToast("Wallet disconnected.", "info");
       } else {
         const newAddr = accounts[0];
+        manualDisconnectRef.current = false;
         setAccount(newAddr);
-        const c = await getContracts();
+        let c = null;
+        try {
+          const p = new ethers.BrowserProvider(window.ethereum);
+          const s = await p.getSigner();
+          setProvider(p);
+          setSigner(s);
+          c = await getContracts(s, p);
+        } catch {
+          c = await getContracts();
+        }
         if (c && c.token) {
           try {
             const balWei = await c.token.balanceOf(newAddr);
@@ -392,7 +436,7 @@ export function Web3Provider({ children }) {
           chainIdHex === "0x7a69" ||
           chainIdHex === "0x539" ||
           Number(chainIdHex) === 31337;
-        if (isLocalChain && accs && accs.length > 0 && !account) {
+        if (isLocalChain && accs && accs.length > 0 && !manualDisconnectRef.current) {
           handleAccountsChanged(accs);
         }
       })
@@ -407,7 +451,7 @@ export function Web3Provider({ children }) {
         clearTimeout(toastTimeoutRef.current);
       }
     };
-  }, [getContracts, initPersistentKey, showToast, account]);
+  }, [getContracts, initPersistentKey, showToast]);
 
   const value = {
     userRole,
@@ -451,7 +495,11 @@ export function Web3Provider({ children }) {
 
   useEffect(() => {
     if (typeof window !== "undefined") {
-      window.__genoWeb3 = value;
+      if (import.meta.env?.DEV) {
+        window.__genoWeb3 = value;
+      } else {
+        delete window.__genoWeb3;
+      }
     }
   }, [value]);
 

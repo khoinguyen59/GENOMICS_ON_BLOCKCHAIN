@@ -24,6 +24,19 @@
  * @param {string} [params.summaryDataHash=""] SHA-256 hash of encrypted clinical summary report
  * @returns {Object} GA4GH Phenopacket v2 JSON
  */
+function hashPseudoId(input) {
+  let h1 = 0xdeadbeef, h2 = 0x41c6ce57;
+  const str = String(input) + "_GENOCHAIN_SALT_2026";
+  for (let i = 0; i < str.length; i++) {
+    const ch = str.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 2654435761);
+    h2 = Math.imul(h2 ^ ch, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(16).padStart(16, "0");
+}
+
 export function buildPhenopacket({
   subjectId,
   disease,
@@ -37,12 +50,16 @@ export function buildPhenopacket({
   summaryCid = "",
   summaryDataHash = "",
 }) {
+  const rawSubject = String(subjectId || "ANON_SUBJECT").trim();
+  const safeSubjectId = /^(ANON_|SEED_|SUBJ_|COHORT_|DONOR_)[a-zA-Z0-9_-]{4,}$/i.test(rawSubject)
+    ? rawSubject.replace(/[^a-zA-Z0-9_-]/g, "_")
+    : `ANON_${hashPseudoId(rawSubject)}`;
   const files = [];
 
   if (rawCid) {
     files.push({
       uri: `ipfs://${rawCid}`,
-      individualToFileIdentifiers: { [subjectId]: `${subjectId}.vcf` },
+      individualToFileIdentifiers: { [safeSubjectId]: `${safeSubjectId}.vcf` },
       fileAttributes: {
         fileFormat: "VCF",
         genomeAssembly: "GRCh38",
@@ -65,18 +82,18 @@ export function buildPhenopacket({
     }
     files.push({
       uri: `ipfs://${summaryCid}`,
-      individualToFileIdentifiers: { [subjectId]: `${subjectId}_summary.pdf` },
+      individualToFileIdentifiers: { [safeSubjectId]: `${safeSubjectId}_summary.pdf` },
       fileAttributes: summaryFileAttributes,
     });
   }
 
   return {
     schemaVersion: "2.0.0",
-    id: `phenopacket-${subjectId}`,
+    id: `phenopacket-${safeSubjectId}`,
     files: files,
-    // Strict GA4GH Individual schema (no arbitrary fields)
+    // Strict GA4GH Individual schema (no arbitrary fields, k-anonymized subject pseudonym)
     subject: {
-      id: subjectId,
+      id: safeSubjectId,
       sex: sex,
       karyotypicSex: sex === "FEMALE" ? "XX" : sex === "MALE" ? "XY" : "UNKNOWN_KARYOTYPE",
       taxonomy: {
@@ -114,7 +131,7 @@ export function buildPhenopacket({
     ],
     interpretations: [
       {
-        id: `interpretation-${subjectId}`,
+        id: `interpretation-${safeSubjectId}`,
         progressStatus: "COMPLETED",
         diagnosis: {
           disease: {
@@ -134,7 +151,7 @@ export function buildPhenopacket({
                 expressions: [
                   {
                     syntax: "hgvs",
-                    value: v.hgvs,
+                    value: "[REDACTED_PROTECTED_UNDER_ENCRYPTED_PAYLOAD]",
                   },
                 ],
                 allelicState: {
@@ -148,7 +165,7 @@ export function buildPhenopacket({
       },
     ],
     metaData: {
-      created: new Date().toISOString(),
+      created: `${new Date().getUTCFullYear()}-01-01T00:00:00.000Z`,
       createdBy: "GenomicsBlockchainRegistry_v2",
       resources: [
         {

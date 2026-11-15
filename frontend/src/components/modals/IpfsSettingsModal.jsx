@@ -40,9 +40,11 @@ export default function IpfsSettingsModal() {
 
         <div className="modal-body">
           <div className="form-field">
-            <label className="field-label">{t("ipfsPinataLabel")}</label>
+            <label htmlFor="input-pinata-jwt" className="field-label">{t("ipfsPinataLabel")}</label>
             <input
+              id="input-pinata-jwt"
               type="password"
+              aria-label={t("ipfsPinataLabel")}
               className="field-input"
               value={pinataJwtInput}
               onChange={(e) => setPinataJwtInput(e.target.value)}
@@ -51,9 +53,11 @@ export default function IpfsSettingsModal() {
           </div>
 
           <div className="form-field">
-            <label className="field-label">{t("ipfsKuboLabel")}</label>
+            <label htmlFor="input-kubo-rpc" className="field-label">{t("ipfsKuboLabel")}</label>
             <input
+              id="input-kubo-rpc"
               type="text"
+              aria-label={t("ipfsKuboLabel")}
               className="field-input"
               value={kuboRpcInput}
               onChange={(e) => setKuboRpcInput(e.target.value)}

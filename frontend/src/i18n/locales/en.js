@@ -99,6 +99,7 @@ export const en = {
     colConsequenceZyg: "Consequence & Zygosity",
     colRawSequenceState: "Security State",
     colPriceRoyalty: "Price & Royalty",
+    tableColPrice: "Price",
     colTerm: "Term",
     colAction: "Action",
 
@@ -408,25 +409,7 @@ export const en = {
     reset: "Reset",
 
     // Activity Feed & RPC Errors
-    activityLiveLedger: "Real-Time Blockchain Activity Ledger",
-    activityFilterAll: "All Events",
-    activityFilterPurchases: "Sales",
-    activityFilterEscrow: "Escrow",
-    activityFilterMints: "Listings",
-    activityFilterRoyalties: "Royalties",
-    activityColEvent: "EVENT",
-    activityColItem: "GENOMIC COHORT",
-    activityColPrice: "PRICE",
-    activityColFrom: "FROM",
-    activityColTo: "TO",
-    activityColTx: "TRANSACTION",
-    activityColTime: "TIME",
-    activityEmpty: "No on-chain events recorded yet",
-    rpcErrorOccurred: "Original RPC Node Query Error:",
-    eventPurchase: "Access Purchased",
-    eventEscrow: "Escrow Deposited",
-    eventRoyalty: "10% EIP-2981 Royalty",
-    eventMint: "Dataset Listed"
+    rpcErrorOccurred: "Original RPC Node Query Error:"
 };
 
 export default en;

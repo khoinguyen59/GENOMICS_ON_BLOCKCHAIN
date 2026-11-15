@@ -3,6 +3,20 @@ import { ethers } from "ethers";
 import seedMetadata from "../contracts/seedMetadata.json";
 import { retrieveFromIpfs } from "../../../ipfs/pinata_uploader.js";
 import { PRESET_CATALOG } from "../services/vcfService";
+import { sanitizeGenomicMetadata } from "../utils/asyncResilience";
+
+function sanitizeMetaTree(val) {
+  if (typeof val === "string") return sanitizeGenomicMetadata(val);
+  if (Array.isArray(val)) return val.map(sanitizeMetaTree);
+  if (val && typeof val === "object") {
+    const out = {};
+    for (const [k, v] of Object.entries(val)) {
+      out[sanitizeGenomicMetadata(String(k))] = sanitizeMetaTree(v);
+    }
+    return out;
+  }
+  return val;
+}
 
 const PRESET_BY_DATA_ID = {
   1: PRESET_CATALOG.KHV_1000G, 2: PRESET_CATALOG.ACTN3_PERFORMANCE, 3: PRESET_CATALOG.ALDH2_METABOLISM,
@@ -50,7 +64,14 @@ export function useGenomicCatalog({ account, getContracts }) {
     try {
       const contracts = await getContracts();
       if (!contracts) return;
-      const items = await contracts.registry.getAllDataItems();
+      let items;
+      try {
+        items = await contracts.registry.getAllDataItems();
+      } catch (err) {
+        console.warn("getAllDataItems fallback to getDataItemsPaginated:", err);
+        const [paginatedItems] = await contracts.registry.getDataItemsPaginated(0, 100);
+        items = paginatedItems;
+      }
       const mapped = await Promise.all(items.map(async (raw) => {
         const dId = Number(raw.dataId), tId = Number(raw.tokenId), statusNum = Number(raw.status);
         const statusStr = statusNum === 0 ? "Active" : statusNum === 1 ? "Paused" : "Revoked";
@@ -61,7 +82,7 @@ export function useGenomicCatalog({ account, getContracts }) {
         if (!seedMatch && raw.metadataCid) {
           try {
             const bytes = await retrieveFromIpfs(raw.metadataCid);
-            if (bytes?.length) ipfsMeta = JSON.parse(new TextDecoder().decode(bytes));
+            if (bytes?.length) ipfsMeta = sanitizeMetaTree(JSON.parse(new TextDecoder().decode(bytes)));
           } catch {}
         }
         let extractedSummaryHash = seedMatch?.summaryDataHash || null;
@@ -70,33 +91,46 @@ export function useGenomicCatalog({ account, getContracts }) {
           extractedSummaryHash = sumFile?.fileAttributes?.summaryDataHash || sumFile?.fileAttributes?.rawDataHash || null;
         }
         const phenoGene = ipfsMeta?.interpretations?.[0]?.diagnosis?.genomicInterpretations?.[0]?.variantInterpretation?.variationDescriptor?.geneContext?.symbol;
-        const p = PRESET_BY_DATA_ID[dId] || PRESET_CATALOG.ACTN3_PERFORMANCE;
-        const geneSym = seedMatch?.geneSymbol === "KHV_1000G" ? "KHV-WGS" : seedMatch?.geneSymbol || p?.geneSymbol?.split(" ")?.[0] || phenoGene || (dId === 1 ? "KHV-WGS" : `GENO_${dId}`);
-        const chrom = seedMatch?.chromosome || (dId === 1 ? "chr12" : dId === 2 ? "chr11" : dId === 3 ? "chr12" : dId === 4 ? "chr2" : dId === 5 ? "chr15" : dId === 6 ? "chr16" : dId === 7 ? "chr20" : dId === 8 ? "chr15" : dId === 9 ? "chr7" : dId === 10 ? "chr2" : `chr${((dId % 22) + 1)}`);
-        const sig = seedMatch?.clinicalSignificance || (dId === 1 ? "Population Genetics" : [2, 6, 8, 10].includes(dId) ? "Physical Traits & Performance" : [3, 4, 9].includes(dId) ? "Sensory & Metabolism" : dId === 5 ? "Pharmacogenomics" : "Reference Benchmark");
-        const cons = seedMatch?.consequence || ([4, 5, 8].includes(dId) ? "regulatory_variant" : dId === 2 ? "stop_gained" : dId === 7 ? "synonymous_variant" : "missense_variant");
+        const p = seedMatch ? (PRESET_BY_DATA_ID[dId] || null) : null;
+        let originalCreator = dynamicOwner;
+        let royaltyBps = 1000;
+        try {
+          const [nftRec, royaltyInfoRes] = await Promise.all([
+            contracts.nft.getGenomicRecord(tId),
+            contracts.nft.royaltyInfo(tId, 10000n)
+          ]);
+          if (nftRec?.originalCreator) originalCreator = nftRec.originalCreator;
+          if (royaltyInfoRes && royaltyInfoRes[1] !== undefined) royaltyBps = Number(royaltyInfoRes[1]);
+        } catch {}
+
+        const geneSym = seedMatch?.geneSymbol === "KHV_1000G" ? "KHV-WGS" : seedMatch?.geneSymbol || p?.geneSymbol?.split(" ")?.[0] || phenoGene || `GENO_${dId}`;
+        const chrom = seedMatch?.chromosome || ipfsMeta?.interpretations?.[0]?.diagnosis?.genomicInterpretations?.[0]?.variantInterpretation?.variationDescriptor?.vcfRecord?.chrom || (p ? (dId === 1 ? "chr12" : dId === 2 ? "chr11" : dId === 3 ? "chr12" : dId === 4 ? "chr2" : dId === 5 ? "chr15" : dId === 6 ? "chr16" : dId === 7 ? "chr20" : dId === 8 ? "chr15" : dId === 9 ? "chr7" : "chr2") : `chr${((dId % 22) + 1)}`);
+        const sig = seedMatch?.clinicalSignificance || ipfsMeta?.diseases?.[0]?.term?.label || (p ? (dId === 1 ? "Population Genetics" : [2, 6, 8, 10].includes(dId) ? "Physical Traits & Performance" : [3, 4, 9].includes(dId) ? "Sensory & Metabolism" : dId === 5 ? "Pharmacogenomics" : "Reference Benchmark") : "On-Chain Cohort");
+        const cons = seedMatch?.consequence || (p ? ([4, 5, 8].includes(dId) ? "regulatory_variant" : dId === 2 ? "stop_gained" : dId === 7 ? "synonymous_variant" : "missense_variant") : "missense_variant");
         const zyg = seedMatch?.zygosity || ([4, 6, 10].includes(dId) ? "1/1 (Homozygous Alt)" : "0/1 (Heterozygous)");
         const refAssembly = seedMatch?.assembly || (dId === 7 ? "GRCh37" : chrom === "chrM" ? "rCRS" : "GRCh38");
         const geneInfo = p?.geneSymbol || seedMatch?.gene || (phenoGene ? `${phenoGene} Molecular Locus` : `Target Locus: ${raw.rawCiphertextCid.substring(0, 8)}...`);
-        const dataFormat = seedMatch?.format || (geneSym === "FASTQ" || geneInfo.includes("FASTQ") ? "FASTQ (Reads)" : geneSym === "FASTA" || geneInfo.includes("FASTA") || chrom === "chrM" ? "FASTA (Sequence)" : geneSym === "JSON" || geneInfo.includes("Phenopacket") ? "GA4GH JSON" : "VCF v4.2");
+        const metaMime = ipfsMeta?.files?.[0]?.fileAttributes?.fileFormat || "";
+        const dataFormat = seedMatch?.format || (metaMime.includes("fastq") || geneSym === "FASTQ" || geneInfo.includes("FASTQ") ? "FASTQ (Reads)" : geneSym === "FASTA" || geneInfo.includes("FASTA") || chrom === "chrM" ? "FASTA (Sequence)" : geneSym === "JSON" || geneInfo.includes("Phenopacket") ? "GA4GH JSON" : "VCF v4.2");
         const seqPlatform = seedMatch?.platform || (dId === 1 ? "1000 Genomes WGS" : dId === 7 ? "GATK Pipeline" : geneInfo.includes("SAMtools") ? "SAMtools Panel" : "Illumina NovaSeq");
 
         return {
-          dataId: dId, tokenId: tId, owner: dynamicOwner, originalCreator: raw.currentOwner,
+          dataId: dId, tokenId: tId, owner: dynamicOwner, originalCreator,
           disease: p?.titleVi || seedMatch?.disease || ipfsMeta?.diseases?.[0]?.term?.label || `Molecular Genomic Cohort #${dId}`,
-          titleVi: p?.titleVi || seedMatch?.disease || `Mẫu Hệ Gen Phân Tử #${dId}`,
-          titleEn: p?.titleEn || `Molecular Genomic Cohort #${dId}`,
-          traitVi: p?.traitVi || seedMatch?.disease || `Đặc Tính Hệ Gen #${dId}`,
-          traitEn: p?.traitEn || `Genomic Trait #${dId}`,
-          category: p?.category || sig, categoryVi: p?.categoryVi || "Tính Trạng Thể Chất", categoryEn: p?.categoryEn || "Physical Traits",
-          gene: geneInfo, geneSymbol: geneSym, chromosome: chrom, pos: seedMatch?.pos || 111803962,
-          rsId: seedMatch?.rsId || (dId === 1 ? "rs671" : dId === 2 ? "rs1815739" : dId === 3 ? "rs671" : dId === 4 ? "rs4988235" : dId === 5 ? "rs762551" : dId === 6 ? "rs17822931" : dId === 7 ? "GIAB-NA12878" : dId === 8 ? "rs12913832" : dId === 9 ? "rs713598" : dId === 10 ? "rs3827760" : `rs${dId * 104729}`),
+          titleVi: p?.titleVi || seedMatch?.disease || ipfsMeta?.diseases?.[0]?.term?.label || `Mẫu Hệ Gen Phân Tử #${dId}`,
+          titleEn: p?.titleEn || ipfsMeta?.diseases?.[0]?.term?.label || `Molecular Genomic Cohort #${dId}`,
+          traitVi: p?.traitVi || seedMatch?.disease || ipfsMeta?.phenotypicFeatures?.[0]?.type?.label || `Đặc Tính Hệ Gen #${dId}`,
+          traitEn: p?.traitEn || ipfsMeta?.phenotypicFeatures?.[0]?.type?.label || `Genomic Trait #${dId}`,
+          category: p?.category || sig, categoryVi: p?.categoryVi || "Mẫu Di Truyền On-Chain", categoryEn: p?.categoryEn || "On-Chain Cohort",
+          gene: geneInfo, geneSymbol: geneSym, chromosome: chrom, pos: seedMatch?.pos || ipfsMeta?.interpretations?.[0]?.diagnosis?.genomicInterpretations?.[0]?.variantInterpretation?.variationDescriptor?.vcfRecord?.pos || 111803962,
+          rsId: seedMatch?.rsId || ipfsMeta?.interpretations?.[0]?.diagnosis?.genomicInterpretations?.[0]?.variantInterpretation?.variationDescriptor?.id || (p ? (dId === 1 ? "rs671" : dId === 2 ? "rs1815739" : dId === 3 ? "rs671" : dId === 4 ? "rs4988235" : dId === 5 ? "rs762551" : dId === 6 ? "rs17822931" : dId === 7 ? "GIAB-NA12878" : dId === 8 ? "rs12913832" : dId === 9 ? "rs713598" : "rs3827760") : `rs${dId * 104729}`),
           clinicalSignificance: sig, consequence: cons, zygosity: zyg, assembly: refAssembly, format: dataFormat, platform: seqPlatform,
           hpoTerm: p?.variantClass || seedMatch?.hpoTerm || ipfsMeta?.phenotypicFeatures?.[0]?.type?.label || "SO:0000694 (Genomic Variant)",
-          region: p?.ancestryRegion || seedMatch?.region || "Southeast Asian (Vietnamese)",
-          ancestry: p?.ancestryRegion || seedMatch?.ancestry || ipfsMeta?.phenotypicFeatures?.find((f) => f.type?.id === "HANCESTRO:0009")?.type?.label || "Vietnamese Kinh (1000 Genomes: KHV)",
-          clinvarId: seedMatch?.clinvarId || "dbSNP:rs671", price: priceFmt, durationDays: durationDay, accessCount,
-          accumulatedRoyalty: priceFmt * accessCount * 0.1, royaltyBps: 1000, status: statusStr, statusNum,
+          region: p?.ancestryRegion || seedMatch?.region || ipfsMeta?.subject?.ancestry || "On-Chain Verified Cohort",
+          ancestry: p?.ancestryRegion || seedMatch?.ancestry || ipfsMeta?.phenotypicFeatures?.find((f) => f.type?.id === "HANCESTRO:0009")?.type?.label || ipfsMeta?.subject?.ancestry || "On-Chain Verified Cohort",
+          clinvarId: seedMatch?.clinvarId || ipfsMeta?.interpretations?.[0]?.diagnosis?.genomicInterpretations?.[0]?.variantInterpretation?.variationDescriptor?.id || "dbSNP:rs671",
+          price: priceFmt, durationDays: durationDay, accessCount,
+          accumulatedRoyalty: (priceFmt * accessCount * royaltyBps) / 10000, royaltyBps, status: statusStr, statusNum,
           rawCid: raw.rawCiphertextCid, summaryCid: raw.summaryCiphertextCid, metadataCid: raw.metadataCid,
           rawDataHash: raw.rawDataHash, summaryDataHash: extractedSummaryHash,
           registeredAt: new Date(Number(raw.registeredAt) * 1000).toLocaleDateString()
@@ -117,7 +151,7 @@ export function useGenomicCatalog({ account, getContracts }) {
               const dep = await contracts.registry.escrowDeposits(d.dataId, currentAccount);
               if (dep && dep.amount > 0n) {
                 const depTime = Number(dep.depositTime), disputeWin = Number(dep.disputeWindow), deadline = depTime + disputeWin;
-                const canRefund = Math.floor(Date.now() / 1000) >= deadline && !dep.released && !dep.refunded;
+                const canRefund = !dep.released && !dep.refunded && (d.statusNum === 1 || d.statusNum === 2 || Math.floor(Date.now() / 1000) >= deadline);
                 escrowInfo = {
                   amount: Number(ethers.formatUnits(dep.amount, 18)), depositTime: depTime, disputeWindow: disputeWin,
                   deadline, released: dep.released, refunded: dep.refunded, isPending: !dep.released && !dep.refunded, canRefund
@@ -143,7 +177,8 @@ export function useGenomicCatalog({ account, getContracts }) {
               expiryLabel = `${d.durationDays} days`;
             }
             purchasedList.push({
-              ...d, purchasedAt: isOwner ? "Data Owner" : isEscrowPending ? "Escrow Active" : "Active",
+              ...d, accountAddr: currentAccount.toLowerCase(),
+              purchasedAt: isOwner ? "Data Owner" : isEscrowPending ? "Escrow Active" : "Active",
               expiresAt: expiryLabel, escrowInfo, isEscrowPending, hasActiveAccess: hasAccess, isOwner,
               decryptedContent: null, decryptedPdfBytes: null, phenopacketJson: null
             });
@@ -151,9 +186,9 @@ export function useGenomicCatalog({ account, getContracts }) {
         }
 
         setPurchasedData((prev) => {
-          const prevMap = new Map((prev || []).map((p) => [p.dataId, p]));
+          const prevMap = new Map((prev || []).map((p) => [`${p.accountAddr || ""}:${p.dataId}`, p]));
           return purchasedList.map((n) => {
-            const p = prevMap.get(n.dataId);
+            const p = prevMap.get(`${n.accountAddr || ""}:${n.dataId}`);
             return p?.decryptedContent ? { ...n, decryptedContent: p.decryptedContent, decryptedPdfBytes: p.decryptedPdfBytes, phenopacketJson: p.phenopacketJson } : n;
           });
         });

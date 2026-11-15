@@ -6,7 +6,8 @@ def sync():
     contracts = [
         ("GenomicToken", os.path.join(base_dir, "frontend", "src", "contracts", "GenomicTokenABI.json")),
         ("GenomicNFT", os.path.join(base_dir, "frontend", "src", "contracts", "GenomicNFTABI.json")),
-        ("GenomicsRegistry", os.path.join(base_dir, "frontend", "src", "contracts", "GenomicsRegistryABI.json"))
+        ("GenomicsRegistry", os.path.join(base_dir, "frontend", "src", "contracts", "GenomicsRegistryABI.json")),
+        ("GenomicZkVerifier", os.path.join(base_dir, "frontend", "src", "contracts", "GenomicZkVerifierABI.json")),
     ]
     for cname, dest in contracts:
         art_path = os.path.join(base_dir, "artifacts", "contracts", f"{cname}.sol", f"{cname}.json")

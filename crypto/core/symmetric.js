@@ -139,13 +139,59 @@ export async function verifyDataIntegrity(data, expectedHash) {
   return actualHash.toLowerCase() === normExpected;
 }
 
+const MAX_RANDOM_IV_INVOCATIONS_PER_KEY = 0x100000000; // 2^32 per NIST SP 800-38D §8.2.2
+const cryptoKeyInvocationMap = new WeakMap();
+const keyFingerprintInvocationMap = new Map();
+
 /**
- * Encrypt a buffer or plaintext string using AES-256-GCM.
+ * Consume and enforce per-key NIST SP 800-38D §8.2.2 random-IV invocation budget (2^32 per key).
+ * Tolerates non-extractable CryptoKeys via WeakMap reference tracking when exportKey is disallowed.
+ * @param {CryptoKey} activeKey
+ * @param {number} [invocations=1]
+ * @returns {Promise<{ invocationSequence: number, nonceBudgetRemaining: number, keyHex: string }>}
+ */
+export async function consumeKeyInvocationBudget(activeKey, invocations = 1) {
+  let keyHex = "";
+  let keyId = "";
+  try {
+    keyHex = await exportKeyToHex(activeKey);
+    if (keyHex) {
+      keyId = await computeDataHash(new TextEncoder().encode("NIST_800_38D_KEY:" + keyHex));
+    }
+  } catch {
+    keyHex = "";
+  }
+  const prevCount = Math.max(
+    cryptoKeyInvocationMap.get(activeKey) || 0,
+    keyId ? (keyFingerprintInvocationMap.get(keyId) || 0) : 0
+  );
+  if (!Number.isInteger(invocations) || invocations < 1 || prevCount + invocations > MAX_RANDOM_IV_INVOCATIONS_PER_KEY) {
+    throw new Error("NIST SP 800-38D §8.2.2 random-IV invocation budget (2^32) exhausted for this AES-256-GCM key");
+  }
+  const invocationSequence = prevCount + invocations;
+  cryptoKeyInvocationMap.set(activeKey, invocationSequence);
+  if (keyId) {
+    if (keyFingerprintInvocationMap.size > 4096 && !keyFingerprintInvocationMap.has(keyId)) {
+      const oldestKey = keyFingerprintInvocationMap.keys().next().value;
+      keyFingerprintInvocationMap.delete(oldestKey);
+    }
+    keyFingerprintInvocationMap.set(keyId, invocationSequence);
+  }
+  return {
+    invocationSequence,
+    nonceBudgetRemaining: MAX_RANDOM_IV_INVOCATIONS_PER_KEY - invocationSequence,
+    keyHex,
+  };
+}
+
+/**
+ * Encrypt a buffer or plaintext string using AES-256-GCM (NIST SP 800-38D) with a fresh 96-bit CSPRNG IV.
+ * Enforces the NIST SP 800-38D §8.2.2 random-IV invocation budget (2^32 per key).
  * Computes rawDataHash on the actual CIPHERTEXT PACKAGE (IV || Ciphertext)
  * so downloaded IPFS blobs can be verified BEFORE decryption!
  * @param {Uint8Array|string} data Plaintext genomic data (VCF/FASTQ/PDF bytes)
  * @param {CryptoKey} [key] Optional existing key, otherwise a new one is generated
- * @returns {Promise<{ payload: Uint8Array, ciphertext: Uint8Array, iv: Uint8Array, ivHex: string, keyHex: string, rawDataHash: string, activeKey: CryptoKey }>}
+ * @returns {Promise<{ payload: Uint8Array, ciphertext: Uint8Array, iv: Uint8Array, ivHex: string, keyHex: string, rawDataHash: string, activeKey: CryptoKey, invocationSequence: number, nonceBudgetRemaining: number }>}
  */
 export async function encryptGenomicData(data, key = null) {
   let activeKey = key;
@@ -154,7 +200,14 @@ export async function encryptGenomicData(data, key = null) {
   } else if (!activeKey) {
     activeKey = await generateSymmetricKey();
   }
-  const iv = cryptoObj.getRandomValues(new Uint8Array(12)); // 96-bit IV for AES-GCM
+
+  const {
+    invocationSequence,
+    nonceBudgetRemaining,
+    keyHex,
+  } = await consumeKeyInvocationBudget(activeKey, 1);
+
+  const iv = cryptoObj.getRandomValues(new Uint8Array(12)); // 96-bit CSPRNG IV for AES-GCM
 
   let encodedData;
   if (typeof data === "string") {
@@ -178,7 +231,6 @@ export async function encryptGenomicData(data, key = null) {
 
   // Compute on-chain integrity hash on the actual ciphertext package (IV || Ciphertext)
   const rawDataHash = await computeDataHash(payload);
-  const keyHex = await exportKeyToHex(activeKey);
 
   return {
     payload: payload,
@@ -188,6 +240,8 @@ export async function encryptGenomicData(data, key = null) {
     keyHex: keyHex,
     rawDataHash: rawDataHash,
     activeKey: activeKey,
+    invocationSequence: invocationSequence,
+    nonceBudgetRemaining: nonceBudgetRemaining,
   };
 }
 

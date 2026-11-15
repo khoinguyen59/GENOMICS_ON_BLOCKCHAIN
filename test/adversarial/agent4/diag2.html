@@ -1,0 +1,45 @@
+<!doctype html><html><head><meta charset="utf-8"></head><body><pre id="out">BOOT</pre>
+<script>
+const el = document.getElementById('out'); const L = [];
+const say = (...a) => { L.push(a.join(' ')); el.textContent = L.join('\n'); fetch('/agent4-probe-log', { method: 'POST', body: el.textContent }); };
+(async () => {
+  say('UA=' + navigator.userAgent);
+  // --- STEP 1: key-PAIR extractability propagation (ECDSA, fast) ---
+  try {
+    const ec = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, false, ['sign', 'verify']);
+    say('[1] ECDSA pair: privateKey.extractable=' + ec.privateKey.extractable + ' publicKey.extractable=' + ec.publicKey.extractable);
+    let e1 = null, j1 = null;
+    try { j1 = await crypto.subtle.exportKey('jwk', ec.publicKey); } catch (e) { e1 = e; }
+    say('[1] exportKey(jwk, ECDSA publicKey) => ' + (e1 ? `THREW ${e1.name}: ${e1.message}` : `OK crv=${j1.crv}`));
+  } catch (e) { say('[1] ECDSA FATAL ' + e); }
+
+  // --- STEP 2: real project module crypto/storage/key_vault.js under IndexedDB ---
+  try {
+    const kv = await import('/crypto/storage/key_vault.js');
+    say('[2] imported key_vault.js exports: ' + Object.keys(kv).join(','));
+    const acct = '0x1111111111111111111111111111111111111111';
+    const missing = await kv.loadPersistentKeyPair(acct);
+    say('[2] loadPersistentKeyPair(NEVER saved) => typeof=' + typeof missing + ' value=' + JSON.stringify(missing));
+    say('[2] VERDICT: ' + (missing === null ? 'OK (null)' : `DEFECT: returns ${JSON.stringify(missing)}; Web3Context.jsx:125 "if (!kp)" is therefore FALSE -> no keypair generated`));
+    const missingCap = await kv.loadOwnerCapsulePersistent('QmNeverSaved');
+    say('[2] loadOwnerCapsulePersistent(NEVER saved) => typeof=' + typeof missingCap + ' value=' + JSON.stringify(missingCap));
+    say('[2] VERDICT: ' + (missingCap === null ? 'OK (null)' : `DEFECT: truthy sentinel ${JSON.stringify(missingCap)} -> datasetService.js:386 "if (ownerCapsule)" passes a non-capsule into decryptKeyCapsule`));
+    const ec2 = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, false, ['sign', 'verify']);
+    await kv.savePersistentKeyPair(acct, ec2);
+    const back = await kv.loadPersistentKeyPair(acct);
+    say('[2] INV-09 persistence roundtrip: stored non-extractable pair reloadable=' + !!(back && back.privateKey && back.privateKey.extractable === false) + ' (got typeof=' + typeof back + ' hasPriv=' + !!(back && back.privateKey) + ')');
+  } catch (e) { say('[2] KEYVAULT FATAL ' + ((e && e.stack) || e)); }
+
+  // --- STEP 3: RSA-OAEP (the algorithm the project actually uses) - last because it is slow ---
+  try {
+    say('[3] RSA-OAEP 2048 generateKey(extractable=false) starting...');
+    const t0 = performance.now();
+    const kp = await crypto.subtle.generateKey({ name: 'RSA-OAEP', modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: 'SHA-256' }, false, ['encrypt', 'decrypt']);
+    say('[3] elapsed=' + Math.round(performance.now() - t0) + 'ms priv.extractable=' + kp.privateKey.extractable + ' pub.extractable=' + kp.publicKey.extractable);
+    let e3 = null, j3 = null;
+    try { j3 = await crypto.subtle.exportKey('jwk', kp.publicKey); } catch (e) { e3 = e; }
+    say('[3] exportPublicKey(non-extractable pair) => ' + (e3 ? `THREW ${e3.name}: ${e3.message}` : `OK n.len=${j3.n.length} -> publish path survives`));
+  } catch (e) { say('[3] RSA FATAL ' + ((e && e.stack) || e)); }
+  say('END');
+})();
+</script></body></html>

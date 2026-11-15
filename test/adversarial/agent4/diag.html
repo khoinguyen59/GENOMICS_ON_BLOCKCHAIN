@@ -1,0 +1,23 @@
+<!doctype html><html><head><meta charset="utf-8"></head><body><pre id="out">BOOT</pre>
+<script>
+const el=document.getElementById('out'); const L=[];
+const say=(...a)=>{L.push(a.join(' ')); el.textContent=L.join('\n');};
+say('sync ok');
+(async()=>{
+  try{
+    say('before digest');
+    const h=await crypto.subtle.digest('SHA-256',new TextEncoder().encode('abc'));
+    say('digest len='+h.byteLength);
+    say('before generateKey AES');
+    const a=await crypto.subtle.generateKey({name:'AES-GCM',length:256},false,['encrypt','decrypt']);
+    say('AES extractable='+a.extractable);
+    say('before generateKey RSA');
+    const kp=await crypto.subtle.generateKey({name:'RSA-OAEP',modulusLength:2048,publicExponent:new Uint8Array([1,0,1]),hash:'SHA-256'},false,['encrypt','decrypt']);
+    say('RSA priv.extractable='+kp.privateKey.extractable+' pub.extractable='+kp.publicKey.extractable);
+    let err=null,jwk=null;
+    try{ jwk=await crypto.subtle.exportKey('jwk',kp.publicKey);}catch(e){err=e;}
+    say('exportKey(pub,jwk) => '+(err?('THREW '+err.name+': '+err.message):('OK kty='+jwk.kty+' n.len='+jwk.n.length)));
+    say('ALL DONE');
+  }catch(e){ say('FATAL '+e); }
+})();
+</script></body></html>

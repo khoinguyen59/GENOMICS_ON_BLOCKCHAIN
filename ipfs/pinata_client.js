@@ -35,8 +35,12 @@ export function getPinataJwt() {
  */
 export function setPinataJwt(token) {
   if (typeof window !== "undefined") {
+    if (window.sessionStorage) {
+      if (token) window.sessionStorage.setItem("GENO_PINATA_JWT", token);
+      else window.sessionStorage.removeItem("GENO_PINATA_JWT");
+    }
     if (window.localStorage) {
-      window.localStorage.setItem("GENO_PINATA_JWT", token || "");
+      window.localStorage.removeItem("GENO_PINATA_JWT");
     }
   }
 }

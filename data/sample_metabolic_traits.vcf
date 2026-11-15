@@ -1,0 +1,12 @@
+##fileformat=VCFv4.2
+##fileDate=20261029
+##source=GenomicsBlockchainSequencer_v2.1
+##reference=GRCh38.p13
+##INFO=<ID=ANN,Number=.,Type=String,Description="Functional annotations: Allele|Annotation|Annotation_Impact|Gene_Name|Feature_ID|HGVS.c|HGVS.p">
+##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">
+##FORMAT=<ID=DP,Number=1,Type=Integer,Description="Read Depth">
+##FORMAT=<ID=AD,Number=R,Type=Integer,Description="Allelic depths for the ref and alt alleles">
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO	FORMAT	SAMPLE_1000G_KHV01
+chr12	111803962	rs671	G	A	100	PASS	ANN=A|missense_variant|MODERATE|ALDH2|NM_000690.4|c.1510G>A|p.Glu504Lys	GT:DP:AD	0/1:48:24,24
+chr11	66560624	rs1815739	C	T	99	PASS	ANN=T|stop_gained|MODERATE|ACTN3|NM_001104.3|c.1729C>T|p.Arg577Ter	GT:DP:AD	0/1:52:26,26
+chr2	108973918	rs3827760	A	G	98	PASS	ANN=G|missense_variant|MODIFIER|EDAR|NM_022336.4|c.1109A>G|p.Val370Ala	GT:DP:AD	0/1:44:22,22

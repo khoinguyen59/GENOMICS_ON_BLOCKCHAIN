@@ -99,13 +99,17 @@ export function useGenomicFilters({ datasets = [] } = {}) {
     const activeLang = getActiveLang(lang);
     if (!sig) return activeLang === "en" ? "Physiological Traits" : "Tính Trạng Thể Chất";
     const mapVi = {
-      "Physiological Traits": "Tính Trạng Thể Chất", "Reference Benchmark": "Chuẩn Đối Chứng",
+      "Physiological Traits": "Tính Trạng Thể Chất",
+      "Physical Traits & Performance": "Tính Trạng Thể Chất & Hiệu Suất",
+      "Reference Benchmark": "Chuẩn Đối Chứng",
       "Carrier Screening": "Sàng Lọc Người Mang Gen", "Pharmacogenomics": "Dược Lý Di Truyền",
       "Population Genetics": "Di Truyền Quần Thể", "Morphological Traits": "Hình Thái Học",
       "NGS Sequencing Reads": "Giải Trình Tự NGS", "Pathogenic Risk": "Biến Dị Chức Năng"
     };
     const mapEn = {
-      "Physiological Traits": "Physiological Traits", "Reference Benchmark": "Reference Benchmark",
+      "Physiological Traits": "Physiological Traits",
+      "Physical Traits & Performance": "Physical Traits & Performance",
+      "Reference Benchmark": "Reference Benchmark",
       "Carrier Screening": "Carrier Screening", "Pharmacogenomics": "Pharmacogenomics",
       "Population Genetics": "Population Genetics", "Morphological Traits": "Morphological Traits",
       "NGS Sequencing Reads": "NGS Sequencing Reads", "Pathogenic Risk": "Functional Variation"

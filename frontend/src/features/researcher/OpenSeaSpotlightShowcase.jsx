@@ -101,16 +101,7 @@ export default function OpenSeaSpotlightShowcase({ onPurchase }) {
       if (catFiltered.length > 0) list = catFiltered;
     }
     if (activeChain !== "all") {
-      const chainFiltered = list.filter((d) => {
-        const id = Number(d.dataId);
-        if (activeChain === "eth") return [2, 7, 8, 5, 1].includes(id);
-        if (activeChain === "sol") return [8, 9, 10, 4].includes(id);
-        if (activeChain === "base") return [5, 6, 3, 2].includes(id);
-        if (activeChain === "arb") return [7, 4, 9, 1].includes(id);
-        if (activeChain === "poly") return [10, 6, 3, 8].includes(id);
-        return true;
-      });
-      if (chainFiltered.length > 0) list = chainFiltered;
+      list = list.filter(() => activeChain === "evm31337");
     }
     return list;
   }, [diverseOrderedDatasets, filterSignificance, activeChain]);
@@ -172,14 +163,10 @@ export default function OpenSeaSpotlightShowcase({ onPurchase }) {
     { id: "Population Genetics", label: lang === "vi" ? "Di truyền Quần thể" : "Population WGS", icon: "🧬" }
   ];
 
-  // Chain / Network Filter Icons matching OpenSea OS2
+  // Truthful Network Filter (Single Deployed EVM Chain: 31337)
   const chains = [
-    { id: "all", label: "All Chains", color: "#111827" },
-    { id: "eth", label: "Ethereum / EVM Main", color: "#627EEA", symbol: "♦" },
-    { id: "sol", label: "High-Throughput L1", color: "#14F195", symbol: "≡" },
-    { id: "base", label: "Base L2 Rollup", color: "#0052FF", symbol: "■" },
-    { id: "arb", label: "Arbitrum Nitro", color: "#28A0F0", symbol: "▲" },
-    { id: "poly", label: "Polygon zkEVM", color: "#8247E5", symbol: "⬡" }
+    { id: "all", label: "All Cohorts", color: "#111827" },
+    { id: "evm31337", label: "Local EVM (31337)", color: "#627EEA", symbol: "♦" }
   ];
 
   const timeframes = ["1h", "6h", "1d", "7d", "30d"];

@@ -42,7 +42,6 @@ recordings/
 
 # Temporary / Scratch Analysis & Local Audit Scripts
 scripts/copy_covers*
-scripts/audit/
 scripts/demo/record_rubric_demo.py
 scripts/check_env_tools.py
 scripts/detail_labs.py
@@ -59,3 +58,10 @@ scripts/read_docx_p3.py
 scripts/scan_extracted_docx.py
 scripts/scan_lab_structure.py
 scripts/summarize_labs.py
+
+# Secret Seed Keys & Local Vault Runtime State
+.local/
+BTL_extracted/
+scripts/deploy/seed_keys.json
+**/seed_keys.json
+

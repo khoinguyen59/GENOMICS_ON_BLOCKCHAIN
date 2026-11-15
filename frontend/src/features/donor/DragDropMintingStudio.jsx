@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from "react";
 import { useWeb3 } from "../../context/Web3Context";
 import { useLanguage } from "../../context/LanguageContext";
 import { PRESET_CATALOG, parseVcfMetadata } from "../../services/vcfService";
-import { encryptGenomicData } from "../../../../crypto/client_crypto.js";
+import { encryptGenomicData, encryptGenomicDataChunked } from "../../../../crypto/client_crypto.js";
 import { SealedCipherIcon, VerifiedBadgeIcon, RefreshSpinIcon, DataOwnerShieldIcon } from "../../components/icons/GenoIcons";
 import ClinvarSampleBar from "./ClinvarSampleBar";
 import PipelineProgressMonitor from "./PipelineProgressMonitor";
@@ -32,7 +32,22 @@ export default function DragDropMintingStudio({ onPublishSuccess }) {
   const [fileFormat, setFileFormat] = useState("VCF v4.2");
   const [ancestryRegion, setAncestryRegion] = useState("Vietnamese Kinh (1000 Genomes: KHV)");
   const [rawFileText, setRawFileText] = useState(
-    `##fileformat=VCFv4.2\n##source=1000Genomes_Phase3_KHV\n#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\nchr12\t111803962\trs671\tG\tA\t100\tPASS\tAF=0.38000;GENE=ALDH2;TRAIT=1000G_KHV_WGS;CATEGORY=1000 Genomes Project;FORMAT=VCFv4.2;ANCESTRY=Vietnamese Kinh (KHV);ANN=A|missense_variant|MODERATE|ALDH2|transcript|NM_000690.4|protein_coding|12/13|c.1510G>A|p.Glu504Lys`
+    `##fileformat=VCFv4.2\n` +
+    `##fileDate=20261110\n` +
+    `##source=1000Genomes_Phase3_KHV_WGS\n` +
+    `##reference=GRCh38\n` +
+    `##contig=<ID=chr12,length=133275309,assembly=GRCh38>\n` +
+    `##INFO=<ID=AF,Number=A,Type=Float,Description="Global Allele Frequency">\n` +
+    `##INFO=<ID=KHV_AF,Number=A,Type=Float,Description="Allele Frequency in 1000 Genomes Kinh in Ho Chi Minh City, Vietnam">\n` +
+    `##INFO=<ID=GENE,Number=1,Type=String,Description="Gene Symbol">\n` +
+    `##INFO=<ID=TRAIT,Number=1,Type=String,Description="Genomic Trait or Analysis Locus">\n` +
+    `##INFO=<ID=DP,Number=1,Type=Integer,Description="Total Depth Across Cohort">\n` +
+    `##INFO=<ID=ANN,Number=.,Type=String,Description="Functional annotations">\n` +
+    `##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">\n` +
+    `##FORMAT=<ID=DP,Number=1,Type=Integer,Description="Read Depth">\n` +
+    `##FORMAT=<ID=GQ,Number=1,Type=Integer,Description="Genotype Quality">\n` +
+    `#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\t1000G_KHV_VN_01\n` +
+    `chr12\t111803962\trs671\tG\tA\t100\tPASS\tAF=0.380;KHV_AF=0.520;GENE=ALDH2;TRAIT=Alcohol_Dehydrogenase_Metabolism;DP=2400;ANN=A|missense_variant|MODERATE|ALDH2|transcript|NM_000690.4|c.1510G>A|p.Glu504Lys\tGT:DP:GQ\t0/1:42:99`
   );
   const [priceGeno, setPriceGeno] = useState(100);
   const [durationDays, setDurationDays] = useState(45);
@@ -103,16 +118,36 @@ export default function DragDropMintingStudio({ onPublishSuccess }) {
     setSubjectId(parsed.detectedSubject);
 
     if (isLargeFile) {
-      setLiveTransmissionAudit({
-        plaintextSizeInRam: fileSize,
-        plaintextBytesOverWire: 0,
-        ciphertextSize: fileSize + Math.ceil(fileSize / (64 * 1024)) * 32 + 20,
-        ivHex: "STREAMING_INDIVIDUAL_IVS_PER_64KB",
-        tagHex: "STREAMING_GMAC_TAGS_PER_64KB",
-        dataHash: "Will compute SHA-256 over chunked package on submission...",
-        status: `VERIFIED: GA4GH Crypt4GH Streaming Guard Active (${(fileSize / (1024 * 1024)).toFixed(1)} MB) - 64KB Slices`
-      });
-      showToast(`Large file detected (${(fileSize / (1024 * 1024)).toFixed(1)} MB): GA4GH Streaming Mode Active`);
+      try {
+        const chunkRes = await encryptGenomicDataChunked(content, {
+          chunkSize: 64 * 1024,
+          onProgress: (fraction) => {
+            setChunkProgress({
+              percent: Math.round(fraction * 100),
+              processedMB: ((fraction * fileSize) / (1024 * 1024)).toFixed(1),
+              totalMB: (fileSize / (1024 * 1024)).toFixed(1)
+            });
+          }
+        });
+        const ivBytes = chunkRes.payload.subarray(24, 36);
+        const ivHex = Array.from(ivBytes).map((b) => b.toString(16).padStart(2, "0")).join("");
+        const chunk0Len = new DataView(chunkRes.payload.buffer, chunkRes.payload.byteOffset).getUint32(20, false);
+        const tagBytes = chunkRes.payload.subarray(24 + chunk0Len - 16, 24 + chunk0Len);
+        const tagHex = Array.from(tagBytes).map((b) => b.toString(16).padStart(2, "0")).join("");
+
+        setLiveTransmissionAudit({
+          plaintextSizeInRam: fileSize,
+          plaintextBytesOverWire: 0,
+          ciphertextSize: chunkRes.payload.byteLength,
+          ivHex: ivHex,
+          tagHex: tagHex,
+          dataHash: chunkRes.rawDataHash,
+          status: `VERIFIED: GA4GH Crypt4GH Streaming Chunked Engine Active (${(fileSize / (1024 * 1024)).toFixed(1)} MB) - 64KB Slices`
+        });
+        showToast(`Large file detected (${(fileSize / (1024 * 1024)).toFixed(1)} MB): GA4GH Streaming Mode Active`);
+      } catch (err) {
+        console.warn("Chunked pre-encryption preview note:", err);
+      }
     } else {
       // Compute live client-side WebCrypto encryption preview to demonstrate Zero Plaintext Leakage
       try {
@@ -156,6 +191,7 @@ export default function DragDropMintingStudio({ onPublishSuccess }) {
       const reader = new FileReader();
       reader.onload = (event) => {
         const text = event.target.result;
+        setRawFileText(text);
         parseVcfAndAutofill(text, file.name, file.size, false);
       };
       reader.readAsText(file);
@@ -203,7 +239,7 @@ export default function DragDropMintingStudio({ onPublishSuccess }) {
           if (preset.ancestryRegion) setAncestryRegion(preset.ancestryRegion);
           if (preset.priceGeno) setPriceGeno(preset.priceGeno);
           if (preset.durationDays) setDurationDays(preset.durationDays);
-          showToast(preset.toastMsg || `Loaded ${preset.file}`);
+          showToast(preset.toastMsg || preset.toastVi || preset.toastEn || `Loaded ${preset.file}`);
           return;
         }
       } catch (err) {
@@ -222,7 +258,7 @@ export default function DragDropMintingStudio({ onPublishSuccess }) {
     if (preset.ancestryRegion) setAncestryRegion(preset.ancestryRegion);
     if (preset.priceGeno) setPriceGeno(preset.priceGeno);
     if (preset.durationDays) setDurationDays(preset.durationDays);
-    showToast(preset.toastMsg || `Loaded ${preset.file}`);
+    showToast(preset.toastMsg || preset.toastVi || preset.toastEn || `Loaded ${preset.file}`);
   };
 
   const handleSubmit = async (e) => {
@@ -544,6 +580,8 @@ export default function DragDropMintingStudio({ onPublishSuccess }) {
               >
                 <input
                   type="checkbox"
+                  id="checkbox-crypt4gh"
+                  aria-label="GA4GH Crypt4GH Streaming Pipeline (64KB Slices)"
                   checked={isChunkedMode}
                   disabled={uploadedFileSize > MAX_PREVIEW_SIZE}
                   onChange={(e) => setIsChunkedMode(e.target.checked)}

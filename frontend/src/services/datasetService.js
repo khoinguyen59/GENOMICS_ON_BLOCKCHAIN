@@ -31,7 +31,8 @@ import {
 import contractAddresses from "../contracts/contractAddresses.json";
 import GenomicsRegistryABI from "../contracts/GenomicsRegistryABI.json";
 import GenomicTokenABI from "../contracts/GenomicTokenABI.json";
-import { executeSerializedTx, smartReadWithRetry } from "../utils/asyncResilience.js";
+import GenomicZkVerifierABI from "../contracts/GenomicZkVerifierABI.json";
+import { executeSerializedTx, smartReadWithRetry, sanitizeGenomicMetadata } from "../utils/asyncResilience.js";
 
 /**
  * 3-Step Client-Side Encryption, IPFS Storage, and Smart Contract Registration Pipeline
@@ -44,6 +45,8 @@ export async function publishGenomicDataset({
   disease,
   geneSymbol,
   hpoCode,
+  fileFormat = "",
+  format = "",
   ancestryRegion,
   priceGeno,
   durationDays,
@@ -62,7 +65,9 @@ export async function publishGenomicDataset({
   const isLargeOrChunked =
     isChunked ||
     Boolean(rawFileBlob) ||
-    (typeof rawFileText === "string" && rawFileText.length > 10 * 1024 * 1024);
+    fileFormat === "Crypt4GH" ||
+    format === "Crypt4GH" ||
+    (typeof rawFileText === "string" && rawFileText.length > 64 * 1024);
 
   if (isLargeOrChunked) {
     const inputData = rawFileBlob || rawFileText;
@@ -79,10 +84,11 @@ export async function publishGenomicDataset({
     gene: geneSymbol,
     variant: "Verified Next-Gen Sequencing Variant"
   });
-  const encryptedSummary = await encryptGenomicData(
-    clinicalPdf,
-    encryptedRaw.activeKey || encryptedRaw.keyHex
-  );
+  const cleanRawKeyHex = typeof encryptedRaw.keyHex === "string" ? encryptedRaw.keyHex.replace(/^0x/, "").toLowerCase() : "";
+  const summaryKeyHex = ethers
+    .sha256(ethers.toUtf8Bytes(`GENOCHAIN_SUMMARY_PDF_DOMAIN_V1:${cleanRawKeyHex}`))
+    .slice(2);
+  const encryptedSummary = await encryptGenomicData(clinicalPdf, summaryKeyHex);
 
   // Step 2: IPFS Decentralized Pinning
   onStepProgress?.(2);
@@ -96,7 +102,7 @@ export async function publishGenomicDataset({
     subjectId,
     disease,
     phenotypes: [{ id: hpoCode.split(/\s*-\s*/)[0], label: hpoCode.split(/\s*-\s*/)[1] || disease }],
-    variants: [{ gene: geneSymbol, hgvs: "c.3454G>A", zygosity: "heterozygous" }],
+    variants: [{ gene: geneSymbol, hgvs: "[REDACTED_PROTECTED_UNDER_ENCRYPTED_PAYLOAD]", zygosity: "heterozygous" }],
     rawDataHash: encryptedRaw.rawDataHash,
     rawCid: rawCid,
     summaryCid: summaryCid,
@@ -106,13 +112,13 @@ export async function publishGenomicDataset({
   const metaUpload = await uploadPhenopacketMetadata(phenopacket);
   const metadataCid = metaUpload?.cid || metaUpload;
 
-  // Secure creator key locally (dual-layer: persistent IndexedDB + localStorage)
+  // Secure creator key locally (persistent IndexedDB scoped by account)
   try {
     const ownerKeyPair = await loadPersistentKeyPair(account);
     if (ownerKeyPair) {
       const ownerPubJwk = await exportPublicKey(ownerKeyPair.publicKey);
       const ownerCapsule = await packageKeyCapsule(encryptedRaw.keyHex, ownerPubJwk, account, account);
-      await saveOwnerCapsulePersistent(rawCid, ownerCapsule);
+      await saveOwnerCapsulePersistent(rawCid, ownerCapsule, account);
     }
   } catch (e) {
     console.warn("Owner capsule packaging note:", e);
@@ -201,7 +207,7 @@ export async function dispatchCapsuleToBuyer({
   const registry = new ethers.Contract(contractAddresses.GenomicsRegistry, GenomicsRegistryABI, signer);
 
   let keyHex = null;
-  const ownerCapsule = await loadOwnerCapsulePersistent(rawCid);
+  const ownerCapsule = await loadOwnerCapsulePersistent(rawCid, ownerAddress);
   if (ownerCapsule) {
     const ownerKeyPair = await loadPersistentKeyPair(ownerAddress);
     if (ownerKeyPair) {
@@ -258,8 +264,10 @@ export async function purchaseDatasetAccess({ dataset, account, signer, research
       await approveTx.wait();
     }
 
-    // 2/2: Grant access with escrow settlement
-    const buyTx = await registry.grantAccess(dataset.dataId);
+    // 2/2: Grant access with escrow settlement and slippage protection
+    const buyTx = await (registry["grantAccess(uint256,uint256)"]
+      ? registry["grantAccess(uint256,uint256)"](dataset.dataId, priceWei)
+      : registry.grantAccess(dataset.dataId));
     await buyTx.wait();
     return buyTx;
   });
@@ -289,7 +297,9 @@ export async function purchaseDatasetWithEscrow({ dataset, disputeWindowDays = 1
     }
 
     const disputeWindowSeconds = Math.max(3600, disputeWindowDays * 86400);
-    const buyTx = await registry.grantAccessWithEscrow(dataset.dataId, disputeWindowSeconds);
+    const buyTx = await (registry["grantAccessWithEscrow(uint256,uint256,uint256)"]
+      ? registry["grantAccessWithEscrow(uint256,uint256,uint256)"](dataset.dataId, disputeWindowSeconds, priceWei)
+      : registry.grantAccessWithEscrow(dataset.dataId, disputeWindowSeconds));
     await buyTx.wait();
     return buyTx;
   });
@@ -354,14 +364,17 @@ async function resolveAesKeyForDataset({ dataset, account, contracts, researcher
     }
   }
 
-  // 1b. Event-driven retrieval fallback if mapping is empty (Gas-optimized retrieval)
+  // 1b. Event-driven retrieval fallback if mapping is empty AND dataset is active
   if ((!capsuleJson || capsuleJson.trim().length === 0) && contracts?.registry?.filters?.CapsuleStored) {
     try {
-      const filter = contracts.registry.filters.CapsuleStored(dataset.dataId, account);
-      const events = await contracts.registry.queryFilter(filter, 0, "latest");
-      if (events && events.length > 0) {
-        const latestEvent = events[events.length - 1];
-        capsuleJson = latestEvent.args?.capsule || latestEvent.args?.[2] || "";
+      const hasActive = await contracts.registry.hasActiveAccess(dataset.dataId, account);
+      if (hasActive) {
+        const filter = contracts.registry.filters.CapsuleStored(dataset.dataId, account);
+        const events = await contracts.registry.queryFilter(filter, 0, "latest");
+        if (events && events.length > 0) {
+          const latestEvent = events[events.length - 1];
+          capsuleJson = latestEvent.args?.capsule || latestEvent.args?.[2] || "";
+        }
       }
     } catch (evErr) {
       console.warn("Event-driven capsule retrieval note:", evErr);
@@ -377,18 +390,17 @@ async function resolveAesKeyForDataset({ dataset, account, contracts, researcher
     }
   }
 
-  // 2. Check if caller is data owner with persistent capsule in IndexedDB or localStorage
-  const ownerCapsule = await loadOwnerCapsulePersistent(dataset.rawCid);
-  if (ownerCapsule) {
-    try {
-      const isOwner = account && dataset.owner && account.toLowerCase() === dataset.owner.toLowerCase();
-      const ownerKp = isOwner ? researcherKeyPair : await loadPersistentKeyPair(dataset.owner);
-      if (ownerKp?.privateKey) {
-        const recovered = await decryptKeyCapsule(ownerCapsule, ownerKp.privateKey);
+  // 2. Check if caller is strictly the data owner with persistent capsule in IndexedDB or localStorage (HIGH-06 tenant isolation)
+  const isOwner = Boolean(account && dataset.owner && account.toLowerCase() === dataset.owner.toLowerCase());
+  if (isOwner) {
+    const ownerCapsule = await loadOwnerCapsulePersistent(dataset.rawCid, account);
+    if (ownerCapsule && researcherKeyPair?.privateKey) {
+      try {
+        const recovered = await decryptKeyCapsule(ownerCapsule, researcherKeyPair.privateKey);
         if (recovered?.keyHex) return recovered.keyHex;
+      } catch (e) {
+        console.warn("Owner capsule recovery note:", e);
       }
-    } catch (e) {
-      console.warn("Owner capsule recovery note:", e);
     }
   }
 
@@ -476,9 +488,33 @@ export async function decryptSummaryReport({ dataset, account, contracts, resear
   // 2. Resolve ECIES Key Capsule
   const recoveredAesKey = await resolveAesKeyForDataset({ dataset, account, contracts, researcherKeyPair });
 
-  // 3. Decrypt binary PDF payload (asString = false)
+  // 3. Decrypt binary PDF payload using domain-separated key (with fallback to base session key for legacy seeds)
+  const cleanKeyHex = typeof recoveredAesKey === "string" ? recoveredAesKey.replace(/^0x/, "").toLowerCase() : "";
+  if (cleanKeyHex.length === 64) {
+    const summaryKeyHex = ethers
+      .sha256(ethers.toUtf8Bytes(`GENOCHAIN_SUMMARY_PDF_DOMAIN_V1:${cleanKeyHex}`))
+      .slice(2);
+    try {
+      return await decryptGenomicPayload(downloadedBlob, summaryKeyHex, false);
+    } catch {
+      // Fallback for legacy datasets encrypted prior to domain separation
+    }
+  }
   const decryptedPdfBytes = await decryptGenomicPayload(downloadedBlob, recoveredAesKey, false);
   return decryptedPdfBytes;
+}
+
+function sanitizeMetadataTree(val) {
+  if (typeof val === "string") return sanitizeGenomicMetadata(val);
+  if (Array.isArray(val)) return val.map(sanitizeMetadataTree);
+  if (val && typeof val === "object") {
+    const out = {};
+    for (const [k, v] of Object.entries(val)) {
+      out[sanitizeGenomicMetadata(String(k))] = sanitizeMetadataTree(v);
+    }
+    return out;
+  }
+  return val;
 }
 
 /**
@@ -488,5 +524,51 @@ export async function fetchPhenopacketMetadata({ metadataCid }) {
   if (!metadataCid) throw new Error("Metadata CID is missing.");
   const bytes = await smartReadWithRetry(() => retrieveFromIpfs(metadataCid));
   const jsonText = new TextDecoder().decode(bytes);
-  return JSON.parse(jsonText);
+  return sanitizeMetadataTree(JSON.parse(jsonText));
 }
+
+/**
+ * Query live GenomicZkVerifier linkage and trait possession proof status via GenomicsRegistry
+ */
+export async function verifyDatasetTraitZkStatus({ dataId, contracts, variantCommitment }) {
+  const result = {
+    linked: false,
+    verifierAddress: ethers.ZeroAddress,
+    bountyCount: 0,
+    verified: false,
+  };
+  if (!contracts?.registry || !dataId) return result;
+  try {
+    const verifierAddr = await smartReadWithRetry(() => contracts.registry.zkVerifier());
+    result.verifierAddress = verifierAddr || ethers.ZeroAddress;
+    result.linked = Boolean(verifierAddr && verifierAddr !== ethers.ZeroAddress);
+
+    const readProvider = contracts.registry.runner?.provider || contracts.registry.runner;
+    if (result.linked && readProvider) {
+      try {
+        const zkContract = new ethers.Contract(verifierAddr, GenomicZkVerifierABI, readProvider);
+        result.bountyCount = Number(await smartReadWithRetry(() => zkContract.bountyCount()));
+      } catch {
+        // Optional view query
+      }
+    }
+
+    const commitment =
+      variantCommitment && /^0x[0-9a-fA-F]{64}$/.test(variantCommitment)
+        ? variantCommitment
+        : null;
+    if (result.linked && commitment) {
+      result.verified = Boolean(
+        await smartReadWithRetry(() => contracts.registry.verifyDatasetTraitPossession(dataId, commitment))
+      );
+    }
+  } catch (err) {
+    console.warn("[ZK-Verify] Status check warning:", err?.message || err);
+  }
+  return result;
+}
+
+export {
+  encryptGenomicDataChunked,
+  decryptGenomicDataChunked
+};

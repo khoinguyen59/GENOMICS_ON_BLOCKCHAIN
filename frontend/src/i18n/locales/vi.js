@@ -99,6 +99,7 @@ export const vi = {
     colConsequenceZyg: "Biến Dị & Zygosity",
     colRawSequenceState: "Bảo Mật Dữ Liệu",
     colPriceRoyalty: "Giá Phí & Bản Quyền",
+    tableColPrice: "Giá Phí",
     colTerm: "Thời Hạn",
     colAction: "Thao Tác",
 
@@ -408,25 +409,7 @@ export const vi = {
     reset: "Đặt lại",
 
     // Activity Feed & RPC Errors
-    activityLiveLedger: "Sổ Cái Sự Kiện On-Chain Thời Gian Thực",
-    activityFilterAll: "Tất Cả",
-    activityFilterPurchases: "Mua Quyền",
-    activityFilterEscrow: "Ký Quỹ Escrow",
-    activityFilterMints: "Đăng Ký Mẫu Gen",
-    activityFilterRoyalties: "Bản Quyền 10%",
-    activityColEvent: "SỰ KIỆN",
-    activityColItem: "MẪU DI TRUYỀN",
-    activityColPrice: "GIÁ",
-    activityColFrom: "TỪ",
-    activityColTo: "ĐẾN",
-    activityColTx: "GIAO DỊCH (TX)",
-    activityColTime: "THỜI GIAN",
-    activityEmpty: "Chưa ghi nhận sự kiện on-chain nào",
-    rpcErrorOccurred: "Lỗi truy vấn RPC nguyên bản (EVM / Node Error):",
-    eventPurchase: "Mua Quyền Truy Cập",
-    eventEscrow: "Ký Quỹ Escrow",
-    eventRoyalty: "10% Bản Quyền EIP-2981",
-    eventMint: "Niêm Yết Mẫu Mới"
+    rpcErrorOccurred: "Lỗi truy vấn RPC nguyên bản (EVM / Node Error):"
 };
 
 export default vi;

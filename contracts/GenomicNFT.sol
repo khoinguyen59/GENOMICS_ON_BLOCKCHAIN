@@ -4,6 +4,12 @@ pragma solidity ^0.8.24;
 import "@openzeppelin/contracts/token/ERC721/extensions/ERC721URIStorage.sol";
 import "@openzeppelin/contracts/token/common/ERC2981.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+
+interface IGenomicsRegistryWorkerSync {
+    function resetAuthorizedWorkersForToken(uint256 tokenId) external;
+}
 
 /**
  * @title GenomicNFT (GNFT)
@@ -13,6 +19,8 @@ import "@openzeppelin/contracts/access/Ownable.sol";
  *      Each NFT uniquely represents an encrypted genomic dataset uploaded by a patient/data owner.
  */
 contract GenomicNFT is ERC721URIStorage, ERC2981, Ownable {
+    using SafeERC20 for IERC20;
+
     uint256 private _nextTokenId;
     address public registryContract;
 
@@ -37,6 +45,11 @@ contract GenomicNFT is ERC721URIStorage, ERC2981, Ownable {
         uint96 royaltyFeeBps
     );
     event RegistryContractUpdated(address indexed newRegistry);
+    event TokensRescued(
+        address indexed token,
+        address indexed to,
+        uint256 amount
+    );
 
     error OnlyRegistry();
     error InvalidAddress();
@@ -64,6 +77,18 @@ contract GenomicNFT is ERC721URIStorage, ERC2981, Ownable {
         if (registryAddress == address(0)) revert InvalidAddress();
         registryContract = registryAddress;
         emit RegistryContractUpdated(registryAddress);
+    }
+
+    /**
+     * @notice Rescue mistakenly sent ERC20 tokens to the NFT contract.
+     * @param tokenAddress The ERC20 token address to rescue
+     * @param to The recipient address
+     * @param amount The token amount in wei
+     */
+    function rescueTokens(address tokenAddress, address to, uint256 amount) external onlyOwner {
+        if (to == address(0)) revert InvalidAddress();
+        IERC20(tokenAddress).safeTransfer(to, amount);
+        emit TokensRescued(tokenAddress, to, amount);
     }
 
     /**
@@ -136,18 +161,8 @@ contract GenomicNFT is ERC721URIStorage, ERC2981, Ownable {
         returns (address)
     {
         address from = super._update(to, tokenId, auth);
-        if (from != address(0) && to != address(0) && from != to) {
-            if (registryContract != address(0)) {
-                (bool success, ) = registryContract.call(
-                    abi.encodeWithSignature("resetAuthorizedWorkersForToken(uint256)", tokenId)
-                );
-                if (!success) {
-                    (bool fallbackSuccess, ) = registryContract.call(
-                        abi.encodeWithSignature("resetAuthorizedWorkers(uint256)", tokenId)
-                    );
-                    (fallbackSuccess); // silence compiler warning
-                }
-            }
+        if (from != address(0) && to != address(0) && from != to && registryContract.code.length > 0) {
+            IGenomicsRegistryWorkerSync(registryContract).resetAuthorizedWorkersForToken(tokenId);
         }
         return from;
     }

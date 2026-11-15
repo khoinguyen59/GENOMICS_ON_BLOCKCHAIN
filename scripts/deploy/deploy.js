@@ -1,9 +1,45 @@
 import hre from "hardhat";
 import fs from "node:fs";
 import path from "node:path";
-import { encryptGenomicData, generateClinicalPdfReport } from "../../crypto/client_crypto.js";
+import crypto from "node:crypto";
+import {
+  encryptGenomicData,
+  generateClinicalPdfReport,
+  generateAsymmetricKeyPair,
+  exportPublicKey,
+  packageKeyCapsule,
+} from "../../crypto/client_crypto.js";
 import { buildPhenopacket } from "../../ipfs/phenopacket_builder.js";
 import { computeIpfsCidV0, cacheLocalIpfsContent } from "../../ipfs/pinata_uploader.js";
+
+function loadOrCreateDispatcherVaultKey() {
+  if (process.env.GENOCHAIN_SEED_VAULT_SECRET) {
+    return crypto.createHash("sha256").update(process.env.GENOCHAIN_SEED_VAULT_SECRET, "utf8").digest();
+  }
+  const localDir = path.resolve(".local");
+  if (!fs.existsSync(localDir)) {
+    fs.mkdirSync(localDir, { recursive: true, mode: 0o700 });
+  }
+  const keyPath = path.join(localDir, "dispatcher_vault.key");
+  if (fs.existsSync(keyPath)) {
+    const hex = fs.readFileSync(keyPath, "utf8").trim();
+    if (!/^[0-9a-fA-F]{64}$/.test(hex)) {
+      throw new Error("Invalid .local/dispatcher_vault.key format (expected 64 hex chars).");
+    }
+    return Buffer.from(hex, "hex");
+  }
+  const randomKey = crypto.randomBytes(32);
+  fs.writeFileSync(keyPath, randomKey.toString("hex"), { mode: 0o600 });
+  return randomKey;
+}
+
+function wrapSeedKeyForVault(aesKeyHex, vaultKey) {
+  const nonce = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv("aes-256-gcm", vaultKey, nonce);
+  const rawBytes = Buffer.from(aesKeyHex.replace(/^0x/, ""), "hex");
+  const encrypted = Buffer.concat([cipher.update(rawBytes), cipher.final(), cipher.getAuthTag()]);
+  return Buffer.concat([nonce, encrypted]).toString("hex");
+}
 
 async function main() {
   console.log("==================================================");
@@ -45,6 +81,18 @@ async function main() {
   await authTx.wait();
   console.log("[OK] GenomicsRegistry authorization completed!");
 
+  // 4.5. Deploy GenomicZkVerifier (BN254 Groth16 Zero-Knowledge Trait Bounty Verifier)
+  console.log("\n4.5. Deploying GenomicZkVerifier (BN254 Groth16 Verifier)...");
+  const GenomicZkVerifier = await ethers.getContractFactory("GenomicZkVerifier");
+  const zkVerifier = await GenomicZkVerifier.deploy(token.target);
+  await zkVerifier.waitForDeployment();
+  console.log(`[OK] GenomicZkVerifier deployed at: ${zkVerifier.target}`);
+
+  // Link GenomicZkVerifier in GenomicsRegistry (zk-Genomics Verification Engine)
+  const linkZkTx = await registry.connect(deployer).setZkVerifier(zkVerifier.target);
+  await linkZkTx.wait();
+  console.log(`[OK] GenomicsRegistry successfully linked to GenomicZkVerifier at: ${zkVerifier.target}`);
+
   // Authorize deployer as Capsule Dispatcher
   const dispTx = await registry.connect(deployer).setCapsuleDispatcher(deployer.address);
   await dispTx.wait();
@@ -60,7 +108,7 @@ async function main() {
     na12878RealVcf = fs.readFileSync(na12878Path, "utf8");
     console.log(`📂 Loaded authentic Broad Institute GIAB NA12878 VCF (${na12878RealVcf.length} bytes)`);
   } else {
-    na12878RealVcf = "##fileformat=VCFv4.2\n#CHROM\tPOS\tID\tREF\tALT\tINFO\nchr20\t14370\trs6072048\tC\tT\tANN=ZNF343|synonymous_variant";
+    na12878RealVcf = "##fileformat=VCFv4.2\n##fileDate=20260919\n##source=Broad_Institute_GATK_GIAB\n##reference=GRCh38\n##contig=<ID=chr20,length=64444167,assembly=GRCh38>\n##INFO=<ID=ANN,Number=.,Type=String,Description=\"Functional annotations\">\n##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">\n#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tNA12878\nchr20\t14370\trs6072048\tC\tT\t100\tPASS\tANN=ZNF343|synonymous_variant\tGT\t0/1\n";
   }
 
   // Helper to load real genomic sample file
@@ -72,11 +120,11 @@ async function main() {
     return fallback;
   };
 
-  const khvVcf = loadVcf("data/diverse_real_datasets/KHV_chr12_1000genomes.vcf", "##fileformat=VCFv4.2\n#CHROM\tPOS\tID\tREF\tALT\tINFO\nchr12\t111803962\trs671\tG\tA\tAF=0.38000;GENE=ALDH2;TRAIT=1000G_KHV");
-  const actn3Vcf = loadVcf("data/diverse_real_datasets/ACTN3_muscle_performance_rs1815739.vcf", "##fileformat=VCFv4.2\n#CHROM\tPOS\tID\tREF\tALT\tINFO\nchr11\t66560624\trs1815739\tC\tT\tGENE=ACTN3;TRAIT=Fast_twitch_muscle_power");
-  const herc2Vcf = loadVcf("data/diverse_real_datasets/HERC2_eye_color_rs12913832.vcf", "##fileformat=VCFv4.2\n#CHROM\tPOS\tID\tREF\tALT\tINFO\nchr15\t28120472\trs12913832\tA\tG\tGENE=HERC2;TRAIT=Eye_color_pigmentation");
-  const tas2r38Vcf = loadVcf("data/diverse_real_datasets/TAS2R38_bitter_taste_rs713598.vcf", "##fileformat=VCFv4.2\n#CHROM\tPOS\tID\tREF\tALT\tINFO\nchr7\t141972804\trs713598\tG\tC\tGENE=TAS2R38;TRAIT=Bitter_taste_perception");
-  const edarVcf = loadVcf("data/diverse_real_datasets/EDAR_hair_thickness_rs3827760.vcf", "##fileformat=VCFv4.2\n#CHROM\tPOS\tID\tREF\tALT\tINFO\nchr2\t108898064\trs3827760\tT\tC\tGENE=EDAR;TRAIT=East_Asian_hair_thickness");
+  const khvVcf = loadVcf("data/diverse_real_datasets/KHV_chr12_1000genomes.vcf", "##fileformat=VCFv4.2\n##fileDate=20260919\n##source=1000Genomes_Phase3_KHV_WGS\n##reference=GRCh38\n##contig=<ID=chr12,length=133275309,assembly=GRCh38>\n##INFO=<ID=AF,Number=A,Type=Float,Description=\"Global Allele Frequency\">\n##INFO=<ID=GENE,Number=1,Type=String,Description=\"Gene Symbol\">\n##INFO=<ID=TRAIT,Number=1,Type=String,Description=\"Genomic Trait\">\n##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">\n#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tKHV01\nchr12\t111803962\trs671\tG\tA\t100\tPASS\tAF=0.38000;GENE=ALDH2;TRAIT=1000G_KHV\tGT\t0/1\n");
+  const actn3Vcf = loadVcf("data/diverse_real_datasets/ACTN3_muscle_performance_rs1815739.vcf", "##fileformat=VCFv4.2\n##fileDate=20260919\n##source=NCBI_dbSNP_Build155_ACTN3\n##reference=GRCh38\n##contig=<ID=chr11,length=135086622,assembly=GRCh38>\n##INFO=<ID=GENE,Number=1,Type=String,Description=\"Gene Symbol\">\n##INFO=<ID=TRAIT,Number=1,Type=String,Description=\"Genomic Trait\">\n##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">\n#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tSUBJECT01\nchr11\t66560624\trs1815739\tC\tT\t100\tPASS\tGENE=ACTN3;TRAIT=Fast_twitch_muscle_power\tGT\t0/1\n");
+  const herc2Vcf = loadVcf("data/diverse_real_datasets/HERC2_eye_color_rs12913832.vcf", "##fileformat=VCFv4.2\n##fileDate=20260919\n##source=NCBI_dbSNP_Build155_HERC2\n##reference=GRCh38\n##contig=<ID=chr15,length=101991189,assembly=GRCh38>\n##INFO=<ID=GENE,Number=1,Type=String,Description=\"Gene Symbol\">\n##INFO=<ID=TRAIT,Number=1,Type=String,Description=\"Genomic Trait\">\n##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">\n#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tSUBJECT01\nchr15\t28120472\trs12913832\tA\tG\t100\tPASS\tGENE=HERC2;TRAIT=Eye_color_pigmentation\tGT\t0/1\n");
+  const tas2r38Vcf = loadVcf("data/diverse_real_datasets/TAS2R38_bitter_taste_rs713598.vcf", "##fileformat=VCFv4.2\n##fileDate=20260919\n##source=NCBI_dbSNP_Build155_TAS2R38\n##reference=GRCh38\n##contig=<ID=chr7,length=159345973,assembly=GRCh38>\n##INFO=<ID=GENE,Number=1,Type=String,Description=\"Gene Symbol\">\n##INFO=<ID=TRAIT,Number=1,Type=String,Description=\"Genomic Trait\">\n##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">\n#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tSUBJECT01\nchr7\t141972804\trs713598\tG\tC\t100\tPASS\tGENE=TAS2R38;TRAIT=Bitter_taste_perception\tGT\t0/1\n");
+  const edarVcf = loadVcf("data/diverse_real_datasets/EDAR_hair_thickness_rs3827760.vcf", "##fileformat=VCFv4.2\n##fileDate=20260919\n##source=NCBI_dbSNP_Build155_EDAR\n##reference=GRCh38\n##contig=<ID=chr2,length=242193529,assembly=GRCh38>\n##INFO=<ID=GENE,Number=1,Type=String,Description=\"Gene Symbol\">\n##INFO=<ID=TRAIT,Number=1,Type=String,Description=\"Genomic Trait\">\n##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">\n#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tSUBJECT01\nchr2\t108898064\trs3827760\tT\tC\t100\tPASS\tGENE=EDAR;TRAIT=East_Asian_hair_thickness\tGT\t0/1\n");
 
   const cohortConfigs = [
     {
@@ -145,7 +193,7 @@ async function main() {
       priceGeno: "80",
       durationDays: 30,
       vcfContent:
-        "##fileformat=VCFv4.2\n##reference=GRCh38\n#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tDONOR_VN_KINH_01\nchr12\t111803962\trs671\tG\tA\t999\tPASS\tANN=ALDH2|c.1510G>A|p.Glu504Lys|Physiological;CLNSIG=Affects;GENE=ALDH2;CLNDN=Alcohol_sensitivity\tGT:GQ:DP\t0/1:99:55",
+        "##fileformat=VCFv4.2\n##fileDate=20260919\n##source=NCBI_dbSNP_Build155_ALDH2\n##reference=GRCh38\n##contig=<ID=chr12,length=133275309,assembly=GRCh38>\n##INFO=<ID=AF,Number=A,Type=Float,Description=\"Global Allele Frequency\">\n##INFO=<ID=GENE,Number=1,Type=String,Description=\"Gene Symbol\">\n##INFO=<ID=TRAIT,Number=1,Type=String,Description=\"Genomic Trait\">\n##INFO=<ID=CLNSIG,Number=.,Type=String,Description=\"Clinical Significance\">\n##INFO=<ID=CLNDN,Number=.,Type=String,Description=\"ClinVar Disease Name\">\n##INFO=<ID=ANN,Number=.,Type=String,Description=\"Functional Annotations\">\n##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">\n##FORMAT=<ID=GQ,Number=1,Type=Integer,Description=\"Genotype Quality\">\n##FORMAT=<ID=DP,Number=1,Type=Integer,Description=\"Read Depth\">\n#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tDONOR_VN_KINH_01\nchr12\t111803962\trs671\tG\tA\t999\tPASS\tAF=0.380;GENE=ALDH2;TRAIT=Alcohol_sensitivity;CLNSIG=Affects;CLNDN=Alcohol_sensitivity;ANN=A|missense_variant|MODERATE|ALDH2|transcript|NM_000690.4|c.1510G>A|p.Glu504Lys\tGT:GQ:DP\t0/1:99:55\n",
       phenotypes: [
         { id: "SO:0001583", label: "Alcohol dehydrogenase variant" },
         { id: "SO:0001818", label: "Protein altering variant" },
@@ -172,7 +220,7 @@ async function main() {
       priceGeno: "80",
       durationDays: 30,
       vcfContent:
-        "##fileformat=VCFv4.2\n##reference=GRCh38\n#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tDONOR_VN_KINH_02\nchr2\t135851076\trs4988235\tC\tT\t999\tPASS\tANN=LCT|c.-13910C>T|Regulatory|LactasePersistence;CLNSIG=Benign/Protective;GENE=LCT;CLNDN=Lactase_persistence\tGT:GQ:DP\t1/1:99:70",
+        "##fileformat=VCFv4.2\n##fileDate=20260919\n##source=NCBI_dbSNP_Build155_LCT\n##reference=GRCh38\n##contig=<ID=chr2,length=242193529,assembly=GRCh38>\n##INFO=<ID=AF,Number=A,Type=Float,Description=\"Global Allele Frequency\">\n##INFO=<ID=GENE,Number=1,Type=String,Description=\"Gene Symbol\">\n##INFO=<ID=TRAIT,Number=1,Type=String,Description=\"Genomic Trait\">\n##INFO=<ID=CLNSIG,Number=.,Type=String,Description=\"Clinical Significance\">\n##INFO=<ID=CLNDN,Number=.,Type=String,Description=\"ClinVar Disease Name\">\n##INFO=<ID=ANN,Number=.,Type=String,Description=\"Functional Annotations\">\n##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">\n##FORMAT=<ID=GQ,Number=1,Type=Integer,Description=\"Genotype Quality\">\n##FORMAT=<ID=DP,Number=1,Type=Integer,Description=\"Read Depth\">\n#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tDONOR_VN_KINH_02\nchr2\t135851076\trs4988235\tC\tT\t999\tPASS\tAF=0.740;GENE=LCT;TRAIT=Lactase_persistence;CLNSIG=Benign/Protective;CLNDN=Lactase_persistence;ANN=T|regulatory_variant|MODIFIER|LCT|transcript|NM_002299.4|c.-13910C>T|LactasePersistence\tGT:GQ:DP\t1/1:99:70\n",
       phenotypes: [
         { id: "SO:0001627", label: "Lactase persistence locus" },
       ],
@@ -198,7 +246,7 @@ async function main() {
       priceGeno: "90",
       durationDays: 30,
       vcfContent:
-        "##fileformat=VCFv4.2\n##reference=GRCh38\n#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tDONOR_EA_03\nchr15\t74749576\trs762551\tA\tC\t999\tPASS\tANN=CYP1A2|c.-163A>C|Regulatory|SlowCaffeineMetabolizer;CLNSIG=Drug_response;GENE=CYP1A2;CLNDN=Caffeine_metabolism\tGT:GQ:DP\t0/1:99:50",
+        "##fileformat=VCFv4.2\n##fileDate=20260919\n##source=NCBI_dbSNP_Build155_CYP1A2\n##reference=GRCh38\n##contig=<ID=chr15,length=101991189,assembly=GRCh38>\n##INFO=<ID=AF,Number=A,Type=Float,Description=\"Global Allele Frequency\">\n##INFO=<ID=GENE,Number=1,Type=String,Description=\"Gene Symbol\">\n##INFO=<ID=TRAIT,Number=1,Type=String,Description=\"Genomic Trait\">\n##INFO=<ID=CLNSIG,Number=.,Type=String,Description=\"Clinical Significance\">\n##INFO=<ID=CLNDN,Number=.,Type=String,Description=\"ClinVar Disease Name\">\n##INFO=<ID=ANN,Number=.,Type=String,Description=\"Functional Annotations\">\n##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">\n##FORMAT=<ID=GQ,Number=1,Type=Integer,Description=\"Genotype Quality\">\n##FORMAT=<ID=DP,Number=1,Type=Integer,Description=\"Read Depth\">\n#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tDONOR_EA_03\nchr15\t74749576\trs762551\tA\tC\t999\tPASS\tAF=0.680;GENE=CYP1A2;TRAIT=Caffeine_metabolism;CLNSIG=Drug_response;CLNDN=Caffeine_metabolism;ANN=C|regulatory_variant|MODIFIER|CYP1A2|transcript|NM_000761.5|c.-163A>C|SlowCaffeineMetabolizer\tGT:GQ:DP\t0/1:99:50\n",
       phenotypes: [{ id: "SO:0001627", label: "Caffeine clearance speed" }],
       variants: [{ gene: "CYP1A2", hgvs: "c.-163A>C", zygosity: "heterozygous" }],
     },
@@ -222,7 +270,7 @@ async function main() {
       priceGeno: "75",
       durationDays: 15,
       vcfContent:
-        "##fileformat=VCFv4.2\n##reference=GRCh38\n#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tDONOR_VN_KINH_04\nchr16\t48224287\trs17822931\tC\tT\t999\tPASS\tANN=ABCC11|c.538G>A|p.Gly180Arg|DryEarwax;CLNSIG=Benign;GENE=ABCC11;CLNDN=Cerumen_type\tGT:GQ:DP\t1/1:99:85",
+        "##fileformat=VCFv4.2\n##fileDate=20260919\n##source=NCBI_dbSNP_Build155_ABCC11\n##reference=GRCh38\n##contig=<ID=chr16,length=90338345,assembly=GRCh38>\n##INFO=<ID=AF,Number=A,Type=Float,Description=\"Global Allele Frequency\">\n##INFO=<ID=GENE,Number=1,Type=String,Description=\"Gene Symbol\">\n##INFO=<ID=TRAIT,Number=1,Type=String,Description=\"Genomic Trait\">\n##INFO=<ID=CLNSIG,Number=.,Type=String,Description=\"Clinical Significance\">\n##INFO=<ID=CLNDN,Number=.,Type=String,Description=\"ClinVar Disease Name\">\n##INFO=<ID=ANN,Number=.,Type=String,Description=\"Functional Annotations\">\n##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">\n##FORMAT=<ID=GQ,Number=1,Type=Integer,Description=\"Genotype Quality\">\n##FORMAT=<ID=DP,Number=1,Type=Integer,Description=\"Read Depth\">\n#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tDONOR_VN_KINH_04\nchr16\t48224287\trs17822931\tC\tT\t999\tPASS\tAF=0.820;GENE=ABCC11;TRAIT=Cerumen_type;CLNSIG=Benign;CLNDN=Cerumen_type;ANN=T|missense_variant|MODERATE|ABCC11|transcript|NM_033151.3|c.538G>A|p.Gly180Arg|DryEarwax\tGT:GQ:DP\t1/1:99:85\n",
       phenotypes: [{ id: "SO:0001583", label: "Cerumen apocrine phenotype" }],
       variants: [{ gene: "ABCC11", hgvs: "c.538G>A", zygosity: "homozygous" }],
     },
@@ -335,7 +383,11 @@ async function main() {
       gene: c.gene,
       variant: c.rsId,
     });
-    const encPdf = await encryptGenomicData(pdfBytes);
+    const cleanKeyHex = enc.keyHex.replace(/^0x/, "").toLowerCase();
+    const summaryKeyHex = ethers
+      .sha256(ethers.toUtf8Bytes(`GENOCHAIN_SUMMARY_PDF_DOMAIN_V1:${cleanKeyHex}`))
+      .slice(2);
+    const encPdf = await encryptGenomicData(pdfBytes, summaryKeyHex);
     const summaryCid = await computeIpfsCidV0(encPdf.payload);
 
     // 3. Build Phenopacket v2 metadata
@@ -398,12 +450,22 @@ async function main() {
       summaryDataHash: encPdf.rawDataHash,
     });
 
-    // 7. Secret seed keys (excluded from frontend bundle)
+    // 7. Encapsulated seed key capsules (zero plaintext AES keys on disk - INVARIANT-01 & CRITICAL-02)
+    if (!globalThis.__deployerSeedKp) {
+      globalThis.__deployerSeedKp = await generateAsymmetricKeyPair(false);
+      globalThis.__deployerSeedPubJwk = await exportPublicKey(globalThis.__deployerSeedKp.publicKey);
+    }
+    const ownerCapsule = await packageKeyCapsule(
+      enc.keyHex,
+      globalThis.__deployerSeedPubJwk,
+      deployer.address,
+      deployer.address
+    );
     secretSeeds.push({
       dataId: c.dataId,
       rawCid: rawCid,
-      aesKeyHex: enc.keyHex,
-      ivHex: enc.ivHex,
+      encryptedCapsule: ownerCapsule,
+      encryptedKeyEnvelopeHex: wrapSeedKeyForVault(enc.keyHex, loadOrCreateDispatcherVaultKey()),
       rawDataHash: enc.rawDataHash,
     });
   }
@@ -411,11 +473,12 @@ async function main() {
   // 6. Save addresses and ABIs for frontend
   const addresses = {
     network: "hardhat-local",
-    chainId: 1337,
+    chainId: 31337,
     deployedAt: new Date().toISOString(),
     GenomicToken: token.target,
     GenomicNFT: nft.target,
     GenomicsRegistry: registry.target,
+    GenomicZkVerifier: zkVerifier.target,
     Deployer: deployer.address,
   };
 
@@ -430,7 +493,7 @@ async function main() {
   console.log("\n[FILE] Contract addresses saved to frontend/src/contracts/contractAddresses.json");
 
   // Save Contract ABIs for frontend
-  const contractsToExport = ["GenomicToken", "GenomicNFT", "GenomicsRegistry"];
+  const contractsToExport = ["GenomicToken", "GenomicNFT", "GenomicsRegistry", "GenomicZkVerifier"];
   for (const name of contractsToExport) {
     const artifactPath = path.resolve(`artifacts/contracts/${name}.sol/${name}.json`);
     if (fs.existsSync(artifactPath)) {
@@ -454,16 +517,21 @@ async function main() {
   );
   console.log("[FILE] Public seed metadata catalog saved to frontend/src/contracts/seedMetadata.json (10 Cohorts, Zero keys leaked)");
 
-  // Private keys saved to backend/scripts and dev fallback ONLY
+  // Private key envelopes saved strictly to git-ignored .local/ dispatcher vault
+  const localVaultDir = path.resolve(".local");
+  if (!fs.existsSync(localVaultDir)) {
+    fs.mkdirSync(localVaultDir, { recursive: true, mode: 0o700 });
+  }
   const secretKeyStore = {
     deployerAddress: deployer.address,
     seeds: secretSeeds,
   };
   fs.writeFileSync(
-    path.resolve("scripts/deploy/seed_keys.json"),
-    JSON.stringify(secretKeyStore, null, 2)
+    path.join(localVaultDir, "dispatcher_seed_vault.json"),
+    JSON.stringify(secretKeyStore, null, 2),
+    { mode: 0o600 }
   );
-  console.log("[SECURITY] Seed secret keys saved securely to scripts/deploy/seed_keys.json");
+  console.log("[SECURITY] Seed secret envelopes saved strictly to .local/dispatcher_seed_vault.json");
 
   console.log("\n==================================================");
   console.log("[SUCCESS] DEPLOYMENT AND ON-CHAIN SEEDING FINISHED SUCCESSFULLY (10 COHORTS SEEDED)!");

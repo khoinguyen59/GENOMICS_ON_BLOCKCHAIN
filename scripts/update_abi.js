@@ -15,3 +15,5 @@ function exportAbi(artifactRelativePath, targetRelativePath) {
 
 exportAbi("artifacts/contracts/GenomicsRegistry.sol/GenomicsRegistry.json", "frontend/src/contracts/GenomicsRegistryABI.json");
 exportAbi("artifacts/contracts/GenomicZkVerifier.sol/GenomicZkVerifier.json", "frontend/src/contracts/GenomicZkVerifierABI.json");
+exportAbi("artifacts/contracts/GenomicNFT.sol/GenomicNFT.json", "frontend/src/contracts/GenomicNFTABI.json");
+exportAbi("artifacts/contracts/GenomicToken.sol/GenomicToken.json", "frontend/src/contracts/GenomicTokenABI.json");

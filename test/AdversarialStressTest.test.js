@@ -446,5 +446,71 @@ describe("Adversarial Stress Testing & Edge Cases Audit (Genomics on Blockchain)
       ).to.be.rejectedWith("Backup does not match current wallet address.");
     });
   });
+
+  describe("8. Administrative Token Rescue & Capsule Worker Deduplication (FIX-01, FIX-02)", function () {
+    let dummyToken;
+
+    beforeEach(async function () {
+      const TokenFactory = await ethers.getContractFactory("GenomicToken");
+      dummyToken = await TokenFactory.deploy(owner.address);
+      await dummyToken.waitForDeployment();
+    });
+
+    it("GenomicNFT: Reverts if non-owner attempts to rescue tokens", async function () {
+      await expect(
+        nft.connect(attacker).rescueTokens(dummyToken.target, attacker.address, ethers.parseEther("100"))
+      ).to.be.revertedWithCustomError(nft, "OwnableUnauthorizedAccount");
+    });
+
+    it("GenomicNFT: Reverts if rescue recipient is address(0)", async function () {
+      await expect(
+        nft.connect(owner).rescueTokens(dummyToken.target, ethers.ZeroAddress, ethers.parseEther("100"))
+      ).to.be.revertedWithCustomError(nft, "InvalidAddress");
+    });
+
+    it("GenomicNFT: Owner can safely rescue tokens and emit TokensRescued", async function () {
+      await dummyToken.faucet(owner.address);
+      await dummyToken.connect(owner).transfer(nft.target, ethers.parseEther("250"));
+
+      const balBefore = await dummyToken.balanceOf(researcher1.address);
+      await expect(
+        nft.connect(owner).rescueTokens(dummyToken.target, researcher1.address, ethers.parseEther("250"))
+      )
+        .to.emit(nft, "TokensRescued")
+        .withArgs(dummyToken.target, researcher1.address, ethers.parseEther("250"));
+
+      const balAfter = await dummyToken.balanceOf(researcher1.address);
+      expect(balAfter - balBefore).to.equal(ethers.parseEther("250"));
+    });
+
+    it("GenomicsRegistry: Repeated setAuthorizedCapsuleWorker calls do not duplicate worker in list", async function () {
+      const rawHash = ethers.keccak256(ethers.toUtf8Bytes("TestWorkerDedup"));
+      await registry.connect(researcher1).registerGenomicData(
+        rawHash,
+        "QmTestRawCID11111111111111111111111111111111111",
+        "QmTestSumCID11111111111111111111111111111111111",
+        "QmTestMetaCID1111111111111111111111111111111111",
+        "ipfs://test",
+        ethers.parseEther("10"),
+        86400,
+        1000
+      );
+      const dataId = 1;
+
+      // Authorize worker first time
+      await registry.connect(researcher1).setAuthorizedCapsuleWorker(dataId, researcher2.address, true);
+      // Authorize worker second time (should be guarded and not pushed twice)
+      await registry.connect(researcher1).setAuthorizedCapsuleWorker(dataId, researcher2.address, true);
+
+      expect(await registry.authorizedCapsuleWorkers(dataId, researcher2.address)).to.be.true;
+      const epochBefore = await registry.workerEpoch(dataId);
+
+      // When resetAuthorizedWorkers is called, it clears the worker list cleanly and increments workerEpoch
+      await registry.connect(researcher1).resetAuthorizedWorkers(dataId);
+      expect(await registry.authorizedCapsuleWorkers(dataId, researcher2.address)).to.be.false;
+      expect(await registry.workerEpoch(dataId)).to.equal(epochBefore + 1n);
+    });
+  });
 });
+
 

@@ -68,6 +68,28 @@ export function encodeUnixFsFileNode(fileBytes) {
   return concatBuffers([new Uint8Array([0x0a]), encodeVarint(unixFs.length), unixFs]);
 }
 
+const UNIXFS_CHUNK_SIZE = 262144; // 256 KB standard IPFS chunk size
+
+async function sha256Multihash(blockBytes) {
+  const hashBuffer = await cryptoObj.subtle.digest("SHA-256", blockBytes);
+  const multihash = new Uint8Array(34);
+  multihash[0] = 0x12;
+  multihash[1] = 0x20;
+  multihash.set(new Uint8Array(hashBuffer), 2);
+  return multihash;
+}
+
+function encodePbLink(multihashBytes, tsize) {
+  const body = concatBuffers([
+    new Uint8Array([0x0a]),
+    encodeVarint(multihashBytes.length),
+    multihashBytes,
+    new Uint8Array([0x12, 0x00, 0x18]),
+    encodeVarint(tsize),
+  ]);
+  return concatBuffers([new Uint8Array([0x12]), encodeVarint(body.length), body]);
+}
+
 /** Compute authentic, RFC-compliant IPFS UnixFS CIDv0 (DAG-PB + Multihash 0x12 0x20 + SHA-256) */
 export async function computeIpfsCidV0(data) {
   let bytes;
@@ -79,13 +101,33 @@ export async function computeIpfsCidV0(data) {
   else if (data) bytes = new Uint8Array(data);
   else bytes = new Uint8Array(0);
 
-  const dagPbBlock = encodeUnixFsFileNode(bytes);
-  const hashBuffer = await cryptoObj.subtle.digest("SHA-256", dagPbBlock);
-  const multihash = new Uint8Array(34);
-  multihash[0] = 0x12;
-  multihash[1] = 0x20;
-  multihash.set(new Uint8Array(hashBuffer), 2);
-  return base58Encode(multihash);
+  if (bytes.length <= UNIXFS_CHUNK_SIZE) {
+    const dagPbBlock = encodeUnixFsFileNode(bytes);
+    const multihash = await sha256Multihash(dagPbBlock);
+    return base58Encode(multihash);
+  }
+
+  // Multi-block UnixFS DAG-PB tree for files > 256 KB
+  const pbLinks = [];
+  const blockSizesParts = [];
+  for (let offset = 0; offset < bytes.length; offset += UNIXFS_CHUNK_SIZE) {
+    const chunk = bytes.subarray(offset, Math.min(offset + UNIXFS_CHUNK_SIZE, bytes.length));
+    const leafBlock = encodeUnixFsFileNode(chunk);
+    const leafMultihash = await sha256Multihash(leafBlock);
+    pbLinks.push(encodePbLink(leafMultihash, leafBlock.length));
+    blockSizesParts.push(new Uint8Array([0x20]), encodeVarint(chunk.length));
+  }
+
+  const unixFsParent = concatBuffers([
+    new Uint8Array([0x08, 0x02, 0x18]),
+    encodeVarint(bytes.length),
+    ...blockSizesParts,
+  ]);
+  const dataField = concatBuffers([new Uint8Array([0x0a]), encodeVarint(unixFsParent.length), unixFsParent]);
+  const rootDagPb = concatBuffers([...pbLinks, dataField]);
+  const rootMultihash = await sha256Multihash(rootDagPb);
+  return base58Encode(rootMultihash);
 }
 
 export const calculateFileCID = computeIpfsCidV0;
+

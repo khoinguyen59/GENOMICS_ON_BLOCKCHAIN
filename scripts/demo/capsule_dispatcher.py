@@ -20,6 +20,8 @@ from web3 import Web3
 from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicNumbers
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+import hashlib
 
 # Fix Windows console encoding
 if sys.platform == "win32":
@@ -27,6 +29,33 @@ if sys.platform == "win32":
         sys.stdout.reconfigure(encoding="utf-8")
     except Exception:
         pass
+
+
+def load_dispatcher_vault_key(base_dir: str) -> bytes:
+    """Load 256-bit vault key from GENOCHAIN_SEED_VAULT_SECRET or .local/dispatcher_vault.key."""
+    env_secret = os.environ.get("GENOCHAIN_SEED_VAULT_SECRET")
+    if env_secret:
+        return hashlib.sha256(env_secret.encode("utf-8")).digest()
+    key_path = os.path.join(base_dir, ".local", "dispatcher_vault.key")
+    if os.path.exists(key_path):
+        with open(key_path, "r", encoding="utf-8") as kf:
+            key_hex = kf.read().strip()
+        key_bytes = bytes.fromhex(key_hex)
+        if len(key_bytes) != 32:
+            raise ValueError(".local/dispatcher_vault.key must contain exactly 32 bytes (64 hex chars).")
+        return key_bytes
+    raise FileNotFoundError(
+        "Missing dispatcher vault key (.local/dispatcher_vault.key or GENOCHAIN_SEED_VAULT_SECRET). "
+        "Refusing predictable key derivation."
+    )
+
+
+def unwrap_seed_key_envelope(envelope_hex: str, vault_key: bytes) -> str:
+    """Unwrap AES-256-GCM vault envelope into ephemeral session key hex in memory."""
+    blob = bytes.fromhex(envelope_hex.replace("0x", ""))
+    nonce, ct_and_tag = blob[:12], blob[12:]
+    raw_key = AESGCM(vault_key).decrypt(nonce, ct_and_tag, None)
+    return raw_key.hex()
 
 
 def b64url_decode(b64_str: str) -> bytes:
@@ -85,7 +114,7 @@ def main():
 
     addresses_file = os.path.join(contracts_dir, "contractAddresses.json")
     registry_abi_file = os.path.join(contracts_dir, "GenomicsRegistryABI.json")
-    seed_keys_file = os.path.join(base_dir, "scripts", "deploy", "seed_keys.json")
+    seed_vault_file = os.path.join(base_dir, ".local", "dispatcher_seed_vault.json")
 
     if not os.path.exists(addresses_file) or not os.path.exists(registry_abi_file):
         print("[!] Thieu contractAddresses.json hoac GenomicsRegistryABI.json. Hay deploy contract truoc!")
@@ -97,11 +126,15 @@ def main():
         registry_abi = json.load(f)
 
     seed_keys = {}
-    if os.path.exists(seed_keys_file):
-        with open(seed_keys_file, "r", encoding="utf-8") as f:
+    if os.path.exists(seed_vault_file):
+        vault_key = load_dispatcher_vault_key(base_dir)
+        with open(seed_vault_file, "r", encoding="utf-8") as f:
             data = json.load(f)
             for item in data.get("seeds", []):
-                seed_keys[item["dataId"]] = item["aesKeyHex"]
+                if "encryptedKeyEnvelopeHex" in item:
+                    seed_keys[item["dataId"]] = unwrap_seed_key_envelope(item["encryptedKeyEnvelopeHex"], vault_key)
+                elif "aesKeyHex" in item:
+                    raise ValueError(f"Plaintext aesKeyHex detected for dataId={item.get('dataId')} — blocked by INVARIANT-01.")
 
     registry_address = addresses.get("GenomicsRegistry")
     print(f"[+] Dia chi GenomicsRegistry : {registry_address}")
@@ -142,33 +175,36 @@ def main():
             buyer = task["buyer"]
             is_escrow = task["isEscrow"]
 
-            # Check if capsule already exists
             try:
-                existing = registry.functions.getCapsuleForBuyer(data_id, buyer).call({"from": worker_account})
-                if existing and len(existing) > 0:
-                    continue
-            except Exception:
-                pass
+                # Check if capsule already exists via authorized buyerCapsules view
+                try:
+                    existing = registry.functions.buyerCapsules(data_id, buyer).call({"from": worker_account})
+                    if existing and len(existing) > 0:
+                        continue
+                except Exception:
+                    pass
 
-            if data_id in seed_keys:
-                aes_key = seed_keys[data_id]
-                buyer_pubkey = registry.functions.researcherPublicKeys(buyer).call()
-                if not buyer_pubkey or len(buyer_pubkey) == 0:
-                    print(f"    [!] Buyer {buyer} chua dang ky Public Key tren chain.")
-                    continue
+                if data_id in seed_keys:
+                    aes_key = seed_keys[data_id]
+                    buyer_pubkey = registry.functions.researcherPublicKeys(buyer).call()
+                    if not buyer_pubkey or len(buyer_pubkey) == 0:
+                        print(f"    [!] Buyer {buyer} chua dang ky Public Key tren chain.")
+                        continue
 
-                capsule_json = package_rsa_capsule(aes_key, buyer_pubkey, buyer, worker_account)
-                print(f"    [+] Worker {worker_account[:10]}... dang dong goi RSA-OAEP capsule cho dataId={data_id}...")
+                    capsule_json = package_rsa_capsule(aes_key, buyer_pubkey, buyer, worker_account)
+                    print(f"    [+] Worker {worker_account[:10]}... dang dong goi RSA-OAEP capsule cho dataId={data_id}...")
 
-                # Call storeTransformedCapsule (which automatically releases escrow if active)
-                tx_hash = registry.functions.storeTransformedCapsule(data_id, buyer, capsule_json).transact({
-                    "from": worker_account
-                })
-                receipt = w3.eth.wait_for_transaction_receipt(tx_hash)
-                dispatched_count += 1
-                print(f"    [✔] Da luu Capsule thanh cong! TxHash: {w3.to_hex(receipt.transactionHash)}")
-                if is_escrow:
-                    print(f"        ↳ Tu dong giai phong tien ky quy Escrow cho nguoi ban va 10% Royalty cho Creator!")
+                    # Call storeTransformedCapsule (which automatically releases escrow if active)
+                    tx_hash = registry.functions.storeTransformedCapsule(data_id, buyer, capsule_json).transact({
+                        "from": worker_account
+                    })
+                    receipt = w3.eth.wait_for_transaction_receipt(tx_hash)
+                    dispatched_count += 1
+                    print(f"    [✔] Da luu Capsule thanh cong! TxHash: {w3.to_hex(receipt.transactionHash)}")
+                    if is_escrow:
+                        print("        -> Tu dong giai phong tien ky quy Escrow cho nguoi ban va 10% Royalty cho Creator!")
+            except Exception as item_err:
+                print(f"    [!] Loi xu ly task dataId={data_id}, buyer={buyer}: {item_err}")
 
         if dispatched_count == 0:
             print("[+] Tat ca giao dich hien tai da co Capsule day du hoac la dataset nguoi dung tu cap.")

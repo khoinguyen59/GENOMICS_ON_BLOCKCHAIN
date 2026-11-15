@@ -92,8 +92,8 @@ describe("Production Protocol Architecture & Security Verification", function ()
       expect(escrow.released).to.be.false;
       expect(escrow.refunded).to.be.false;
 
-      // Access should already be granted conditionally
-      expect(await registry.hasActiveAccess(1, researcher.address)).to.be.true;
+      // Access should not be active until capsule is delivered and escrow released (INV-16)
+      expect(await registry.hasActiveAccess(1, researcher.address)).to.be.false;
     });
 
     it("should reject dispute window less than 1 hour or greater than 30 days", async function () {
@@ -139,6 +139,7 @@ describe("Production Protocol Architecture & Security Verification", function ()
       const escrow = await registry.escrowDeposits(1, researcher.address);
       expect(escrow.released).to.be.true;
       expect(escrow.refunded).to.be.false;
+      expect(await registry.hasActiveAccess(1, researcher.address)).to.be.true;
 
       // Cannot refund after capsule is delivered
       await expect(

@@ -9,12 +9,12 @@
 
 import {
   generateSymmetricKey,
-  exportKeyToHex,
   importKeyFromHex,
   packCiphertextPayload,
   unpackCiphertextPayload,
   computeDataHash,
   decryptGenomicPayload,
+  consumeKeyInvocationBudget,
 } from "./symmetric.js";
 
 const cryptoObj =
@@ -24,6 +24,15 @@ const cryptoObj =
 
 if (!cryptoObj || !cryptoObj.subtle) {
   throw new Error("Web Crypto API (crypto.subtle) is required but not available in this environment.");
+}
+
+function buildChunkAad(chunkIndex, chunkCount, totalPlaintextSize) {
+  const aad = new Uint8Array(16);
+  const view = new DataView(aad.buffer);
+  view.setUint32(0, chunkIndex >>> 0, false);
+  view.setUint32(4, chunkCount >>> 0, false);
+  view.setBigUint64(8, BigInt(totalPlaintextSize), false);
+  return aad;
 }
 
 /**
@@ -44,7 +53,10 @@ export async function encryptGenomicDataChunked(data, options = {}) {
   const safeOptions = options || {};
   const chunkSize = safeOptions.chunkSize || 64 * 1024; // 64KB chunks
   const onProgress = safeOptions.onProgress || (() => {});
-  const activeKey = safeOptions.key || (await generateSymmetricKey());
+  const activeKey =
+    typeof safeOptions.key === "string"
+      ? await importKeyFromHex(safeOptions.key)
+      : safeOptions.key || (await generateSymmetricKey());
 
   const isBlobOrFile =
     data &&
@@ -78,38 +90,15 @@ export async function encryptGenomicDataChunked(data, options = {}) {
   }
 
   const chunkCount = Math.ceil(totalBytes / chunkSize) || 1;
-  const encryptedChunks = [];
-  let totalCiphertextSize = 0;
-
-  for (let i = 0; i < chunkCount; i++) {
-    const start = i * chunkSize;
-    const end = Math.min(start + chunkSize, totalBytes);
-    let slice;
-    if (isBlobOrFile) {
-      const sliceBlob = data.slice(start, end);
-      const sliceBuf = await sliceBlob.arrayBuffer();
-      slice = new Uint8Array(sliceBuf);
-    } else {
-      slice = rawBytes.slice(start, end);
-    }
-
-    const chunkIv = cryptoObj.getRandomValues(new Uint8Array(12));
-    const encBuf = await cryptoObj.subtle.encrypt(
-      { name: "AES-GCM", iv: chunkIv },
-      activeKey,
-      slice
-    );
-    const chunkCipher = new Uint8Array(encBuf);
-    const packedChunk = packCiphertextPayload(chunkIv, chunkCipher);
-
-    encryptedChunks.push(packedChunk);
-    totalCiphertextSize += 4 + packedChunk.length; // 4-byte length prefix + chunk
-
-    onProgress((i + 1) / chunkCount, end, totalBytes);
-  }
+  const {
+    invocationSequence,
+    nonceBudgetRemaining,
+    keyHex,
+  } = await consumeKeyInvocationBudget(activeKey, chunkCount);
 
   // Header: MAGIC (4) "GNC1" + ChunkSize (4) + ChunkCount (4) + TotalPlaintextSize (8) = 20 bytes
   const headerSize = 20;
+  const totalCiphertextSize = totalBytes + chunkCount * 32;
   const fullPayload = new Uint8Array(headerSize + totalCiphertextSize);
   const view = new DataView(fullPayload.buffer, fullPayload.byteOffset, fullPayload.byteLength);
 
@@ -120,15 +109,39 @@ export async function encryptGenomicDataChunked(data, options = {}) {
   view.setBigUint64(12, BigInt(totalBytes), false);
 
   let offset = headerSize;
-  for (const chunk of encryptedChunks) {
-    view.setUint32(offset, chunk.length, false);
+  for (let i = 0; i < chunkCount; i++) {
+    const start = i * chunkSize;
+    const end = Math.min(start + chunkSize, totalBytes);
+    let slice;
+    if (isBlobOrFile) {
+      const sliceBlob = data.slice(start, end);
+      const sliceBuf = await sliceBlob.arrayBuffer();
+      slice = new Uint8Array(sliceBuf);
+    } else {
+      slice = rawBytes.subarray(start, end);
+    }
+
+    const chunkIv = cryptoObj.getRandomValues(new Uint8Array(12));
+    const additionalData = buildChunkAad(i, chunkCount, totalBytes);
+    const encBuf = await cryptoObj.subtle.encrypt(
+      { name: "AES-GCM", iv: chunkIv, additionalData },
+      activeKey,
+      slice
+    );
+    const chunkCipher = new Uint8Array(encBuf);
+    const packedChunkLen = 12 + chunkCipher.length;
+
+    view.setUint32(offset, packedChunkLen, false);
     offset += 4;
-    fullPayload.set(chunk, offset);
-    offset += chunk.length;
+    fullPayload.set(chunkIv, offset);
+    offset += 12;
+    fullPayload.set(chunkCipher, offset);
+    offset += chunkCipher.length;
+
+    onProgress((i + 1) / chunkCount, end, totalBytes);
   }
 
   const rawDataHash = await computeDataHash(fullPayload);
-  const keyHex = await exportKeyToHex(activeKey);
 
   return {
     payload: fullPayload,
@@ -137,6 +150,8 @@ export async function encryptGenomicDataChunked(data, options = {}) {
     activeKey,
     chunkCount,
     totalPlaintextSize: totalBytes,
+    invocationSequence,
+    nonceBudgetRemaining,
   };
 }
 
@@ -200,6 +215,9 @@ export async function decryptGenomicDataChunked(payloadBytes, key, options = {})
   if (chunkCount < 0 || chunkCount > 500000) {
     throw new Error(`Corrupted chunked payload: unreasonable chunkCount (${chunkCount})`);
   }
+  if (totalPlaintextSize > Math.max(0, bytes.length - 20)) {
+    throw new Error("Corrupted chunked payload: declared plaintext size exceeds physical ciphertext length");
+  }
 
   const resultBytes = new Uint8Array(totalPlaintextSize);
   let readOffset = 20;
@@ -214,14 +232,15 @@ export async function decryptGenomicDataChunked(payloadBytes, key, options = {})
       throw new Error("Corrupted chunked payload: unexpected end of buffer or invalid chunk length");
     }
     readOffset += 4;
-    const chunkData = bytes.slice(readOffset, readOffset + chunkLen);
+    const chunkIv = bytes.subarray(readOffset, readOffset + 12);
+    const chunkCiphertext = bytes.subarray(readOffset + 12, readOffset + chunkLen);
     readOffset += chunkLen;
 
-    const { iv, ciphertext } = unpackCiphertextPayload(chunkData);
+    const additionalData = buildChunkAad(i, chunkCount, totalPlaintextSize);
     const decBuf = await cryptoObj.subtle.decrypt(
-      { name: "AES-GCM", iv: iv },
+      { name: "AES-GCM", iv: chunkIv, additionalData },
       activeKey,
-      ciphertext
+      chunkCiphertext
     );
     const plainChunk = new Uint8Array(decBuf);
     if (writeOffset + plainChunk.length > resultBytes.length) {

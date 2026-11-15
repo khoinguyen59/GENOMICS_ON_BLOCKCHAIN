@@ -13,10 +13,6 @@ export function getKuboRpcEndpoint() {
       const sessionSaved = window.sessionStorage.getItem("GENO_KUBO_RPC");
       if (sessionSaved && sessionSaved.trim().length > 0) return sessionSaved.trim();
     }
-    if (window.localStorage) {
-      const saved = window.localStorage.getItem("GENO_KUBO_RPC");
-      if (saved && saved.trim().length > 0) return saved.trim();
-    }
   }
   try {
     if (typeof import.meta !== "undefined" && import.meta.env?.VITE_KUBO_RPC) {
@@ -32,8 +28,11 @@ export function getKuboRpcEndpoint() {
  */
 export function setKuboRpcEndpoint(endpoint) {
   if (typeof window !== "undefined") {
+    if (window.sessionStorage) {
+      window.sessionStorage.setItem("GENO_KUBO_RPC", endpoint || "");
+    }
     if (window.localStorage) {
-      window.localStorage.setItem("GENO_KUBO_RPC", endpoint || "");
+      window.localStorage.removeItem("GENO_KUBO_RPC");
     }
   }
 }
@@ -101,11 +100,27 @@ export async function pinJsonToKubo(jsonData, fileName = "metadata.json", custom
     const blob = new Blob([jsonBytes], { type: "application/json" });
     formData.append("file", blob, fileName);
 
-    const res = await fetch(`${kuboRpc}/api/v0/add`, {
-      method: "POST",
-      body: formData,
-      signal: AbortSignal.timeout(3000),
-    });
+    const isBrowser = typeof window !== "undefined";
+    const kuboUrl = (isBrowser && (kuboRpc === "http://127.0.0.1:5001" || kuboRpc === "/ipfs-rpc"))
+      ? "/ipfs-rpc/add"
+      : `${kuboRpc}/api/v0/add`;
+
+    let res = null;
+    try {
+      res = await fetch(kuboUrl, {
+        method: "POST",
+        body: formData,
+        signal: AbortSignal.timeout(3000),
+      });
+    } catch (_) {
+      if (kuboUrl !== `${kuboRpc}/api/v0/add`) {
+        res = await fetch(`${kuboRpc}/api/v0/add`, {
+          method: "POST",
+          body: formData,
+          signal: AbortSignal.timeout(3000),
+        });
+      }
+    }
 
     if (res && res.ok) {
       const json = await res.json();

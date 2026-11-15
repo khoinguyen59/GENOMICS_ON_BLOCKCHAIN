@@ -27,12 +27,17 @@
   },
   {
     "inputs": [],
+    "name": "CannotRescuePaymentToken",
+    "type": "error"
+  },
+  {
+    "inputs": [],
     "name": "DonorAlreadyClaimed",
     "type": "error"
   },
   {
     "inputs": [],
-    "name": "InsufficientBountyFunds",
+    "name": "InvalidAddress",
     "type": "error"
   },
   {
@@ -115,6 +120,44 @@
       }
     ],
     "name": "OwnershipTransferred",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "token",
+        "type": "address"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "to",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "amount",
+        "type": "uint256"
+      }
+    ],
+    "name": "TokensRescued",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "updater",
+        "type": "address"
+      }
+    ],
+    "name": "VerificationKeyUpdated",
     "type": "event"
   },
   {
@@ -233,6 +276,52 @@
     ],
     "name": "ZkProofVerified",
     "type": "event"
+  },
+  {
+    "inputs": [],
+    "name": "alpha",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "x",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "y",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "beta",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "x0",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "x1",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "y0",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "y1",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
   },
   {
     "inputs": [
@@ -409,6 +498,62 @@
     "type": "function"
   },
   {
+    "inputs": [],
+    "name": "delta",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "x0",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "x1",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "y0",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "y1",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "gamma",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "x0",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "x1",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "y0",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "y1",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
     "inputs": [
       {
         "internalType": "uint256",
@@ -458,6 +603,42 @@
   },
   {
     "inputs": [],
+    "name": "ic0",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "x",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "y",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "ic1",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "x",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "y",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
     "name": "owner",
     "outputs": [
       {
@@ -485,6 +666,67 @@
   {
     "inputs": [],
     "name": "renounceOwnership",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "tokenAddress",
+        "type": "address"
+      },
+      {
+        "internalType": "address",
+        "name": "to",
+        "type": "address"
+      },
+      {
+        "internalType": "uint256",
+        "name": "amount",
+        "type": "uint256"
+      }
+    ],
+    "name": "rescueTokens",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256[2]",
+        "name": "_alpha",
+        "type": "uint256[2]"
+      },
+      {
+        "internalType": "uint256[2][2]",
+        "name": "_beta",
+        "type": "uint256[2][2]"
+      },
+      {
+        "internalType": "uint256[2][2]",
+        "name": "_gamma",
+        "type": "uint256[2][2]"
+      },
+      {
+        "internalType": "uint256[2][2]",
+        "name": "_delta",
+        "type": "uint256[2][2]"
+      },
+      {
+        "internalType": "uint256[2]",
+        "name": "_ic0",
+        "type": "uint256[2]"
+      },
+      {
+        "internalType": "uint256[2]",
+        "name": "_ic1",
+        "type": "uint256[2]"
+      }
+    ],
+    "name": "setupVerificationKey",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"

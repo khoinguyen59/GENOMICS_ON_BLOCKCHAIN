@@ -9,7 +9,7 @@ export default defineConfig({
       evmVersion: "cancun",
       optimizer: {
         enabled: true,
-        runs: 200,
+        runs: 1,
       },
     },
   },

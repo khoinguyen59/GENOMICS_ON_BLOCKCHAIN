@@ -15,6 +15,7 @@ import "@openzeppelin/contracts/access/Ownable.sol";
  */
 contract GenomicToken is ERC20, ERC20Burnable, Ownable {
     uint256 public constant INITIAL_SUPPLY = 10_000_000 * 10 ** 18; // 10 million $GENO
+    uint256 public constant MAX_FAUCET_SUPPLY = 50_000_000 * 10 ** 18; // 50 million $GENO max faucet cap
     uint256 public constant FAUCET_AMOUNT = 1_000 * 10 ** 18;       // 1,000 $GENO per faucet call
     uint256 public constant FAUCET_COOLDOWN = 1 hours;              // 1 hour cooldown between faucet claims
 
@@ -25,6 +26,7 @@ contract GenomicToken is ERC20, ERC20Burnable, Ownable {
     error InvalidRecipient();
     error FaucetCooldownActive(uint256 remainingSeconds);
     error ContractCallersNotAllowed();
+    error FaucetMaxSupplyExceeded();
 
     constructor(address initialOwner) ERC20("Genomic Token", "GENO") Ownable(initialOwner) {
         _mint(initialOwner, INITIAL_SUPPLY);
@@ -41,19 +43,20 @@ contract GenomicToken is ERC20, ERC20Burnable, Ownable {
 
     /**
      * @notice Public testnet/demo faucet to allow researchers and users to get test tokens.
-     *         Enforces strict 1-hour rate-limit per address and tx.origin to block contract factory Sybil attacks.
+     *         Enforces strict 1-hour rate-limit per caller and recipient address (INVARIANT-15 Anti-Sybil)
+     *         and blocks smart contract / factory callers.
      * @param to Recipient of the faucet tokens
      */
     function faucet(address to) external {
-        if (msg.sender != tx.origin) revert ContractCallersNotAllowed();
         if (to == address(0)) revert InvalidRecipient();
-
-        // Anti-Sybil protection: Enforce rate limit on tx.origin (DEF2-4-03)
-        uint256 lastOriginTime = lastFaucetTime[tx.origin];
-        if (lastOriginTime != 0 && block.timestamp < lastOriginTime + FAUCET_COOLDOWN) {
-            revert FaucetCooldownActive((lastOriginTime + FAUCET_COOLDOWN) - block.timestamp);
+        // solhint-disable-next-line avoid-tx-origin
+        if (msg.sender != tx.origin || msg.sender.code.length > 0 || to.code.length > 0) {
+            revert ContractCallersNotAllowed();
         }
-        
+        if (totalSupply() + FAUCET_AMOUNT > INITIAL_SUPPLY + MAX_FAUCET_SUPPLY) {
+            revert FaucetMaxSupplyExceeded();
+        }
+
         // Anti-Sybil protection: Enforce rate limit on caller (msg.sender)
         uint256 lastCallerTime = lastFaucetTime[msg.sender];
         if (lastCallerTime != 0 && block.timestamp < lastCallerTime + FAUCET_COOLDOWN) {
@@ -66,7 +69,6 @@ contract GenomicToken is ERC20, ERC20Burnable, Ownable {
             revert FaucetCooldownActive((lastToTime + FAUCET_COOLDOWN) - block.timestamp);
         }
 
-        lastFaucetTime[tx.origin] = block.timestamp;
         lastFaucetTime[msg.sender] = block.timestamp;
         lastFaucetTime[to] = block.timestamp;
         _mint(to, FAUCET_AMOUNT);

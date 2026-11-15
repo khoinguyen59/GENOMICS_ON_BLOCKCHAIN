@@ -127,11 +127,35 @@ export function useDatasetDecryption({
     [showToast]
   );
 
+  const handleClearDecryptedData = useCallback(
+    (dataId = null) => {
+      if (!setPurchasedData) return;
+      setPurchasedData((prev) =>
+        (prev || []).map((p) => {
+          if (dataId === null || p.dataId === dataId) {
+            if (p.decryptedPdfBytes instanceof Uint8Array) {
+              p.decryptedPdfBytes.fill(0);
+            }
+            return {
+              ...p,
+              decryptedContent: null,
+              decryptedPdfBytes: null,
+              phenopacketJson: null
+            };
+          }
+          return p;
+        })
+      );
+    },
+    [setPurchasedData]
+  );
+
   return {
     decryptingDataId,
     decryptionProgress,
     handleDecryptData,
     handleDownloadFile,
-    handleDownloadPdf
+    handleDownloadPdf,
+    handleClearDecryptedData
   };
 }

@@ -98,10 +98,12 @@ export default function OpenSeaBottomBar() {
           )}
 
           <button
+            id="footer-ipfs-settings-btn"
             type="button"
             className="os2-bottom-link-btn"
             onClick={() => setShowIpfsSettings(true)}
             title={t("footerIpfsConfig")}
+            aria-label={t("footerIpfsConfig")}
           >
             <span>{t("footerIpfsConfig")}</span>
           </button>

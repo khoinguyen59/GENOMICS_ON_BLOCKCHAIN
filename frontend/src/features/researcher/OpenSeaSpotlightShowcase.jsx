@@ -101,18 +101,34 @@ export default function OpenSeaSpotlightShowcase({ onPurchase }) {
     return ordered;
   }, [datasets]);
 
-  // Filter datasets by Top Category Pill + Chain Selector so every top bar button visibly updates the UI
+  // Filter datasets by Top Category Pill + Chain Selector + Timeframe so every top bar button visibly updates the UI
   const showcaseDatasets = useMemo(() => {
-    let list = diverseOrderedDatasets;
+    let list = [...diverseOrderedDatasets];
     if (filterSignificance && filterSignificance !== "All") {
       const catFiltered = list.filter((d) => d.clinicalSignificance === filterSignificance);
       if (catFiltered.length > 0) list = catFiltered;
     }
     if (activeChain !== "all") {
-      list = list.filter(() => activeChain === "evm31337");
+      list = list.filter((d) => {
+        if (activeChain === "evm31337") {
+          return !d.chainId || d.chainId === 31337 || d.network === "Hardhat" || d.network === "Localhost";
+        }
+        return String(d.chainId) === String(activeChain);
+      });
+    }
+    if (timeframe === "1h") {
+      list.sort((a, b) => Number(a.price || 0) - Number(b.price || 0));
+    } else if (timeframe === "6h") {
+      list.sort((a, b) => (Number(b.durationDays || 0) - Number(a.durationDays || 0)) || (b.dataId - a.dataId));
+    } else if (timeframe === "1d") {
+      list.sort((a, b) => ((Number(b.price) || 0) * (Number(b.accessCount) || 1)) - ((Number(a.price) || 0) * (Number(a.accessCount) || 1)));
+    } else if (timeframe === "7d") {
+      list.sort((a, b) => (Number(b.accessCount || 0) - Number(a.accessCount || 0)) || (b.dataId - a.dataId));
+    } else if (timeframe === "30d") {
+      list.sort((a, b) => b.dataId - a.dataId);
     }
     return list;
-  }, [diverseOrderedDatasets, filterSignificance, activeChain]);
+  }, [diverseOrderedDatasets, filterSignificance, activeChain, timeframe]);
 
   if (!datasets || datasets.length === 0) {
     if (!loadingChain) return null;
@@ -250,7 +266,7 @@ export default function OpenSeaSpotlightShowcase({ onPurchase }) {
               title={c.label}
             >
               {c.id === "all" ? (
-                <span>All</span>
+                <span>{lang === "vi" ? "Tất cả" : "All"}</span>
               ) : (
                 <span className="os2-chain-dot" style={{ background: c.color }}>
                   {c.symbol}
@@ -296,9 +312,10 @@ export default function OpenSeaSpotlightShowcase({ onPurchase }) {
             type="button"
             className="os2-timeframe-btn"
             onClick={handleCycleTimeframe}
-            title="Switch Leaderboard Timeframe (1h / 6h / 1d / 7d / 30d)"
+            title={lang === "vi" ? "Chuyển mốc thời gian bảng xếp hạng (1h / 6h / 1d / 7d / 30d)" : "Switch Leaderboard Timeframe (1h / 6h / 1d / 7d / 30d)"}
+            aria-label={lang === "vi" ? `Mốc thời gian: ${timeframe === "1d" ? "1 ngày" : timeframe === "7d" ? "7 ngày" : timeframe === "30d" ? "30 ngày" : timeframe === "1h" ? "1 giờ" : "6 giờ"}` : `Timeframe: ${timeframe}`}
           >
-            <span>{timeframe}</span>
+            <span>{lang === "vi" ? (timeframe === "1d" ? "1 ngày" : timeframe === "7d" ? "7 ngày" : timeframe === "30d" ? "30 ngày" : timeframe === "1h" ? "1 giờ" : timeframe === "6h" ? "6 giờ" : timeframe) : timeframe}</span>
             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
               <polyline points="6 9 12 15 18 9" />
             </svg>
@@ -486,7 +503,7 @@ export default function OpenSeaSpotlightShowcase({ onPurchase }) {
           {/* B. Trending Tokens Section (4x2 Grid with Real 3D Avatars & Sparklines) */}
           <div id="os2-trending-tokens-section" className="os2-trending-section">
             <div className="os2-section-header">
-              <h3 className="os2-section-title">{t("trendingTokens")}</h3>
+              <h2 className="os2-section-title">{t("trendingTokens")}</h2>
               <p className="os2-section-subtitle">
                 {t("trendingTokensSub")}
               </p>
@@ -540,7 +557,7 @@ export default function OpenSeaSpotlightShowcase({ onPurchase }) {
           {/* C. Featured Collections 4-Card Row (Matching OpenSea OS2 Second Viewport) */}
           <div className="os2-featured-collections-strip">
             <div className="os2-section-header">
-              <h3 className="os2-section-title">{t("featuredCollectionsTitle")}</h3>
+              <h2 className="os2-section-title">{t("featuredCollectionsTitle")}</h2>
               <p className="os2-section-subtitle">
                 {t("featuredCollectionsSub")}
               </p>

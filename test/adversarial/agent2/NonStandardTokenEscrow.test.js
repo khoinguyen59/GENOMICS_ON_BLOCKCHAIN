@@ -93,6 +93,8 @@ describe("AGENT2 :: Non-Standard (void-return) ERC20 through the escrow lifecycl
       .connect(seller)
       .storeTransformedCapsule(1n, buyer1.address, JSON.stringify({ version: "GENO-ASYM-RSA-OAEP-v2", capsule: "NST-REAL-DELIVERY", keyCipher: "ab".repeat(256) }));
     expect((await t.wait()).status).to.equal(1);
+    expect((await registry.escrowDeposits(1n, buyer1.address)).released).to.equal(false);
+    await (await registry.connect(buyer1).confirmCapsuleAndReleaseEscrow(1n)).wait();
 
     expect(await token.balanceOf(registryAddr)).to.equal(0n);
     // seller == royalty receiver -> the whole price (incl. the 10% royalty leg) lands on the seller

@@ -21,7 +21,8 @@ async function capture(send) {
   }
 }
 
-const CID = (n) => `QmAgent2Boundary${n}11111111111111111111111111111`;
+const toB58 = (s) => String(s).replace(/0/g, "x").replace(/O/g, "o").replace(/I/g, "i").replace(/l/g, "1").replace(/[^1-9A-HJ-NP-Za-km-z]/g, "");
+const CID = (n) => (`QmAgent2Boundary${toB58(n)}11111111111111111111111111111`).slice(0, 46);
 
 describe("AGENT2 :: dataId Boundary & Cross-Function State Symmetry (INV-16)", function () {
   this.timeout(180000);

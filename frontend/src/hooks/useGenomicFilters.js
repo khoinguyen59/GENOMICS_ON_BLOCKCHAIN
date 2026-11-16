@@ -8,6 +8,7 @@ export function useGenomicFilters({ datasets = [] } = {}) {
   const [filterConsequence, setFilterConsequence] = useState("All");
   const [filterZygosity, setFilterZygosity] = useState("All");
   const [filterRegion, setFilterRegion] = useState("All");
+  const [filterBloodType, setFilterBloodType] = useState("All");
   const [filterFormat, setFilterFormat] = useState("All");
   const [filterAssembly, setFilterAssembly] = useState("All");
   const [filterPlatform, setFilterPlatform] = useState("All");
@@ -22,7 +23,7 @@ export function useGenomicFilters({ datasets = [] } = {}) {
   const resetFilters = useCallback(() => {
     setFilterKeyword(""); setFilterChromosome("All"); setFilterGene("All");
     setFilterSignificance("All"); setFilterConsequence("All"); setFilterZygosity("All");
-    setFilterRegion("All"); setFilterFormat("All"); setFilterAssembly("All");
+    setFilterRegion("All"); setFilterBloodType("All"); setFilterFormat("All"); setFilterAssembly("All");
     setFilterPlatform("All"); setFilterPriceTier("All"); setMinPrice("");
     setMaxPrice(""); setFilterStatus("All"); setFilterDuration("All");
     setBlindMatchIds(null);
@@ -37,7 +38,20 @@ export function useGenomicFilters({ datasets = [] } = {}) {
         d.disease?.toLowerCase().includes(q) || d.gene?.toLowerCase().includes(q) ||
         d.geneSymbol?.toLowerCase().includes(q) || d.chromosome?.toLowerCase().includes(q) ||
         d.rsId?.toLowerCase().includes(q) || d.hpoTerm?.toLowerCase().includes(q) ||
-        d.clinvarId?.toLowerCase().includes(q);
+        d.clinvarId?.toLowerCase().includes(q) ||
+        d.region?.toLowerCase().includes(q) ||
+        d.ancestry?.toLowerCase().includes(q) ||
+        d.titleVi?.toLowerCase().includes(q) ||
+        d.titleEn?.toLowerCase().includes(q) ||
+        d.categoryVi?.toLowerCase().includes(q) ||
+        d.categoryEn?.toLowerCase().includes(q) ||
+        d.format?.toLowerCase().includes(q) ||
+        d.assembly?.toLowerCase().includes(q) ||
+        d.platform?.toLowerCase().includes(q) ||
+        String(d.dataId) === q ||
+        String(d.dataId).includes(q) ||
+        d.bloodGroup?.toLowerCase().includes(q) ||
+        d.bloodType?.toLowerCase().includes(q);
 
       const matchesChrom = filterChromosome === "All" || (d.chromosome && d.chromosome.toLowerCase() === filterChromosome.toLowerCase());
       const matchesGene = filterGene === "All" || (d.geneSymbol && d.geneSymbol.toLowerCase().includes(filterGene.toLowerCase())) || (d.gene && d.gene.toLowerCase().includes(filterGene.toLowerCase()));
@@ -45,6 +59,9 @@ export function useGenomicFilters({ datasets = [] } = {}) {
       const matchesCons = filterConsequence === "All" || d.consequence === filterConsequence;
       const matchesZyg = filterZygosity === "All" || (d.zygosity && d.zygosity.includes(filterZygosity));
       const matchesRegion = filterRegion === "All" || d.region?.toLowerCase().includes(filterRegion.toLowerCase()) || d.ancestry?.toLowerCase().includes(filterRegion.toLowerCase());
+      const matchesBlood = filterBloodType === "All" ||
+        (d.bloodGroup && (d.bloodGroup.toLowerCase() === filterBloodType.toLowerCase() || d.bloodGroup.includes(filterBloodType))) ||
+        (d.bloodType && (d.bloodType.toLowerCase() === filterBloodType.toLowerCase() || d.bloodType.includes(filterBloodType)));
       const matchesFormat = filterFormat === "All" || (d.format && d.format.includes(filterFormat));
       const matchesAssembly = filterAssembly === "All" || (d.assembly && d.assembly.toLowerCase().includes(filterAssembly.toLowerCase()));
       const matchesPlatform = filterPlatform === "All" || (d.platform && d.platform.toLowerCase().includes(filterPlatform.toLowerCase()));
@@ -59,7 +76,7 @@ export function useGenomicFilters({ datasets = [] } = {}) {
 
       return (
         matchesKeyword && matchesChrom && matchesGene && matchesSig &&
-        matchesCons && matchesZyg && matchesRegion && matchesFormat &&
+        matchesCons && matchesZyg && matchesRegion && matchesBlood && matchesFormat &&
         matchesAssembly && matchesPlatform && matchesPriceTier &&
         matchesMinPrice && matchesMaxPrice && matchesStatus && matchesDuration && matchesBlind
       );
@@ -74,7 +91,7 @@ export function useGenomicFilters({ datasets = [] } = {}) {
     });
   }, [
     datasets, filterKeyword, filterChromosome, filterGene, filterSignificance,
-    filterConsequence, filterZygosity, filterRegion, filterFormat,
+    filterConsequence, filterZygosity, filterRegion, filterBloodType, filterFormat,
     filterAssembly, filterPlatform, filterPriceTier, minPrice, maxPrice,
     filterStatus, filterDuration, blindMatchIds, sortBy
   ]);
@@ -153,7 +170,7 @@ export function useGenomicFilters({ datasets = [] } = {}) {
     filterKeyword, setFilterKeyword, filterChromosome, setFilterChromosome,
     filterGene, setFilterGene, filterSignificance, setFilterSignificance,
     filterConsequence, setFilterConsequence, filterZygosity, setFilterZygosity,
-    filterRegion, setFilterRegion, filterFormat, setFilterFormat,
+    filterRegion, setFilterRegion, filterBloodType, setFilterBloodType, filterFormat, setFilterFormat,
     filterAssembly, setFilterAssembly, filterPlatform, setFilterPlatform,
     filterPriceTier, setFilterPriceTier, minPrice, setMinPrice,
     maxPrice, setMaxPrice, filterStatus, setFilterStatus,

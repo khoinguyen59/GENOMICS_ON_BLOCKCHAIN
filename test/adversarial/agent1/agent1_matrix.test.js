@@ -221,12 +221,17 @@ describe("AGENT1 :: Independent Adversarial Matrix", function () {
       expect(await token.balanceOf(reg.target)).to.equal(0n);
     });
 
-    it("releases escrow to seller once owner dispatches capsule; blocks refund afterwards", async function () {
+    it("holds escrow on capsule dispatch and releases to seller on buyer confirmation; blocks refund afterwards", async function () {
       await reg.connect(creator).storeTransformedCapsule(1n, buyer1.address, JSON.stringify({ version: "GENO-ASYM-RSA-OAEP-v2", tag: "REAL_RSA_OAEP_CAPSULE_JSON", keyCipher: "ab".repeat(256) }));
-      const dep = await reg.escrowDeposits(1n, buyer1.address);
-      expect(dep.released).to.equal(true);
+      let dep = await reg.escrowDeposits(1n, buyer1.address);
+      expect(dep.released).to.equal(false);
       expect(dep.capsuleDelivered).to.equal(true);
-      // funds disbursed -> contract drained, creator paid (primary sale: royaltyReceiver==seller)
+      await expect(reg.connect(buyer1).claimEscrowRefund(1n))
+        .to.be.revertedWithCustomError(reg, "CapsuleAlreadyDelivered");
+
+      await reg.connect(buyer1).confirmCapsuleAndReleaseEscrow(1n);
+      dep = await reg.escrowDeposits(1n, buyer1.address);
+      expect(dep.released).to.equal(true);
       expect(await token.balanceOf(reg.target)).to.equal(0n);
       await expect(reg.connect(buyer1).claimEscrowRefund(1n))
         .to.be.revertedWithCustomError(reg, "CapsuleAlreadyDelivered");

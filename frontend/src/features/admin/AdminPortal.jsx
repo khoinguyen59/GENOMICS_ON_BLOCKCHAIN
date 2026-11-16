@@ -5,6 +5,7 @@ import { useLanguage } from "../../context/LanguageContext";
 import { useDatasets } from "../../context/DatasetContext";
 import contractAddresses from "../../contracts/contractAddresses.json";
 import GenomicZkVerifierABI from "../../contracts/GenomicZkVerifierABI.json";
+import { resolveEscrowDispute } from "../../services/datasetService";
 import {
   DataOwnerShieldIcon,
   GenoTokenIcon,
@@ -52,6 +53,7 @@ export default function AdminPortal() {
     maxBlindTags: 16,
     chainNowSec: 0
   });
+  const [rpcError, setRpcError] = useState(null);
   const [bounties, setBounties] = useState([]);
 
   // Governance form states
@@ -71,6 +73,11 @@ export default function AdminPortal() {
   const [bountyRewardInput, setBountyRewardInput] = useState("50");
   const [bountyMaxClaimsInput, setBountyMaxClaimsInput] = useState("5");
   const [bountyDurationInput, setBountyDurationInput] = useState("86400");
+
+  // Escrow Dispute Arbitration states
+  const [disputes, setDisputes] = useState([]);
+  const [disputeDataIdInput, setDisputeDataIdInput] = useState("1");
+  const [disputeBuyerInput, setDisputeBuyerInput] = useState("");
 
   const loadAdminTelemetry = useCallback(async () => {
     setLoadingTelemetry(true);
@@ -93,15 +100,15 @@ export default function AdminPortal() {
         reuseBps,
         maxTags
       ] = await Promise.all([
-        activeContracts.registry.owner().catch(() => ""),
-        activeContracts.token.owner().catch(() => ""),
-        activeContracts.registry.capsuleDispatcher().catch(() => ethers.ZeroAddress),
-        activeContracts.registry.zkVerifier().catch(() => ethers.ZeroAddress),
-        activeContracts.registry.dataCount().catch(() => 0n),
-        activeContracts.token.totalSupply().catch(() => 0n),
-        activeContracts.token.balanceOf(contractAddresses.GenomicsRegistry).catch(() => 0n),
-        activeContracts.registry.REUSE_FEE_BPS().catch(() => 500n),
-        activeContracts.registry.MAX_BLIND_TAGS_PER_DATASET().catch(() => 16n)
+        activeContracts.registry.owner(),
+        activeContracts.token.owner(),
+        activeContracts.registry.capsuleDispatcher(),
+        activeContracts.registry.zkVerifier(),
+        activeContracts.registry.dataCount(),
+        activeContracts.token.totalSupply(),
+        activeContracts.token.balanceOf(contractAddresses.GenomicsRegistry),
+        activeContracts.registry.REUSE_FEE_BPS(),
+        activeContracts.registry.MAX_BLIND_TAGS_PER_DATASET()
       ]);
 
       const activeZkAddr =
@@ -111,7 +118,7 @@ export default function AdminPortal() {
       const bountyList = [];
       if (activeZkAddr && activeZkAddr !== ethers.ZeroAddress && provider) {
         const zk = new ethers.Contract(activeZkAddr, GenomicZkVerifierABI, provider);
-        bCount = Number(await zk.bountyCount().catch(() => 0n));
+        bCount = Number(await zk.bountyCount());
         for (let i = 1; i <= bCount; i++) {
           try {
             const b = await zk.bounties(i);
@@ -147,11 +154,48 @@ export default function AdminPortal() {
         maxBlindTags: Number(maxTags || 16n),
         chainNowSec
       });
+      const disputeList = [];
+      try {
+        const dispEvs = await activeContracts.registry.queryFilter(
+          activeContracts.registry.filters.EscrowDisputed(),
+          0,
+          "latest"
+        );
+        const seenDisp = new Set();
+        for (const ev of dispEvs) {
+          const dId = Number(ev.args?.dataId || 0);
+          const bAddr = ev.args?.buyer;
+          const k = `${dId}:${(bAddr || "").toLowerCase()}`;
+          if (!dId || !bAddr || seenDisp.has(k)) continue;
+          seenDisp.add(k);
+          const [isDisp, dep] = await Promise.all([
+            activeContracts.registry.escrowDisputed(dId, bAddr).catch(() => false),
+            activeContracts.registry.escrowDeposits(dId, bAddr).catch(() => null)
+          ]);
+          if (isDisp && dep && dep.amount > 0n && !dep.released && !dep.refunded) {
+            disputeList.push({
+              dataId: dId,
+              buyer: bAddr,
+              seller: dep.seller,
+              amount: Number(ethers.formatUnits(dep.amount, 18))
+            });
+          }
+        }
+      } catch {}
+
+      setDisputes(disputeList);
+      if (disputeList.length > 0 && !disputeBuyerInput) {
+        setDisputeDataIdInput(String(disputeList[0].dataId));
+        setDisputeBuyerInput(disputeList[0].buyer);
+      }
       setBounties(bountyList);
       setDispatcherInput((prev) => prev || disp || regOwner || "");
       setRescueToInput((prev) => prev || account || regOwner || "");
+      setRpcError(null);
     } catch (err) {
-      showToast("Admin telemetry warning: " + (err.shortMessage || err.message), "error");
+      const errMsg = err.shortMessage || err.message;
+      setRpcError(errMsg);
+      showToast("Admin telemetry warning: " + errMsg, "error");
     } finally {
       setLoadingTelemetry(false);
     }
@@ -321,6 +365,36 @@ export default function AdminPortal() {
     }
   };
 
+  const handleResolveDispute = async (targetDataId, targetBuyer, refundBuyer) => {
+    try {
+      setBusyAction(`dispute-${refundBuyer ? "refund" : "release"}`);
+      const dId = parseInt(targetDataId ?? disputeDataIdInput, 10);
+      const buyerAddr = (targetBuyer ?? disputeBuyerInput).trim();
+      if (!Number.isFinite(dId) || dId <= 0) throw new Error("Invalid Dataset ID.");
+      if (!ethers.isAddress(buyerAddr)) throw new Error("Invalid disputing buyer EVM address.");
+      const s = await requireActiveSigner();
+      showToast(
+        refundBuyer
+          ? `Resolving dispute #${dId}: Refunding 100% to buyer...`
+          : `Resolving dispute #${dId}: Rejecting dispute & releasing funds to seller...`,
+        "info"
+      );
+      await resolveEscrowDispute({ dataId: dId, buyer: buyerAddr, refundBuyer, signer: s });
+      showToast(
+        refundBuyer
+          ? `Dispute #${dId} resolved: Buyer refunded 100%.`
+          : `Dispute #${dId} resolved: Escrow released to seller + EIP-2981 creator.`
+      );
+      await refreshBalance(account);
+      await fetchOnChainDatasets(account);
+      await loadAdminTelemetry();
+    } catch (err) {
+      showToast("resolveEscrowDispute failed: " + (err.shortMessage || err.message), "error");
+    } finally {
+      setBusyAction("");
+    }
+  };
+
   const isOwnerMatch =
     account &&
     telemetry.registryOwner &&
@@ -414,6 +488,48 @@ export default function AdminPortal() {
         </div>
       </div>
 
+      {/* Persistent Inline RPC Error Banner */}
+      {rpcError && (
+        <div
+          id="admin-rpc-error-banner"
+          className="admin-rpc-error-banner"
+          role="alert"
+          style={{
+            marginBottom: "18px",
+            padding: "14px 18px",
+            background: "rgba(239, 68, 68, 0.12)",
+            border: "1px solid rgba(239, 68, 68, 0.45)",
+            borderRadius: "var(--radius-sm)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: "14px",
+            flexWrap: "wrap"
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            <AlertTriangleIcon size={20} color="var(--accent-rose-text)" />
+            <div>
+              <div style={{ fontWeight: 700, fontSize: "13px", color: "var(--accent-rose-text)" }}>
+                {t("rpcOfflineTitle") || "Mất kết nối Node RPC Blockchain (Hardhat 31337)"}
+              </div>
+              <div style={{ fontSize: "12px", color: "var(--text-secondary)", marginTop: "2px" }}>
+                {t("rpcOfflineDesc") || "Chỉ số hệ thống hiển thị trạng thái ngắt kết nối. Vui lòng kiểm tra Hardhat Node."} ({rpcError})
+              </div>
+            </div>
+          </div>
+          <button
+            type="button"
+            className="btn-terminal btn-terminal-primary"
+            style={{ height: "32px", fontSize: "12px", padding: "0 14px", whiteSpace: "nowrap" }}
+            onClick={loadAdminTelemetry}
+          >
+            <RefreshSpinIcon size={13} />
+            <span>{t("retryConnection") || "Thử lại kết nối RPC"}</span>
+          </button>
+        </div>
+      )}
+
       {/* 2x2 Admin Governance Studio Grid */}
       <div className="admin-governance-grid">
         {/* CARD 1: Protocol Telemetry & IPFS Configuration */}
@@ -435,25 +551,25 @@ export default function AdminPortal() {
             <div className="admin-kpi-tile">
               <div className="admin-kpi-label">{t("adminKpiDatasets")}</div>
               <div className="admin-kpi-val">
-                {telemetry.dataCount} / {telemetry.bountyCount}
+                {rpcError ? "RPC Offline" : `${telemetry.dataCount} / ${telemetry.bountyCount}`}
               </div>
             </div>
             <div className="admin-kpi-tile">
               <div className="admin-kpi-label">{t("adminKpiSupply")}</div>
               <div className="admin-kpi-val is-accent">
-                {telemetry.totalSupplyGeno.toLocaleString()}
+                {rpcError ? "RPC Offline" : telemetry.totalSupplyGeno.toLocaleString()}
               </div>
             </div>
             <div className="admin-kpi-tile">
               <div className="admin-kpi-label">{t("adminKpiRoyalty")}</div>
               <div className="admin-kpi-val" style={{ fontSize: "15px" }}>
-                {telemetry.reuseFeeBps / 100}% ({telemetry.reuseFeeBps} bps) / {telemetry.maxBlindTags}
+                {rpcError ? "RPC Offline" : `${telemetry.reuseFeeBps / 100}% (${telemetry.reuseFeeBps} bps) / ${telemetry.maxBlindTags}`}
               </div>
             </div>
             <div className="admin-kpi-tile">
               <div className="admin-kpi-label">{t("adminKpiEscrow")}</div>
               <div className="admin-kpi-val is-emerald" style={{ fontSize: "15px" }}>
-                {telemetry.registryTokenBal.toLocaleString()} $GENO
+                {rpcError ? "RPC Offline" : `${telemetry.registryTokenBal.toLocaleString()} $GENO`}
               </div>
             </div>
           </div>
@@ -502,7 +618,7 @@ export default function AdminPortal() {
             <div className="admin-kv-row">
               <span className="admin-kv-key">{t("adminLabelIpfs")}</span>
               <span className="admin-kv-val">
-                {pinataJwt ? "Pinata JWT" : "Pinata Unset"} | {kuboRpc}
+                {pinataJwt ? "Pinata JWT" : (lang === "vi" ? "Chưa cấu hình Pinata" : "Pinata Unset")} | {kuboRpc}
               </span>
             </div>
           </div>
@@ -831,6 +947,111 @@ export default function AdminPortal() {
                 </div>
               );
             })}
+          </div>
+        </section>
+
+        {/* CARD 5: Escrow Dispute Arbiter Governance */}
+        <section id="admin-escrow-disputes-card" className="studio-panel" style={{ gridColumn: "1 / -1" }}>
+          <div className="panel-title-bar">
+            <h2 className="panel-title">
+              <span className="panel-title-icon-wrap">
+                <AlertTriangleIcon size={16} color="var(--accent-rose-text)" />
+              </span>
+              {t("adminEscrowPanelTitle")}
+            </h2>
+          </div>
+
+          <div className="form-group-row">
+            <div className="form-field" style={{ marginBottom: 0 }}>
+              <label className="field-label" htmlFor="admin-dispute-dataid-input">
+                {t("adminDisputeDataIdLabel")}
+              </label>
+              <input
+                id="admin-dispute-dataid-input"
+                type="number"
+                className="field-input"
+                value={disputeDataIdInput}
+                onChange={(e) => setDisputeDataIdInput(e.target.value)}
+              />
+            </div>
+            <div className="form-field" style={{ marginBottom: 0 }}>
+              <label className="field-label" htmlFor="admin-dispute-buyer-input">
+                {t("adminDisputeBuyerLabel")}
+              </label>
+              <input
+                id="admin-dispute-buyer-input"
+                type="text"
+                className="field-input"
+                value={disputeBuyerInput}
+                onChange={(e) => setDisputeBuyerInput(e.target.value)}
+                placeholder="0x..."
+              />
+            </div>
+          </div>
+
+          <div style={{ display: "flex", gap: "10px", marginTop: "12px", flexWrap: "wrap" }}>
+            <button
+              id="admin-resolve-refund-btn"
+              type="button"
+              className="btn-terminal btn-terminal-danger"
+              style={{ flex: 1, justifyContent: "center", background: "#b91c1c", color: "#ffffff" }}
+              disabled={busyAction.startsWith("dispute-")}
+              onClick={() => handleResolveDispute(disputeDataIdInput, disputeBuyerInput, true)}
+            >
+              <span>{busyAction === "dispute-refund" ? "..." : t("adminResolveRefundBtn")}</span>
+            </button>
+            <button
+              id="admin-resolve-release-btn"
+              type="button"
+              className="btn-terminal btn-terminal-success"
+              style={{ flex: 1, justifyContent: "center" }}
+              disabled={busyAction.startsWith("dispute-")}
+              onClick={() => handleResolveDispute(disputeDataIdInput, disputeBuyerInput, false)}
+            >
+              <span>{busyAction === "dispute-release" ? "..." : t("adminResolveReleaseBtn")}</span>
+            </button>
+          </div>
+
+          <div style={{ marginTop: "12px" }}>
+            <div className="spec-box-label" style={{ marginBottom: "6px" }}>{t("adminActiveDisputesLabel")}</div>
+            {disputes.length === 0 ? (
+              <div style={{ fontSize: "12px", color: "var(--text-secondary)", fontFamily: "var(--font-mono)" }}>
+                {t("adminNoActiveDisputes")}
+              </div>
+            ) : (
+              <div className="admin-bounty-list">
+                {disputes.map((d) => (
+                  <div key={`${d.dataId}-${d.buyer}`} className="admin-bounty-row">
+                    <div style={{ fontSize: "12px", minWidth: 0 }}>
+                      <div style={{ fontWeight: 700, color: "var(--text-primary)" }}>
+                        #{d.dataId} • {d.amount} $GENO
+                      </div>
+                      <div style={{ color: "var(--text-secondary)", fontFamily: "var(--font-mono)", fontSize: "11px" }}>
+                        Buyer: {shortAddr(d.buyer)} | Seller: {shortAddr(d.seller)}
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", gap: "6px", flexShrink: 0 }}>
+                      <button
+                        type="button"
+                        className="btn-terminal btn-terminal-danger"
+                        style={{ padding: "5px 10px", fontSize: "11px", background: "#b91c1c", color: "#ffffff" }}
+                        onClick={() => handleResolveDispute(d.dataId, d.buyer, true)}
+                      >
+                        {t("adminResolveRefundBtn")}
+                      </button>
+                      <button
+                        type="button"
+                        className="btn-terminal btn-terminal-success"
+                        style={{ padding: "5px 10px", fontSize: "11px" }}
+                        onClick={() => handleResolveDispute(d.dataId, d.buyer, false)}
+                      >
+                        {t("adminResolveReleaseBtn")}
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </section>
       </div>

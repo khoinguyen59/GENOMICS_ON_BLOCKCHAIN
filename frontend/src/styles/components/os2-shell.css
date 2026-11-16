@@ -22,8 +22,9 @@
 .os2-main-content {
   margin-left: 52px !important;
   padding: 12px 24px 56px 24px !important;
-  max-width: calc(100vw - 52px) !important;
-  width: calc(100vw - 52px) !important;
+  max-width: calc(100% - 52px) !important;
+  width: calc(100% - 52px) !important;
+  box-sizing: border-box !important;
 }
 
 /* --------------------------------------------------------------------------
@@ -52,11 +53,11 @@
 
 .os2-left-sidebar:hover {
   width: 220px;
-  box-shadow: 0 0 0 100vw rgba(0, 0, 0, 0.36), 10px 0 30px rgba(0, 0, 0, 0.18);
+  box-shadow: 10px 0 30px rgba(0, 0, 0, 0.25);
 }
 
 [data-theme="light"] .os2-left-sidebar:hover {
-  box-shadow: 0 0 0 100vw rgba(0, 0, 0, 0.34), 8px 0 24px rgba(15, 23, 42, 0.12);
+  box-shadow: 8px 0 24px rgba(15, 23, 42, 0.12);
 }
 
 .os2-left-nav {
@@ -186,7 +187,7 @@
 
 [data-theme="light"] .os2-nav-item.active {
   background: #eff6ff;
-  color: #0284c7;
+  color: #0369a1;
 }
 
 .os2-nav-icon {
@@ -251,13 +252,17 @@
   z-index: 120;
   margin-left: 52px;
   height: 56px;
-  padding: 0 24px;
+  padding: 0 20px;
   background: var(--bg-app);
   border-bottom: 1px solid var(--border-subtle);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
+  gap: 12px;
+  max-width: calc(100% - 52px);
+  width: calc(100% - 52px);
+  box-sizing: border-box;
+  flex-wrap: nowrap;
 }
 
 [data-theme="light"] .os2-top-navbar {
@@ -1889,6 +1894,80 @@
 
   .hide-lg {
     display: none !important;
+  }
+}
+
+@media (max-width: 1200px) {
+  .os2-top-navbar {
+    padding: 0 14px;
+    gap: 8px;
+  }
+  .os2-top-search-wrap {
+    flex: 0 1 200px;
+    min-width: 120px;
+  }
+  .os2-wallet-cluster {
+    gap: 6px;
+  }
+  .os2-faucet-btn {
+    padding: 0 8px;
+    font-size: 11.5px;
+  }
+  .os2-wallet-pill {
+    padding: 0 4px 0 8px;
+    gap: 6px;
+  }
+  .os2-wallet-bal {
+    font-size: 11.5px;
+  }
+  .os2-wallet-addr {
+    font-size: 11.5px;
+    padding: 0 6px;
+  }
+  .os2-role-btn {
+    padding: 0 8px;
+    font-size: 11.5px;
+  }
+}
+
+@media (max-width: 1024px) {
+  .os2-top-navbar {
+    padding: 0 10px;
+    gap: 6px;
+    height: 56px !important;
+    max-height: 56px !important;
+    flex-wrap: nowrap !important;
+  }
+  .os2-top-search-wrap {
+    flex: 0 1 130px;
+    min-width: 90px;
+  }
+  .os2-faucet-btn span {
+    display: none;
+  }
+  .os2-faucet-btn {
+    padding: 0 8px;
+    width: 32px;
+    justify-content: center;
+  }
+  .os2-wallet-pill {
+    padding: 0 3px 0 6px;
+    gap: 4px;
+  }
+  .os2-wallet-bal {
+    font-size: 11px;
+  }
+  .os2-role-switch-group {
+    padding: 2px;
+    gap: 1px;
+  }
+  .os2-role-btn {
+    padding: 0 6px;
+    font-size: 11px;
+  }
+  .os2-lang-btn {
+    padding: 0 6px;
+    font-size: 11px;
   }
 }
 

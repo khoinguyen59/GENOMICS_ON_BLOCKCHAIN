@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
-import "../GenomicsRegistry.sol";
+import {IERC721Receiver} from "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
+import {GenomicsRegistry} from "../GenomicsRegistry.sol";
 
 /**
  * @title MaliciousReentrantReceiver
@@ -22,10 +22,10 @@ contract MaliciousReentrantReceiver is IERC721Receiver {
 
     function registerWithRegistry(
         bytes32 rawDataHash,
-        string memory rawCid,
-        string memory summaryCid,
-        string memory metadataCid,
-        string memory tokenUri,
+        string calldata rawCid,
+        string calldata summaryCid,
+        string calldata metadataCid,
+        string calldata tokenUri,
         uint256 price,
         uint256 accessDuration,
         uint96 royaltyBps

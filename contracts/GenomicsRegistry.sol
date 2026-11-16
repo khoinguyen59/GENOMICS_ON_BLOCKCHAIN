@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
-import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import "./GenomicNFT.sol";
+import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
+import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import { GenomicNFT, IGenomicsRegistryWorkerSync } from "./GenomicNFT.sol";
 
 interface IGenomicZkVerifier {
     function hasVerifiedVariant(bytes32 variantCommitment, address donor) external view returns (bool);
+    function hasVerifiedTraitVariant(bytes32 targetTraitId, bytes32 variantCommitment, address donor) external view returns (bool);
     function hasClaimedBounty(uint256 bountyId, address donor) external view returns (bool);
 }
 
@@ -19,8 +19,26 @@ interface IGenomicZkVerifier {
  *         status updates, and active on-chain disbursement of EIP-2981 royalties via royaltyInfo() queries.
  * @dev Comprehensive DeSci Genomic Registry implementing smart contracts, escrow, royalty settlement, and access control.
  */
-contract GenomicsRegistry is ReentrancyGuard, Ownable, IGenomicsRegistryWorkerSync {
+contract GenomicsRegistry is Ownable, IGenomicsRegistryWorkerSync {
     using SafeERC20 for IERC20;
+
+    error ReentrancyGuardReentrantCall();
+    uint256 private _reentrancyStatus = 1;
+
+    modifier nonReentrant() {
+        _nonReentrantBefore();
+        _;
+        _nonReentrantAfter();
+    }
+
+    function _nonReentrantBefore() internal {
+        if (_reentrancyStatus == 2) revert ReentrancyGuardReentrantCall();
+        _reentrancyStatus = 2;
+    }
+
+    function _nonReentrantAfter() internal {
+        _reentrancyStatus = 1;
+    }
 
     enum DataStatus { Active, Paused, Revoked }
 
@@ -94,6 +112,14 @@ contract GenomicsRegistry is ReentrancyGuard, Ownable, IGenomicsRegistryWorkerSy
 
     // dataId => worker revocation epoch counter for O(1) invalidation
     mapping(uint256 => uint256) public workerEpoch;
+    mapping(uint256 => mapping(address => uint256)) public workerAuthorizedEpoch;
+
+    // dataId => buyer => dispute status & manual confirmation preferences
+    mapping(uint256 => mapping(address => bool)) public escrowDisputed;
+    mapping(uint256 => mapping(address => bool)) public manualEscrowRelease;
+
+    // dataId => worker address => 1-based index in _authorizedWorkersList (O(1) prune)
+    mapping(uint256 => mapping(address => uint256)) internal _workerIndex;
 
 
     // tokenId => dataId
@@ -115,6 +141,10 @@ contract GenomicsRegistry is ReentrancyGuard, Ownable, IGenomicsRegistryWorkerSy
     mapping(uint256 => mapping(bytes32 => bool)) public studyReuseReceipts;
     mapping(uint256 => uint256) public datasetReuseCount;
 
+    // Anti-front-running commit-reveal registration commitments: commitment => commit block number
+    mapping(bytes32 => uint256) public registrationCommitments;
+    bool public commitRevealRequired;
+
     // Custom Errors (Gas optimization)
     error NotDataOwner();
     error DataNotActive();
@@ -130,6 +160,9 @@ contract GenomicsRegistry is ReentrancyGuard, Ownable, IGenomicsRegistryWorkerSy
     error InvalidRecipient();
     error EscrowNotActive();
     error DisputeWindowActive();
+    error DisputeWindowExpired();
+    error EscrowDisputedError();
+    error EscrowNotDisputed();
     error CapsuleAlreadyDelivered();
     error CapsuleNotDelivered();
     error InvalidDisputeWindow();
@@ -147,6 +180,10 @@ contract GenomicsRegistry is ReentrancyGuard, Ownable, IGenomicsRegistryWorkerSy
     error InvalidBlindTag();
     error InvalidStudyCommitment();
     error StudyReuseAlreadyRecorded();
+    error InvalidCommitment();
+    error CommitmentAlreadyExists();
+    error CommitmentNotFound();
+    error CommitmentTooNew();
 
     // Events
     event TokensRescued(
@@ -239,6 +276,32 @@ contract GenomicsRegistry is ReentrancyGuard, Ownable, IGenomicsRegistryWorkerSy
         uint256 amount
     );
 
+    event EscrowDisputed(
+        uint256 indexed dataId,
+        address indexed buyer
+    );
+
+    event EscrowDisputeResolved(
+        uint256 indexed dataId,
+        address indexed buyer,
+        bool indexed refundBuyer,
+        uint256 amount
+    );
+
+    event EscrowConfirmed(
+        uint256 indexed dataId,
+        address indexed buyer
+    );
+
+    event GenomicDataCommitted(
+        bytes32 indexed commitment,
+        address indexed donor,
+        uint256 blockNumber
+    );
+
+    event CommitRevealRequirementUpdated(bool required);
+
+
     event ArtifactHashesAnchored(
         uint256 indexed dataId,
         bytes32 summaryHash,
@@ -282,23 +345,24 @@ contract GenomicsRegistry is ReentrancyGuard, Ownable, IGenomicsRegistryWorkerSy
     function _checkDataOwnerOrDispatcher(uint256 dataId) internal view {
         _requireValidDataId(dataId);
         address nftOwner = genomicNFT.ownerOf(genomicDataItems[dataId].tokenId);
-        bool isAuthorizedWorker = authorizedCapsuleWorkers[dataId][msg.sender] &&
-            capsuleWorkerAuthorizer[dataId][msg.sender] == nftOwner;
+        bool isWorker = isAuthorizedWorker(dataId, msg.sender);
         if (
             msg.sender != nftOwner &&
             msg.sender != capsuleDispatcher &&
-            !isAuthorizedWorker
+            !isWorker
         ) {
             revert NotDataOwner();
         }
     }
 
     function _safeOwnerOf(uint256 tokenId, address fallbackOwner) internal view returns (address) {
-        try genomicNFT.ownerOf(tokenId) returns (address liveOwner) {
-            return liveOwner;
-        } catch {
-            return fallbackOwner;
+        (bool ok, bytes memory data) = address(genomicNFT).staticcall(
+            abi.encodeWithSelector(0x6352211e, tokenId)
+        );
+        if (ok && data.length == 32) {
+            return abi.decode(data, (address));
         }
+        return fallbackOwner;
     }
 
     constructor(
@@ -317,6 +381,65 @@ contract GenomicsRegistry is ReentrancyGuard, Ownable, IGenomicsRegistryWorkerSy
     // =========================================================================
     // Core Business Functions
     // =========================================================================
+
+    /**
+     * @notice Toggle strict commit-reveal registration mode to block mempool front-running
+     * @param required True to require prior commitGenomicData() before register calls
+     */
+    function setCommitRevealRequired(bool required) external onlyOwner {
+        commitRevealRequired = required;
+        emit CommitRevealRequirementUpdated(required);
+    }
+
+    /**
+     * @notice Submit salted commitment keccak256(abi.encodePacked(rawDataHash, salt, msg.sender))
+     *         prior to revealing genomic dataset parameters
+     * @param commitment Salted hash commitment binding rawDataHash, salt, and msg.sender
+     */
+    function commitGenomicData(bytes32 commitment) external {
+        if (commitment == bytes32(0)) revert InvalidCommitment();
+        bytes32 commitKey = keccak256(abi.encodePacked(commitment, msg.sender));
+        if (registrationCommitments[commitKey] != 0) revert CommitmentAlreadyExists();
+        registrationCommitments[commitKey] = block.number;
+        emit GenomicDataCommitted(commitment, msg.sender, block.number);
+    }
+
+    /**
+     * @notice Reveal salted commitment in a later block and register encrypted genomic dataset
+     * @param rawDataHash SHA-256 hash of encrypted raw ciphertext package
+     * @param salt Secret 32-byte salt used when computing commitment
+     * @param cidsAndUri [rawCid, summaryCid, metadataCid, tokenUri]
+     * @param price Access fee in $GENO wei
+     * @param accessDuration Access period in seconds
+     * @param royaltyBps Creator royalty in basis points
+     * @return dataId Registered dataset ID
+     */
+    function revealAndRegisterGenomicData(
+        bytes32 rawDataHash,
+        bytes32 salt,
+        string[4] calldata cidsAndUri,
+        uint256 price,
+        uint256 accessDuration,
+        uint96 royaltyBps
+    ) external nonReentrant returns (uint256 dataId) {
+        bytes32 commitment = keccak256(abi.encodePacked(rawDataHash, salt, msg.sender));
+        bytes32 commitKey = keccak256(abi.encodePacked(commitment, msg.sender));
+        uint256 commitBlock = registrationCommitments[commitKey];
+        if (commitBlock == 0) revert CommitmentNotFound();
+        if (block.number <= commitBlock) revert CommitmentTooNew();
+        delete registrationCommitments[commitKey];
+
+        dataId = _validateAndInitData(
+            rawDataHash,
+            cidsAndUri[0],
+            cidsAndUri[1],
+            cidsAndUri[2],
+            bytes(cidsAndUri[3]).length,
+            price,
+            accessDuration
+        );
+        _mintStoredNft(dataId, cidsAndUri[3], royaltyBps);
+    }
 
     /**
      * @notice 1. registerGenomicData(): Register encrypted genomic dataset on-chain.
@@ -343,6 +466,7 @@ contract GenomicsRegistry is ReentrancyGuard, Ownable, IGenomicsRegistryWorkerSy
         uint256 accessDuration,
         uint96 royaltyBps
     ) external nonReentrant returns (uint256 dataId) {
+        if (commitRevealRequired) revert CommitmentNotFound();
         dataId = _validateAndInitData(
             rawDataHash,
             rawCid,
@@ -363,6 +487,7 @@ contract GenomicsRegistry is ReentrancyGuard, Ownable, IGenomicsRegistryWorkerSy
         uint96 royaltyBps,
         bytes32[] calldata blindTags
     ) external nonReentrant returns (uint256 newDataId) {
+        if (commitRevealRequired) revert CommitmentNotFound();
         if (hashes[1] == bytes32(0) || hashes[2] == bytes32(0)) revert InvalidDataHashOrCid();
         newDataId = _validateAndInitData(
             hashes[0],
@@ -391,21 +516,20 @@ contract GenomicsRegistry is ReentrancyGuard, Ownable, IGenomicsRegistryWorkerSy
         uint256 price,
         uint256 accessDuration
     ) internal returns (uint256 newDataId) {
-        if (
-            rawDataHash == bytes32(0) ||
-            !_isValidCid(rawCid) ||
-            !_isValidCid(summaryCid) ||
-            !_isValidCid(metadataCid) ||
-            tokenUriLen == 0
-        ) revert InvalidDataHashOrCid();
+        if (rawDataHash == bytes32(0) || tokenUriLen == 0) revert InvalidDataHashOrCid();
+        for (uint256 k = 0; k < 3; ) {
+            string calldata cid = k == 0 ? rawCid : (k == 1 ? summaryCid : metadataCid);
+            if (!_isValidCid(cid)) revert InvalidDataHashOrCid();
+            unchecked { ++k; }
+        }
         if (registeredRawDataHashes[rawDataHash]) revert DataAlreadyRegistered();
+
         if (price == 0) revert InvalidPrice();
         if (accessDuration == 0) revert InvalidDuration();
 
         registeredRawDataHashes[rawDataHash] = true;
         uint256 expectedTokenId = genomicNFT.nextTokenId();
-        dataCount++;
-        newDataId = dataCount;
+        newDataId = ++dataCount;
 
         tokenToDataId[expectedTokenId] = newDataId;
         GenomicData storage item = genomicDataItems[newDataId];
@@ -486,28 +610,28 @@ contract GenomicsRegistry is ReentrancyGuard, Ownable, IGenomicsRegistryWorkerSy
         }
     }
 
-    function _grantAccessInternal(uint256 dataId, uint256 maxPrice) internal {
-        (GenomicData storage data, address seller) = _validatePurchase(dataId, maxPrice);
-
-        EscrowDeposit storage existingDeposit = escrowDeposits[dataId][msg.sender];
+    function _clearSettledEscrow(uint256 dataId, address user) internal {
+        EscrowDeposit storage existingDeposit = escrowDeposits[dataId][user];
         if (existingDeposit.amount > 0) {
             if (!existingDeposit.released && !existingDeposit.refunded) revert EscrowAlreadyActive();
-            delete escrowDeposits[dataId][msg.sender];
+            delete escrowDeposits[dataId][user];
         }
+        escrowDisputed[dataId][user] = false;
+    }
+
+    function _grantAccessInternal(uint256 dataId, uint256 maxPrice) internal {
+        (GenomicData storage data, address seller) = _validatePurchase(dataId, maxPrice);
+        _clearSettledEscrow(dataId, msg.sender);
 
         uint256 totalPrice = data.price;
 
         // CHECKS-EFFECTS-INTERACTIONS: Update all state variables BEFORE making external calls
         uint256 expires = block.timestamp + data.accessDuration;
-        data.accessCount++;
+        ++data.accessCount;
         data.currentOwner = seller; // Sync latest NFT holder
 
         delete _buyerCapsules[dataId][msg.sender];
-
-        AccessGrant storage grant = accessGrants[dataId][msg.sender];
-        grant.isGranted = true;
-        grant.grantedAt = block.timestamp;
-        grant.expiresAt = expires;
+        accessGrants[dataId][msg.sender] = AccessGrant(true, block.timestamp, expires);
 
         (, uint256 royaltyAmount) = _settleRoyaltyPayment(
             dataId,
@@ -555,76 +679,143 @@ contract GenomicsRegistry is ReentrancyGuard, Ownable, IGenomicsRegistryWorkerSy
         if (disputeWindow < 1 hours || disputeWindow > 30 days) revert InvalidDisputeWindow();
 
         uint256 totalPrice = data.price;
-        data.accessCount++;
+        ++data.accessCount;
         data.currentOwner = seller;
 
         delete _buyerCapsules[dataId][msg.sender];
         delete accessGrants[dataId][msg.sender];
 
-        dep.buyer = msg.sender;
-        dep.seller = seller;
-        dep.amount = totalPrice;
-        dep.depositTime = block.timestamp;
-        dep.disputeWindow = disputeWindow;
-        dep.released = false;
-        dep.refunded = false;
-        dep.capsuleDelivered = false;
+        escrowDeposits[dataId][msg.sender] = EscrowDeposit({
+            buyer: msg.sender,
+            seller: seller,
+            amount: totalPrice,
+            depositTime: block.timestamp,
+            disputeWindow: disputeWindow,
+            released: false,
+            refunded: false,
+            capsuleDelivered: false
+        });
+        escrowDisputed[dataId][msg.sender] = false;
+        manualEscrowRelease[dataId][msg.sender] = false;
 
         paymentToken.safeTransferFrom(msg.sender, address(this), totalPrice);
 
         emit EscrowDeposited(dataId, msg.sender, totalPrice, disputeWindow);
     }
 
+    function _requireActiveEscrow(uint256 dataId, address buyer) internal view returns (EscrowDeposit storage deposit) {
+        _requireValidDataId(dataId);
+        deposit = escrowDeposits[dataId][buyer];
+        if (deposit.amount == 0 || deposit.released || deposit.refunded) revert EscrowNotActive();
+    }
+
     /**
-     * @notice Claim a 100% refund if the capsule dispatcher fails to deliver the capsule within the dispute window
+     * @notice Buyer toggles manual confirmation release for their escrow
+     */
+    function setManualEscrowRelease(uint256 dataId, bool manual) external {
+        _requireActiveEscrow(dataId, msg.sender);
+        manualEscrowRelease[dataId][msg.sender] = manual;
+    }
+
+    /**
+     * @notice Dispute a delivered capsule during the active dispute window (freezes escrow for admin arbitration)
+     * @param dataId Target dataset ID
+     */
+    function disputeCapsule(uint256 dataId) external {
+        EscrowDeposit storage deposit = _requireActiveEscrow(dataId, msg.sender);
+        if (!deposit.capsuleDelivered) revert CapsuleNotDelivered();
+        if (escrowDisputed[dataId][msg.sender]) revert EscrowDisputedError();
+        if (block.timestamp >= deposit.depositTime + deposit.disputeWindow) revert DisputeWindowExpired();
+        escrowDisputed[dataId][msg.sender] = true;
+        accessGrants[dataId][msg.sender].isGranted = false;
+        emit EscrowDisputed(dataId, msg.sender);
+    }
+
+    /**
+     * @notice Buyer explicitly confirms satisfactory capsule delivery and releases escrow immediately
+     * @param dataId Target dataset ID
+     */
+    function confirmCapsuleAndReleaseEscrow(uint256 dataId) external nonReentrant {
+        EscrowDeposit storage deposit = _requireActiveEscrow(dataId, msg.sender);
+        if (!deposit.capsuleDelivered) revert CapsuleNotDelivered();
+        emit EscrowConfirmed(dataId, msg.sender);
+        _releaseEscrowInternal(dataId, msg.sender);
+    }
+
+    /**
+     * @notice Claim a 100% refund when capsule is not delivered before dispute window expires (or dataset deactivated pre-delivery)
      * @param dataId Target dataset ID
      */
     function claimEscrowRefund(uint256 dataId) external nonReentrant {
         _requireValidDataId(dataId);
         EscrowDeposit storage deposit = escrowDeposits[dataId][msg.sender];
-        if (deposit.released || deposit.capsuleDelivered) {
-            revert CapsuleAlreadyDelivered();
-        }
         if (deposit.amount == 0 || deposit.refunded) revert EscrowNotActive();
+        if (deposit.released || deposit.capsuleDelivered) revert CapsuleAlreadyDelivered();
 
-        bool canRefundImmediately = (genomicDataItems[dataId].status == DataStatus.Revoked || genomicDataItems[dataId].status == DataStatus.Paused);
+        bool canRefundImmediately = (genomicDataItems[dataId].status != DataStatus.Active);
         if (!canRefundImmediately && block.timestamp < deposit.depositTime + deposit.disputeWindow) {
             revert DisputeWindowActive();
         }
 
-        uint256 refundAmount = deposit.amount;
-        deposit.refunded = true;
-        delete _buyerCapsules[dataId][msg.sender];
-        accessGrants[dataId][msg.sender].isGranted = false;
-        accessGrants[dataId][msg.sender].expiresAt = 0;
-        if (genomicDataItems[dataId].accessCount > 0) {
-            genomicDataItems[dataId].accessCount--;
-        }
-
-        paymentToken.safeTransfer(msg.sender, refundAmount);
-        emit EscrowRefunded(dataId, msg.sender, refundAmount);
+        _refundEscrowInternal(dataId, msg.sender);
     }
 
     /**
-     * @notice Manually release escrowed payment to seller once capsule is verified/delivered
+     * @notice Arbiter governance resolves a post-delivery escrow dispute (either 100% buyer refund or release to seller + royalty)
+     * @param dataId Target dataset ID
+     * @param buyer Disputing buyer address
+     * @param refundBuyer True to refund 100% to buyer and purge capsule/grant; false to release funds to seller + EIP-2981 royalty
+     */
+    function resolveEscrowDispute(
+        uint256 dataId,
+        address buyer,
+        bool refundBuyer
+    ) external onlyOwner nonReentrant {
+        if (buyer == address(0)) revert InvalidAddress();
+        EscrowDeposit storage deposit = _requireActiveEscrow(dataId, buyer);
+        if (!escrowDisputed[dataId][buyer]) revert EscrowNotDisputed();
+
+        if (refundBuyer) {
+            uint256 amt = _refundEscrowInternal(dataId, buyer);
+            emit EscrowDisputeResolved(dataId, buyer, true, amt);
+        } else {
+            _releaseEscrowInternal(dataId, buyer);
+            emit EscrowDisputeResolved(dataId, buyer, false, deposit.amount);
+        }
+    }
+
+    function _refundEscrowInternal(uint256 dataId, address buyer) internal returns (uint256 refundAmount) {
+        EscrowDeposit storage deposit = escrowDeposits[dataId][buyer];
+        refundAmount = deposit.amount;
+        deposit.refunded = true;
+        escrowDisputed[dataId][buyer] = false;
+        delete _buyerCapsules[dataId][buyer];
+        delete accessGrants[dataId][buyer];
+        if (genomicDataItems[dataId].accessCount > 0) {
+            --genomicDataItems[dataId].accessCount;
+        }
+        paymentToken.safeTransfer(buyer, refundAmount);
+        emit EscrowRefunded(dataId, buyer, refundAmount);
+    }
+
+    /**
+     * @notice Manually release escrowed payment to seller once capsule is verified/delivered and dispute window passes
      * @param dataId Target dataset ID
      * @param buyer Target buyer address
      */
     function releaseEscrow(uint256 dataId, address buyer) external nonReentrant {
-        _requireValidDataId(dataId);
-        EscrowDeposit storage deposit = escrowDeposits[dataId][buyer];
-        if (deposit.amount == 0 || deposit.released || deposit.refunded) revert EscrowNotActive();
+        EscrowDeposit storage deposit = _requireActiveEscrow(dataId, buyer);
         if (!deposit.capsuleDelivered) revert CapsuleNotDelivered();
+        if (escrowDisputed[dataId][buyer]) revert EscrowDisputedError();
 
-        address nftOwner = genomicNFT.ownerOf(genomicDataItems[dataId].tokenId);
-        if (
-            msg.sender != buyer &&
-            msg.sender != deposit.seller &&
-            msg.sender != nftOwner &&
-            msg.sender != capsuleDispatcher &&
-            msg.sender != owner()
-        ) {
-            revert NotDataOwner();
+        if (msg.sender != buyer) {
+            if (block.timestamp < deposit.depositTime + deposit.disputeWindow) {
+                revert DisputeWindowActive();
+            }
+            address nftOwner = genomicNFT.ownerOf(genomicDataItems[dataId].tokenId);
+            if (msg.sender != deposit.seller && msg.sender != nftOwner) {
+                revert NotDataOwner();
+            }
         }
 
         _releaseEscrowInternal(dataId, buyer);
@@ -639,11 +830,15 @@ contract GenomicsRegistry is ReentrancyGuard, Ownable, IGenomicsRegistryWorkerSy
             return;
         }
 
+        escrowDisputed[dataId][buyer] = false;
+
         GenomicData storage data = genomicDataItems[dataId];
         address seller = deposit.seller != address(0) ? deposit.seller : genomicNFT.ownerOf(data.tokenId);
         data.currentOwner = _safeOwnerOf(data.tokenId, seller);
         uint256 totalPrice = deposit.amount;
         deposit.released = true;
+
+        accessGrants[dataId][buyer] = AccessGrant(true, block.timestamp, block.timestamp + data.accessDuration);
 
         (uint256 sellerProceeds, uint256 royaltyAmount) = _settleRoyaltyPayment(
             dataId,
@@ -699,24 +894,18 @@ contract GenomicsRegistry is ReentrancyGuard, Ownable, IGenomicsRegistryWorkerSy
         GenomicData storage data = genomicDataItems[dataId];
         if (data.status != DataStatus.Active) revert DataNotActive();
 
-        EscrowDeposit storage existingDeposit = escrowDeposits[dataId][recipient];
-        if (existingDeposit.amount > 0) {
-            if (!existingDeposit.released && !existingDeposit.refunded) revert EscrowAlreadyActive();
-            delete escrowDeposits[dataId][recipient];
-        }
+        _clearSettledEscrow(dataId, recipient);
 
         AccessGrant storage currentGrant = accessGrants[dataId][recipient];
         if (!currentGrant.isGranted || block.timestamp >= currentGrant.expiresAt) {
-            data.accessCount++;
+            ++data.accessCount;
         }
 
         uint256 expires = block.timestamp + data.accessDuration;
 
-        accessGrants[dataId][recipient] = AccessGrant({
-            isGranted: true,
-            grantedAt: block.timestamp,
-            expiresAt: expires
-        });
+        currentGrant.isGranted = true;
+        currentGrant.grantedAt = block.timestamp;
+        currentGrant.expiresAt = expires;
 
         emit DirectAccessGranted(dataId, recipient, expires);
     }
@@ -770,15 +959,41 @@ contract GenomicsRegistry is ReentrancyGuard, Ownable, IGenomicsRegistryWorkerSy
     ) external onlyDataOwner(dataId) {
         if (worker == address(0)) revert InvalidRecipient();
         if (authorized) {
-            if (!authorizedCapsuleWorkers[dataId][worker]) {
+            if (!authorizedCapsuleWorkers[dataId][worker] || workerAuthorizedEpoch[dataId][worker] != workerEpoch[dataId]) {
                 _authorizedWorkersList[dataId].push(worker);
+                _workerIndex[dataId][worker] = _authorizedWorkersList[dataId].length;
             }
             capsuleWorkerAuthorizer[dataId][worker] = msg.sender;
+            workerAuthorizedEpoch[dataId][worker] = workerEpoch[dataId];
+            authorizedCapsuleWorkers[dataId][worker] = true;
         } else {
+            authorizedCapsuleWorkers[dataId][worker] = false;
             capsuleWorkerAuthorizer[dataId][worker] = address(0);
+            workerAuthorizedEpoch[dataId][worker] = 0;
+            uint256 idx1 = _workerIndex[dataId][worker];
+            if (idx1 > 0) {
+                address[] storage list = _authorizedWorkersList[dataId];
+                uint256 len = list.length;
+                if (idx1 <= len) {
+                    address lastWorker = list[len - 1];
+                    list[idx1 - 1] = lastWorker;
+                    _workerIndex[dataId][lastWorker] = idx1;
+                    list.pop();
+                }
+                delete _workerIndex[dataId][worker];
+            }
         }
-        authorizedCapsuleWorkers[dataId][worker] = authorized;
         emit CapsuleWorkerAuthorized(dataId, worker, authorized);
+    }
+
+    /**
+     * @notice Check whether a worker is currently authorized under the active workerEpoch
+     */
+    function isAuthorizedWorker(uint256 dataId, address worker) public view returns (bool) {
+        if (!authorizedCapsuleWorkers[dataId][worker]) return false;
+        if (workerAuthorizedEpoch[dataId][worker] != workerEpoch[dataId]) return false;
+        address nftOwner = genomicNFT.ownerOf(genomicDataItems[dataId].tokenId);
+        return capsuleWorkerAuthorizer[dataId][worker] == nftOwner;
     }
 
     /**
@@ -803,21 +1018,24 @@ contract GenomicsRegistry is ReentrancyGuard, Ownable, IGenomicsRegistryWorkerSy
         if (msg.sender != address(genomicNFT)) revert NotDataOwner();
         uint256 dataId = tokenToDataId[tokenId];
         if (dataId != 0 && dataId <= dataCount) {
-            genomicDataItems[dataId].currentOwner = _safeOwnerOf(tokenId, genomicDataItems[dataId].currentOwner);
-            _clearWorkers(dataId);
+            resetAuthorizedWorkers(dataId);
         }
     }
 
     function _clearWorkers(uint256 dataId) internal {
-        workerEpoch[dataId]++;
+        ++workerEpoch[dataId];
         address[] storage workers = _authorizedWorkersList[dataId];
-        for (uint256 i = 0; i < workers.length; i++) {
+        uint256 len = workers.length;
+        for (uint256 i = 0; i < len; ) {
             address w = workers[i];
             if (authorizedCapsuleWorkers[dataId][w]) {
                 authorizedCapsuleWorkers[dataId][w] = false;
                 emit CapsuleWorkerAuthorized(dataId, w, false);
             }
             capsuleWorkerAuthorizer[dataId][w] = address(0);
+            workerAuthorizedEpoch[dataId][w] = 0;
+            delete _workerIndex[dataId][w];
+            unchecked { ++i; }
         }
         delete _authorizedWorkersList[dataId];
     }
@@ -830,25 +1048,28 @@ contract GenomicsRegistry is ReentrancyGuard, Ownable, IGenomicsRegistryWorkerSy
         address researcher,
         string calldata capsule
     ) external nonReentrant onlyDataOwnerOrDispatcher(dataId) {
-        _deliverCapsule(dataId, researcher, capsule, false);
+        _deliverCapsule(dataId, researcher, capsule);
     }
 
     /**
      * @notice Capsule emission and storage: Persists capsule and emits CapsuleStored event
+     * @param dataId Target dataset ID
+     * @param researcher Target researcher address
+     * @param capsule Serialized RSA-OAEP JSON key capsule
      */
     function emitTransformedCapsule(
         uint256 dataId,
         address researcher,
         string calldata capsule
     ) external nonReentrant onlyDataOwnerOrDispatcher(dataId) {
-        _deliverCapsule(dataId, researcher, capsule, true);
+        _deliverCapsule(dataId, researcher, capsule);
+        emit CapsuleStored(dataId, researcher, capsule);
     }
 
     function _deliverCapsule(
         uint256 dataId,
         address researcher,
-        string calldata capsule,
-        bool emitEvent
+        string calldata capsule
     ) internal {
         if (researcher == address(0)) revert InvalidAddress();
         if (genomicDataItems[dataId].status != DataStatus.Active) revert DataNotActive();
@@ -859,6 +1080,12 @@ contract GenomicsRegistry is ReentrancyGuard, Ownable, IGenomicsRegistryWorkerSy
 
         if (deposit.amount > 0) {
             if (deposit.released || deposit.refunded) revert EscrowNotActive();
+            if (escrowDisputed[dataId][researcher]) revert EscrowDisputedError();
+            uint256 deadline = deposit.depositTime + deposit.disputeWindow;
+            if (block.timestamp >= deadline) revert DisputeWindowExpired();
+            if (!deposit.capsuleDelivered && block.timestamp + 15 minutes > deadline) {
+                deposit.disputeWindow = (block.timestamp - deposit.depositTime) + 15 minutes;
+            }
         } else {
             _requireActiveGrant(dataId, researcher);
         }
@@ -874,13 +1101,6 @@ contract GenomicsRegistry is ReentrancyGuard, Ownable, IGenomicsRegistryWorkerSy
         }
 
         _buyerCapsules[dataId][researcher] = capsule;
-        if (emitEvent) {
-            emit CapsuleStored(dataId, researcher, capsule);
-        }
-
-        if (deposit.amount > 0) {
-            _releaseEscrowInternal(dataId, researcher);
-        }
     }
 
     function _requireActiveGrant(uint256 dataId, address researcher) internal view {
@@ -889,20 +1109,30 @@ contract GenomicsRegistry is ReentrancyGuard, Ownable, IGenomicsRegistryWorkerSy
         if (block.timestamp >= grant.expiresAt) revert AccessExpired();
     }
 
+    function _requireBuyerActiveAccess(uint256 dataId, address user) internal view {
+        if (escrowDisputed[dataId][user]) revert EscrowDisputedError();
+        EscrowDeposit storage dep = escrowDeposits[dataId][user];
+        if (dep.amount > 0 && (dep.refunded || !dep.capsuleDelivered)) revert AccessNotGranted();
+        _requireActiveGrant(dataId, user);
+    }
+
     /**
      * @notice Retrieve the re-encrypted capsule (only authorized researcher with active grant and active dataset)
+     * @param dataId Target dataset ID
+     * @return Serialized key capsule JSON string
      */
     function getTransformedCapsule(uint256 dataId) external view returns (string memory) {
         _requireValidDataId(dataId);
-        GenomicData storage data = genomicDataItems[dataId];
-        if (data.status != DataStatus.Active) revert DataNotActive();
-
-        _requireActiveGrant(dataId, msg.sender);
+        if (genomicDataItems[dataId].status != DataStatus.Active) revert DataNotActive();
+        _requireBuyerActiveAccess(dataId, msg.sender);
         return _buyerCapsules[dataId][msg.sender];
     }
 
     /**
      * @notice Data owner can view buyer's capsule
+     * @param dataId Target dataset ID
+     * @param researcher Target researcher address
+     * @return Serialized key capsule JSON string
      */
     function getCapsuleForBuyer(uint256 dataId, address researcher) external view onlyDataOwner(dataId) returns (string memory) {
         GenomicData storage data = genomicDataItems[dataId];
@@ -914,6 +1144,7 @@ contract GenomicsRegistry is ReentrancyGuard, Ownable, IGenomicsRegistryWorkerSy
      * @notice Public view for buyer's capsule with caller authorization
      * @param dataId Target dataset ID
      * @param researcher Target researcher address
+     * @return Serialized key capsule JSON string or empty string if unauthorized viewer
      */
     function buyerCapsules(uint256 dataId, address researcher) external view returns (string memory) {
         _requireValidDataId(dataId);
@@ -922,20 +1153,22 @@ contract GenomicsRegistry is ReentrancyGuard, Ownable, IGenomicsRegistryWorkerSy
         if (data.status != DataStatus.Active) return "";
 
         if (msg.sender == researcher) {
-            _requireActiveGrant(dataId, researcher);
+            _requireBuyerActiveAccess(dataId, researcher);
         } else {
+            EscrowDeposit storage dep = escrowDeposits[dataId][researcher];
+            bool escrowBlocked = (dep.amount > 0 && (dep.refunded || !dep.capsuleDelivered));
+            if (escrowDisputed[dataId][researcher] || escrowBlocked) return "";
             AccessGrant storage grant = accessGrants[dataId][researcher];
             if (!grant.isGranted || block.timestamp >= grant.expiresAt) return "";
         }
 
         address nftOwner = _safeOwnerOf(data.tokenId, data.currentOwner);
-        bool isAuthorizedWorker = authorizedCapsuleWorkers[dataId][msg.sender] &&
-            (capsuleWorkerAuthorizer[dataId][msg.sender] == nftOwner || capsuleWorkerAuthorizer[dataId][msg.sender] == address(0));
+        bool isWorker = isAuthorizedWorker(dataId, msg.sender);
 
         if (
             msg.sender == nftOwner ||
             msg.sender == capsuleDispatcher ||
-            isAuthorizedWorker ||
+            isWorker ||
             msg.sender == researcher
         ) {
             return _buyerCapsules[dataId][researcher];
@@ -945,6 +1178,9 @@ contract GenomicsRegistry is ReentrancyGuard, Ownable, IGenomicsRegistryWorkerSy
 
     /**
      * @notice Check whether an address has active permission to access a dataset
+     * @param dataId Target dataset ID
+     * @param researcher Address to verify
+     * @return True if active access is currently permitted
      */
     function hasActiveAccess(uint256 dataId, address researcher) public view returns (bool) {
         _requireValidDataId(dataId);
@@ -954,13 +1190,37 @@ contract GenomicsRegistry is ReentrancyGuard, Ownable, IGenomicsRegistryWorkerSy
         // The current NFT owner always has access to their own data
         if (_safeOwnerOf(data.tokenId, address(0)) == researcher) return true;
 
+        if (escrowDisputed[dataId][researcher]) return false;
+
         EscrowDeposit storage deposit = escrowDeposits[dataId][researcher];
-        if (deposit.amount > 0 && !deposit.released && !deposit.refunded) return false;
+        if (deposit.amount > 0 && (deposit.refunded || !deposit.capsuleDelivered)) return false;
 
         AccessGrant storage grant = accessGrants[dataId][researcher];
         if (grant.isGranted && block.timestamp < grant.expiresAt) return true;
 
         return false;
+    }
+
+    function _getDatasetDonor(uint256 dataId) internal view returns (address) {
+        _requireValidDataId(dataId);
+        if (zkVerifier == address(0)) return address(0);
+        return _safeOwnerOf(genomicDataItems[dataId].tokenId, genomicDataItems[dataId].currentOwner);
+    }
+
+    /**
+     * @notice Check whether a registered dataset's owner has proven possession of a specific genomic trait via ZK-SNARKs
+     * @param dataId Target genomic dataset identifier
+     * @param traitId Identifier of the targeted genetic trait
+     * @param variantCommitment Cryptographic commitment to the private genomic variant
+     * @return verified True if the data owner has proven possession of the specific trait
+     */
+    function verifyDatasetTraitPossession(
+        uint256 dataId,
+        bytes32 traitId,
+        bytes32 variantCommitment
+    ) external view returns (bool verified) {
+        address donor = _getDatasetDonor(dataId);
+        return donor != address(0) && IGenomicZkVerifier(zkVerifier).hasVerifiedTraitVariant(traitId, variantCommitment, donor);
     }
 
     /**
@@ -970,11 +1230,8 @@ contract GenomicsRegistry is ReentrancyGuard, Ownable, IGenomicsRegistryWorkerSy
      * @return verified True if the data owner has proven possession without revealing the raw genome
      */
     function verifyDatasetTraitPossession(uint256 dataId, bytes32 variantCommitment) external view returns (bool verified) {
-        _requireValidDataId(dataId);
-        if (zkVerifier == address(0)) return false;
-        address donor = _safeOwnerOf(genomicDataItems[dataId].tokenId, genomicDataItems[dataId].currentOwner);
-        if (donor == address(0)) return false;
-        return IGenomicZkVerifier(zkVerifier).hasVerifiedVariant(variantCommitment, donor);
+        address donor = _getDatasetDonor(dataId);
+        return donor != address(0) && IGenomicZkVerifier(zkVerifier).hasVerifiedVariant(variantCommitment, donor);
     }
 
     /**
@@ -1064,7 +1321,7 @@ contract GenomicsRegistry is ReentrancyGuard, Ownable, IGenomicsRegistryWorkerSy
         bytes32 metadataHash
     ) external onlyDataOwner(dataId) {
         if (summaryHash == bytes32(0) || metadataHash == bytes32(0)) revert InvalidDataHashOrCid();
-        if (uint256(summaryDataHashes[dataId]) > 0 || uint256(metadataHashes[dataId]) > 0) {
+        if (summaryDataHashes[dataId] != bytes32(0) || metadataHashes[dataId] != bytes32(0)) {
             revert ArtifactHashesAlreadyAnchored();
         }
         summaryDataHashes[dataId] = summaryHash;
@@ -1130,18 +1387,19 @@ contract GenomicsRegistry is ReentrancyGuard, Ownable, IGenomicsRegistryWorkerSy
         _requireValidDataId(dataId);
         GenomicData storage data = genomicDataItems[dataId];
         if (data.status != DataStatus.Active) revert DataNotActive();
+        address seller = _safeOwnerOf(data.tokenId, data.currentOwner);
+        if (msg.sender == seller) revert SelfAccessNotAllowed();
         if (!hasActiveAccess(dataId, msg.sender)) {
-            _requireActiveGrant(dataId, msg.sender);
+            _requireBuyerActiveAccess(dataId, msg.sender);
             revert AccessNotGranted();
         }
         if (studyCommitment == bytes32(0)) revert InvalidStudyCommitment();
         if (studyReuseReceipts[dataId][studyCommitment]) revert StudyReuseAlreadyRecorded();
 
         uint256 reuseFee = quoteReuseFee(dataId);
-        address seller = _safeOwnerOf(data.tokenId, data.currentOwner);
         data.currentOwner = seller;
         studyReuseReceipts[dataId][studyCommitment] = true;
-        datasetReuseCount[dataId] += 1;
+        ++datasetReuseCount[dataId];
 
         (, uint256 royaltyAmount) = _settleRoyaltyPayment(
             dataId,
@@ -1171,28 +1429,26 @@ contract GenomicsRegistry is ReentrancyGuard, Ownable, IGenomicsRegistryWorkerSy
         uint256 totalPrice
     ) internal returns (uint256 sellerProceeds, uint256 royaltyAmount) {
         (address royaltyReceiver, uint256 rawRoyalty) = genomicNFT.royaltyInfo(tokenId, totalPrice);
-        royaltyAmount = rawRoyalty;
-        sellerProceeds = totalPrice;
-        if (royaltyAmount > 0 && royaltyReceiver != address(0)) {
-            sellerProceeds = totalPrice - royaltyAmount;
+        if (royaltyReceiver == address(0) || totalPrice < 1) {
+            _transferToken(from, seller, totalPrice);
+            return (totalPrice, 0);
         }
-        if (royaltyReceiver == seller) {
-            if (from == address(this)) {
-                _transferToken(from, seller, totalPrice);
-            } else if (totalPrice > 0) {
-                paymentToken.safeTransferFrom(msg.sender, seller, totalPrice);
+        if (rawRoyalty < 1 && royaltyReceiver != seller) {
+            (address checkReceiver, uint256 bpsCheck) = genomicNFT.royaltyInfo(tokenId, 10_000);
+            if (checkReceiver != address(0) && bpsCheck > 0) {
+                rawRoyalty = 1;
             }
-            if (royaltyAmount > 0) {
-                emit RoyaltyPaid(dataId, seller, royaltyAmount);
-            }
+        }
+        royaltyAmount = rawRoyalty > totalPrice ? totalPrice : rawRoyalty;
+        sellerProceeds = totalPrice - royaltyAmount;
+        if (royaltyReceiver == seller || royaltyAmount == 0) {
+            _transferToken(from, seller, totalPrice);
         } else {
-            if (royaltyAmount > 0 && royaltyReceiver != address(0)) {
-                _transferToken(from, royaltyReceiver, royaltyAmount);
-                emit RoyaltyPaid(dataId, royaltyReceiver, royaltyAmount);
-            }
-            if (sellerProceeds > 0) {
-                _transferToken(from, seller, sellerProceeds);
-            }
+            _transferToken(from, royaltyReceiver, royaltyAmount);
+            _transferToken(from, seller, sellerProceeds);
+        }
+        if (royaltyAmount > 0) {
+            emit RoyaltyPaid(dataId, royaltyReceiver, royaltyAmount);
         }
     }
 
@@ -1225,15 +1481,28 @@ contract GenomicsRegistry is ReentrancyGuard, Ownable, IGenomicsRegistryWorkerSy
 
     function _isValidCid(string calldata cid) internal pure returns (bool) {
         bytes calldata b = bytes(cid);
-        if (b.length < 14 || b.length > 128) return false;
+        uint256 len = b.length;
+        if (len < 14 || len > 128) return false;
         if (b[0] == "Q" && b[1] == "m") {
-            if (b[2] == "0") return false;
-            // Reject explicitly crafted fake test vectors (e.g. QmGenoFake...) without choking valid Base58 prefixes
-            if (b.length >= 10 && keccak256(b[2:10]) == keccak256("GenoFake")) return false;
+            if (bytes4(b[2:6]) == "Geno") return false;
+            for (uint256 i = 2; i < len; ) {
+                bytes1 c = b[i];
+                if (
+                    !((c >= "1" && c <= "9") ||
+                        (c >= "A" && c <= "Z" && c != "I" && c != "O") ||
+                        (c >= "a" && c <= "z" && c != "l"))
+                ) return false;
+                unchecked { ++i; }
+            }
             return true;
         }
-        if (b[0] == "b" && b[1] == "a" && b[2] == "f" && b[3] == "y") {
-            return b.length >= 32;
+        if (len >= 50 && bytes4(b[0:4]) == "bafy") {
+            for (uint256 i = 4; i < len; ) {
+                bytes1 c = b[i];
+                if (!((c >= "a" && c <= "z") || (c >= "2" && c <= "7"))) return false;
+                unchecked { ++i; }
+            }
+            return true;
         }
         return false;
     }
@@ -1242,27 +1511,106 @@ contract GenomicsRegistry is ReentrancyGuard, Ownable, IGenomicsRegistryWorkerSy
         bytes calldata b = bytes(capsule);
         uint256 len = b.length;
         if (len < 528 || len > 8192) return false;
-        if (b[0] != "{" || b[len - 1] != "}") return false;
 
-        uint256 hexRun = 0;
-        for (uint256 i = 1; i < len - 1; ) {
-            bytes1 ch = b[i];
-            if (
-                (ch >= 0x30 && ch <= 0x39) ||
-                (ch >= 0x41 && ch <= 0x46) ||
-                (ch >= 0x61 && ch <= 0x66)
-            ) {
-                unchecked {
-                    ++hexRun;
+        uint8 st = 8; // 8=init, 0=key quote, 1=in key, 2=colon, 3=val, 4=in str, 5=in num, 6=comma/end, 7=closed
+        uint256 spanStart = 0;
+        bool esc = false;
+        bool curKC = false;
+        bool hasKC = false;
+        bool numDigit = false;
+
+        for (uint256 i = 0; i < len; ) {
+            bytes1 c = b[i];
+            bool ws = (c == 0x20 || c == 0x09 || c == 0x0a || c == 0x0d);
+            if (st == 8) {
+                if (!ws) {
+                    if (c != "{") return false;
+                    st = 0;
                 }
-                if (hexRun >= 512) return true;
-            } else {
-                hexRun = 0;
+            } else if (st == 0) {
+                if (!ws) {
+                    if (c != 0x22) return false;
+                    spanStart = i + 1;
+                    esc = false;
+                    st = 1;
+                }
+            } else if (st == 1) {
+                if (c < 0x20) return false;
+                if (esc) {
+                    esc = false;
+                } else if (c == 0x5c) {
+                    esc = true;
+                } else if (c == 0x22) {
+                    if (i == spanStart) return false;
+                    curKC = keccak256(b[spanStart:i]) == keccak256("keyCipher");
+                    st = 2;
+                }
+            } else if (st == 2) {
+                if (!ws) {
+                    if (c != ":") return false;
+                    st = 3;
+                }
+            } else if (st == 3) {
+                if (!ws) {
+                    if (c == 0x22) {
+                        spanStart = i + 1;
+                        esc = false;
+                        st = 4;
+                    } else if (curKC) {
+                        return false;
+                    } else if ((c >= "0" && c <= "9") || c == "-") {
+                        numDigit = (c >= "0" && c <= "9");
+                        st = 5;
+                    } else if (i + 4 <= len && (bytes4(b[i:i + 4]) == "true" || bytes4(b[i:i + 4]) == "null")) {
+                        unchecked { i += 3; }
+                        st = 6;
+                    } else if (i + 5 <= len && bytes5(b[i:i + 5]) == "false") {
+                        unchecked { i += 4; }
+                        st = 6;
+                    } else {
+                        return false;
+                    }
+                }
+            } else if (st == 4) {
+                if (c < 0x20) return false;
+                if (curKC) {
+                    if (c == 0x22) {
+                        uint256 hLen = i - spanStart;
+                        if (hasKC || hLen < 512 || (hLen & 1) != 0) return false;
+                        hasKC = true;
+                        st = 6;
+                    } else {
+                        bytes1 ch = c | 0x20;
+                        if (!((c >= "0" && c <= "9") || (ch >= "a" && ch <= "f"))) return false;
+                    }
+                } else if (esc) {
+                    esc = false;
+                } else if (c == 0x5c) {
+                    esc = true;
+                } else if (c == 0x22) {
+                    st = 6;
+                }
+            } else if (st == 5) {
+                if (c >= "0" && c <= "9") {
+                    numDigit = true;
+                } else if (c != "." && c != "e" && c != "E" && c != "+" && c != "-") {
+                    if (!numDigit) return false;
+                    if (ws) st = 6;
+                    else if (c == ",") st = 0;
+                    else if (c == "}") st = 7;
+                    else return false;
+                }
+            } else if (st == 6) {
+                if (!ws) {
+                    if (c == ",") st = 0;
+                    else if (c == "}") st = 7;
+                    else return false;
+                }
+            } else if (!ws) {
+                return false;
             }
-            unchecked {
-                ++i;
-            }
+            unchecked { ++i; }
         }
-        return false;
+        return hasKC && st == 7 && !esc;
     }
 }

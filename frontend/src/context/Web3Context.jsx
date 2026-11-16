@@ -205,13 +205,50 @@ export function Web3Provider({ children }) {
 
     if (typeof window !== "undefined" && window.ethereum) {
       try {
-        const chainIdHex = await window.ethereum.request({ method: "eth_chainId" });
-        const isLocalChain =
+        let chainIdHex = await window.ethereum.request({ method: "eth_chainId" });
+        let isLocalChain =
           chainIdHex === "0x7a69" ||
           chainIdHex === "0x539" ||
           Number(chainIdHex) === 31337;
         if (!isLocalChain) {
-          return await connectLocalHardhat();
+          try {
+            await window.ethereum.request({
+              method: "wallet_switchEthereumChain",
+              params: [{ chainId: "0x7a69" }]
+            });
+            chainIdHex = await window.ethereum.request({ method: "eth_chainId" });
+            isLocalChain =
+              chainIdHex === "0x7a69" ||
+              chainIdHex === "0x539" ||
+              Number(chainIdHex) === 31337;
+          } catch (switchErr) {
+            if (switchErr?.code === 4902) {
+              try {
+                await window.ethereum.request({
+                  method: "wallet_addEthereumChain",
+                  params: [
+                    {
+                      chainId: "0x7a69",
+                      chainName: "Hardhat Localhost (31337)",
+                      nativeCurrency: { name: "ETH", symbol: "ETH", decimals: 18 },
+                      rpcUrls: ["http://127.0.0.1:8545"]
+                    }
+                  ]
+                });
+                isLocalChain = true;
+              } catch {
+                showToast("Please add and switch to Hardhat Localhost (31337) in MetaMask.", "error");
+                throw new Error("Unsupported network. Please switch to Hardhat Localhost (31337).");
+              }
+            } else {
+              showToast("Please switch MetaMask network to Hardhat Localhost (31337).", "error");
+              throw new Error("Unsupported network. Please switch to Hardhat Localhost (31337).");
+            }
+          }
+        }
+        if (!isLocalChain) {
+          showToast("MetaMask is on an unsupported chain. Please switch to Hardhat Localhost (31337).", "error");
+          return null;
         }
         const p = new ethers.BrowserProvider(window.ethereum);
         const accounts = await p.send("eth_requestAccounts", []);
@@ -231,12 +268,9 @@ export function Web3Provider({ children }) {
           showToast(`${tRef.current("walletConnectedMsg")}: ${userAddr.substring(0, 6)}...${userAddr.substring(userAddr.length - 4)}`);
           return userAddr;
         }
-      } catch {
-        try {
-          return await connectLocalHardhat();
-        } catch (err2) {
-          showToast("Connection failed: " + err2.message, "error");
-        }
+      } catch (err) {
+        showToast("MetaMask connection notice: " + (err.shortMessage || err.message), "error");
+        return null;
       }
     } else {
       try {

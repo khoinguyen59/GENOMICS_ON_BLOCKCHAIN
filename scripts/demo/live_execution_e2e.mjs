@@ -31,7 +31,7 @@ import { computeIpfsCidV0 } from "../../ipfs/pinata_uploader.js";
 
 async function main() {
   console.log("================================================================================");
-  console.log("🧬 GENOCHAIN LIVE ON-CHAIN EXECUTION & END-TO-END CRYPTOGRAPHIC TRUTH ENGINE");
+  console.log("[GENOCHAIN] LIVE ON-CHAIN EXECUTION & END-TO-END CRYPTOGRAPHIC TRUTH ENGINE");
   console.log("   Target Course: IS355 - Công nghệ Blockchain (Khoa HTTT - UIT)");
   console.log("   Student: Nguyễn Trọng Khôi (23520783) | Instructor: ThS. Hà Lê Hoài Trung");
   console.log("================================================================================");

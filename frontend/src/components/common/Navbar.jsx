@@ -196,7 +196,7 @@ export default function Navbar() {
         <button
           id="navbar-theme-toggle"
           type="button"
-          className="os2-lang-mini-btn hide-sm"
+          className="os2-lang-mini-btn"
           title={t("themeToggleTitle")}
           aria-label={t("themeToggleTitle")}
           onClick={() => setTheme(theme === "light" ? "dark" : "light")}

@@ -1,7 +1,10 @@
 import asyncio
 import json
 import os
+import subprocess
 import sys
+import time
+import urllib.request
 from pathlib import Path
 from playwright.async_api import async_playwright
 
@@ -10,9 +13,34 @@ if hasattr(sys.stdout, "reconfigure"):
 
 AXE_PATH = os.path.join(os.getcwd(), "research_repos", "axe-core", "axe.min.js")
 BASE_URL = "http://localhost:3000"
-THEME_CHECKS_DIR = Path(
-    r"C:\Users\Nguyen Trong Khoi\.gemini\antigravity\brain\66a73df6-10e0-40f8-9a2e-ea91648f0426\scratch\theme_checks"
-)
+THEME_CHECKS_DIR = Path(__file__).resolve().parents[2] / "docs" / "reports" / "theme_checks"
+
+
+def ensure_server():
+    try:
+        urllib.request.urlopen("http://localhost:3000", timeout=1)
+        return None
+    except Exception:
+        print("[*] Starting Vite dev server on port 3000...")
+        frontend_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "frontend")
+        if not os.path.exists(frontend_dir):
+            frontend_dir = os.path.join(os.getcwd(), "frontend")
+        proc = subprocess.Popen(
+            "cmd /c npm run dev",
+            cwd=frontend_dir,
+            shell=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+        for _ in range(30):
+            time.sleep(1)
+            try:
+                urllib.request.urlopen("http://localhost:3000", timeout=1)
+                print("[*] Vite dev server is ready!")
+                return proc
+            except Exception:
+                pass
+        return proc
 
 
 async def ensure_theme(page, target_theme: str):
@@ -87,9 +115,85 @@ async def audit_scenario(page, axe_js: str, scenario_tag: str, save_shot: bool):
             overflowPx: document.documentElement.scrollWidth - document.documentElement.clientWidth
         })"""
     )
+    computed_contrast_failures = await page.evaluate(
+        """() => {
+            const parseRgba = (str) => {
+                const m = String(str || '').match(/rgba?\\((\\d+(?:\\.\\d+)?),\\s*(\\d+(?:\\.\\d+)?),\\s*(\\d+(?:\\.\\d+)?)(?:,\\s*(\\d+(?:\\.\\d+)?))?\\)/);
+                if (!m) return null;
+                return { r: +m[1], g: +m[2], b: +m[3], a: m[4] === undefined ? 1 : +m[4] };
+            };
+            const blend = (fg, bg) => {
+                const a = fg.a;
+                return {
+                    r: fg.r * a + bg.r * (1 - a),
+                    g: fg.g * a + bg.g * (1 - a),
+                    b: fg.b * a + bg.b * (1 - a),
+                    a: 1
+                };
+            };
+            const lum = (c) => {
+                const ch = [c.r, c.g, c.b].map(v => {
+                    const s = v / 255;
+                    return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+                });
+                return 0.2126 * ch[0] + 0.7152 * ch[1] + 0.0722 * ch[2];
+            };
+            const getBg = (el) => {
+                const layers = [];
+                let cur = el;
+                while (cur && cur.nodeType === 1) {
+                    const st = getComputedStyle(cur);
+                    if (st.backgroundImage && st.backgroundImage.includes('gradient')) return null;
+                    const bg = parseRgba(st.backgroundColor);
+                    if (bg && bg.a > 0) layers.push(bg);
+                    if (bg && bg.a >= 0.999) break;
+                    cur = cur.parentElement;
+                }
+                const rootBg = parseRgba(getComputedStyle(document.body).backgroundColor) || { r: 255, g: 255, b: 255, a: 1 };
+                let acc = rootBg.a > 0.99 ? rootBg : { r: 255, g: 255, b: 255, a: 1 };
+                for (let i = layers.length - 1; i >= 0; i--) acc = blend(layers[i], acc);
+                return acc;
+            };
+            const failures = [];
+            for (const el of document.querySelectorAll('button:not(:disabled), .status-badge-chip, .btn-terminal:not(:disabled)')) {
+                if (el.closest('.os2-featured-strip-card') || el.classList.contains('os2-brand-btn')) continue;
+                const rect = el.getBoundingClientRect();
+                if (rect.width <= 0 || rect.height <= 0) continue;
+                const st = getComputedStyle(el);
+                if (st.visibility === 'hidden' || parseFloat(st.opacity) < 0.9) continue;
+                if (st.webkitTextFillColor === 'rgba(0, 0, 0, 0)') continue;
+                const txt = (el.innerText || '').trim();
+                if (!txt) continue;
+                const bg = getBg(el);
+                const fgRaw = parseRgba(st.color);
+                if (!bg || !fgRaw || fgRaw.a === 0) continue;
+                const fg = fgRaw.a < 1 ? blend(fgRaw, bg) : fgRaw;
+                const l1 = lum(fg), l2 = lum(bg);
+                const ratio = (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
+                const px = parseFloat(st.fontSize) || 14;
+                const bold = (parseInt(st.fontWeight, 10) || 400) >= 700;
+                const minRatio = (px >= 24 || (bold && px >= 18.67)) ? 3.0 : 4.5;
+                if (ratio < minRatio) {
+                    failures.push({ tag: el.tagName, id: el.id || '', cls: String(el.className || '').slice(0, 60), text: txt.slice(0, 40), ratio: Number(ratio.toFixed(2)), minRatio });
+                }
+            }
+            return failures;
+        }"""
+    )
 
     violations = results.get("violations", [])
-    blocking = [v for v in violations if v.get("impact") in ("critical", "serious")]
+    # Task 4: verify ALL axe-core impacts (critical, serious, moderate, minor) without suppression
+    blocking = violations
+    if computed_contrast_failures:
+        blocking = list(violations) + [{
+            "id": "computed-color-contrast",
+            "impact": "serious",
+            "description": f"{len(computed_contrast_failures)} visible interactive/badge element(s) below WCAG contrast minimum",
+            "nodes": [
+                {"target": [f"#{f['id']}" if f["id"] else f["cls"]], "failureSummary": f"{f['text']!r} ratio={f['ratio']} < {f['minRatio']}"}
+                for f in computed_contrast_failures[:4]
+            ],
+        }]
     minor_or_mod = [v for v in violations if v.get("impact") not in ("critical", "serious")]
 
     if save_shot:
@@ -98,7 +202,7 @@ async def audit_scenario(page, axe_js: str, scenario_tag: str, save_shot: bool):
 
     print(
         f"  [{scenario_tag}] passes={len(results.get('passes', []))}, "
-        f"blocking(crit/ser)={len(blocking)}, minor/mod={len(minor_or_mod)}, "
+        f"blocking(all_impacts)={len(blocking)}, minor/mod={len(minor_or_mod)}, "
         f"overflow={overflow_info['overflowPx']}px"
     )
     for v in blocking:
@@ -182,6 +286,100 @@ async def run_audit():
             if res["overflow_px"] > 0:
                 overflow_failures += 1
 
+        # Audit AssetDetailModal in Desktop Light VI
+        await ensure_theme(page, "light")
+        await ensure_lang(page, "vi")
+        await switch_view(page, "researcher")
+        inspect_btn = page.locator(".opensea-nft-card, .btn-terminal-ghost").first
+        if await inspect_btn.count() > 0:
+            await inspect_btn.click()
+            await page.wait_for_selector(".opensea-modal-container", timeout=5000)
+            await page.wait_for_timeout(450)
+            tag = "desktop_light_vi_modal"
+            res = await audit_scenario(page, axe_js, tag, True)
+            all_scenarios.append(res)
+            blocking_failures += res["blocking_count"]
+            if res["overflow_px"] > 0:
+                overflow_failures += 1
+            # Test Escape dismissal
+            await page.keyboard.press("Escape")
+            await page.wait_for_timeout(350)
+
+        # Audit IpfsSettingsModal in Desktop Light & Dark
+        for theme in ("light", "dark"):
+            await ensure_theme(page, theme)
+            ipfs_btn = page.locator("#footer-ipfs-settings-btn, #admin-open-ipfs-btn, button:has-text('IPFS')").first
+            if await ipfs_btn.count() > 0:
+                await ipfs_btn.click()
+                await page.wait_for_selector(".terminal-modal-window", timeout=5000)
+                await page.wait_for_timeout(350)
+                tag = f"desktop_{theme}_ipfs_modal"
+                res = await audit_scenario(page, axe_js, tag, True)
+                all_scenarios.append(res)
+                blocking_failures += res["blocking_count"]
+                if res["overflow_px"] > 0:
+                    overflow_failures += 1
+                await page.keyboard.press("Escape")
+                await page.wait_for_timeout(300)
+
+        # Audit Table & Activity Views in Researcher Portal
+        await ensure_theme(page, "light")
+        await ensure_lang(page, "vi")
+        await switch_view(page, "researcher")
+
+        # Table view
+        table_btn = page.locator("#btn-view-table")
+        if await table_btn.count() > 0:
+            await table_btn.click()
+            await page.wait_for_timeout(350)
+            tag = "desktop_light_vi_table_view"
+            res = await audit_scenario(page, axe_js, tag, True)
+            all_scenarios.append(res)
+            blocking_failures += res["blocking_count"]
+            if res["overflow_px"] > 0:
+                overflow_failures += 1
+            grid_btn = page.locator("#btn-view-grid")
+            if await grid_btn.count() > 0:
+                await grid_btn.click()
+                await page.wait_for_timeout(250)
+
+        # Activity view & LicensedDatasetsView across Light and Dark
+        for theme in ("light", "dark"):
+            await ensure_theme(page, theme)
+            await ensure_lang(page, "vi")
+            await switch_view(page, "researcher")
+
+            activity_tab = page.locator("#os2-tab-activity-btn")
+            if await activity_tab.count() > 0:
+                await activity_tab.click()
+                await page.wait_for_timeout(350)
+                tag = f"desktop_{theme}_vi_activity_view"
+                res = await audit_scenario(page, axe_js, tag, theme == "light")
+                all_scenarios.append(res)
+                blocking_failures += res["blocking_count"]
+                if res["overflow_px"] > 0:
+                    overflow_failures += 1
+
+            licensed_tab = page.locator("#btn-tab-licensed")
+            if await licensed_tab.count() > 0:
+                await licensed_tab.click()
+                await page.wait_for_timeout(350)
+                tag = f"desktop_{theme}_vi_licensed_view"
+                res = await audit_scenario(page, axe_js, tag, theme == "light")
+                all_scenarios.append(res)
+                blocking_failures += res["blocking_count"]
+                if res["overflow_px"] > 0:
+                    overflow_failures += 1
+                back_catalog = page.locator(".portal-subnav-bar .subnav-tab-item").first
+                if await back_catalog.count() > 0:
+                    await back_catalog.click()
+                    await page.wait_for_timeout(250)
+
+            items_tab = page.locator(".collection-subtabs-group button").first
+            if await items_tab.count() > 0:
+                await items_tab.click()
+                await page.wait_for_timeout(250)
+
         # Measure Top Bar Diagnostics in Desktop Light + VI
         await ensure_theme(page, "light")
         await ensure_lang(page, "vi")
@@ -213,6 +411,34 @@ async def run_audit():
         )
         await ctx_desk.close()
 
+        # 1b. Tablet / Small Desktop Viewport (1024x768) matrix
+        ctx_tab = await browser.new_context(viewport={"width": 1024, "height": 768})
+        tab_page = await ctx_tab.new_page()
+        await tab_page.goto(BASE_URL, wait_until="networkidle")
+        await tab_page.wait_for_selector("#navbar-role-admin", timeout=15000)
+        await tab_page.click("#navbar-role-admin")
+        await tab_page.wait_for_selector("#admin-switch-acct-0", timeout=10000)
+        await tab_page.click("#admin-switch-acct-0")
+        await tab_page.wait_for_timeout(1000)
+
+        tablet_matrix = [
+            ("light", "vi", "researcher", True),
+            ("light", "vi", "admin", True),
+            ("dark", "vi", "researcher", False),
+            ("dark", "vi", "admin", False),
+        ]
+        for theme, lang, view, save_shot in tablet_matrix:
+            await ensure_theme(tab_page, theme)
+            await ensure_lang(tab_page, lang)
+            await switch_view(tab_page, view)
+            tag = f"tablet_1024x768_{theme}_{lang}_{view}"
+            res = await audit_scenario(tab_page, axe_js, tag, save_shot)
+            all_scenarios.append(res)
+            blocking_failures += res["blocking_count"]
+            if res["overflow_px"] > 0:
+                overflow_failures += 1
+        await ctx_tab.close()
+
         # 2. Mobile (390x844) matrix
         ctx_mob = await browser.new_context(viewport={"width": 390, "height": 844})
         mob_page = await ctx_mob.new_page()
@@ -225,6 +451,8 @@ async def run_audit():
 
         mobile_matrix = [
             ("light", "vi", "researcher", True),
+            ("light", "vi", "provider_mint", True),
+            ("light", "vi", "provider_vault", True),
             ("light", "vi", "admin", False),
             ("dark", "vi", "researcher", False),
             ("dark", "vi", "admin", True),
@@ -239,6 +467,30 @@ async def run_audit():
             blocking_failures += res["blocking_count"]
             if res["overflow_px"] > 0:
                 overflow_failures += 1
+
+        # Audit AssetDetailModal in Mobile Light VI
+        await ensure_theme(mob_page, "light")
+        await ensure_lang(mob_page, "vi")
+        await switch_view(mob_page, "researcher")
+        mob_inspect = mob_page.locator(".opensea-nft-card, .btn-terminal-ghost, .btn-inspect").first
+        if await mob_inspect.count() > 0:
+            await mob_inspect.click()
+            await mob_page.wait_for_selector(".opensea-modal-container", timeout=5000)
+            await mob_page.wait_for_timeout(450)
+            tag = "mobile_light_vi_modal"
+            res = await audit_scenario(mob_page, axe_js, tag, True)
+            all_scenarios.append(res)
+            blocking_failures += res["blocking_count"]
+            if res["overflow_px"] > 0:
+                overflow_failures += 1
+            # Test close button dismissal
+            close_btn = mob_page.locator(".modal-close-btn").first
+            if await close_btn.count() > 0:
+                await close_btn.click()
+                await mob_page.wait_for_timeout(350)
+            else:
+                await mob_page.keyboard.press("Escape")
+                await mob_page.wait_for_timeout(350)
         await ctx_mob.close()
         await browser.close()
 
@@ -267,5 +519,18 @@ async def run_audit():
         sys.exit(1)
 
 
+def main():
+    proc = ensure_server()
+    try:
+        asyncio.run(run_audit())
+    finally:
+        if proc:
+            print("[*] Cleaning up Vite dev server process...")
+            try:
+                subprocess.run(f"taskkill /F /T /PID {proc.pid}", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            except Exception:
+                pass
+
+
 if __name__ == "__main__":
-    asyncio.run(run_audit())
+    main()

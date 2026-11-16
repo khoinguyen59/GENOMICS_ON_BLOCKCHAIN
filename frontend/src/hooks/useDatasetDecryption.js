@@ -49,7 +49,8 @@ export function useDatasetDecryption({
               researcherKeyPair: activeKeyPair
             });
           } catch (e) {
-            console.warn("PDF summary report decryption notice:", e);
+            console.warn("PDF summary report decryption warning:", e);
+            showToast(`PDF summary report notice: ${e.message}`, "info");
           }
         }
 
@@ -57,9 +58,13 @@ export function useDatasetDecryption({
         if (ds.metadataCid) {
           showToast("3/4: Fetching GA4GH Phenopacket v2 JSON metadata...", "info");
           try {
-            phenopacketJson = await fetchPhenopacketMetadata({ metadataCid: ds.metadataCid });
+            phenopacketJson = await fetchPhenopacketMetadata({
+              metadataCid: ds.metadataCid,
+              expectedMetadataHash: ds.metadataHash
+            });
           } catch (e) {
-            console.warn("Phenopacket metadata fetch notice:", e);
+            console.warn("Phenopacket metadata fetch warning:", e);
+            showToast(`Phenopacket metadata notice: ${e.message}`, "info");
           }
         }
 

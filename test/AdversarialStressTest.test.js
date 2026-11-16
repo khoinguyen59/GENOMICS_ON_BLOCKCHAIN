@@ -487,9 +487,9 @@ describe("Adversarial Stress Testing & Edge Cases Audit (Genomics on Blockchain)
       const rawHash = ethers.keccak256(ethers.toUtf8Bytes("TestWorkerDedup"));
       await registry.connect(researcher1).registerGenomicData(
         rawHash,
-        "QmTestRawCID11111111111111111111111111111111111",
-        "QmTestSumCID11111111111111111111111111111111111",
-        "QmTestMetaCID1111111111111111111111111111111111",
+        "QmTestRawC1d11111111111111111111111111111111111",
+        "QmTestSumC1d11111111111111111111111111111111111",
+        "QmTestMetaC1d1111111111111111111111111111111111",
         "ipfs://test",
         ethers.parseEther("10"),
         86400,

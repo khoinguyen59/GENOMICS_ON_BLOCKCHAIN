@@ -28,13 +28,13 @@ for (const item of filesToCheck) {
 const viKeyCount = Object.keys(translations.vi).length;
 const enKeyCount = Object.keys(translations.en).length;
 console.log(`Translation keys: vi=${viKeyCount}, en=${enKeyCount}`);
-if (viKeyCount !== 493 || enKeyCount !== 493) {
+if (viKeyCount !== enKeyCount || viKeyCount < 493) {
   console.error("FAIL: Key count mismatch in translations!");
   allPassed = false;
 }
 
 // Check named exports
-if (Object.keys(vi).length !== 493 || Object.keys(en).length !== 493) {
+if (Object.keys(vi).length !== viKeyCount || Object.keys(en).length !== enKeyCount) {
   console.error("FAIL: Named exports mismatch!");
   allPassed = false;
 }

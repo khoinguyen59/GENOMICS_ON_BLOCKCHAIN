@@ -17,6 +17,17 @@ export default function IpfsSettingsModal() {
   } = useWeb3();
   const { t } = useLanguage();
 
+  React.useEffect(() => {
+    if (!showIpfsSettings) return;
+    const handleKeyDown = (e) => {
+      if (e.key === "Escape") {
+        setShowIpfsSettings(false);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [showIpfsSettings, setShowIpfsSettings]);
+
   if (!showIpfsSettings) return null;
 
   const handleSave = () => {
@@ -27,18 +38,32 @@ export default function IpfsSettingsModal() {
 
   return (
     <div className="terminal-modal-backdrop" onClick={() => setShowIpfsSettings(false)}>
-      <div className="terminal-modal-window" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-header-bar">
+      <div
+        className="terminal-modal-window"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="ipfs-modal-title"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="modal-header-bar" role="region" aria-label={t("ipfsModalTitle") || "IPFS Node Settings"}>
           <div className="modal-title-left">
             <ServerDriveIcon size={16} color="var(--accent-cyan)" />
-            <span>{t("ipfsModalTitle")}</span>
+            <h2 id="ipfs-modal-title" style={{ fontSize: "14px", fontWeight: 700, margin: 0, padding: 0, display: "inline" }}>
+              {t("ipfsModalTitle")}
+            </h2>
           </div>
-          <button className="modal-close-btn" onClick={() => setShowIpfsSettings(false)} title={t("close")}>
+          <button
+            type="button"
+            className="modal-close-btn"
+            onClick={() => setShowIpfsSettings(false)}
+            title={t("close")}
+            aria-label={t("close") || "Close"}
+          >
             <CloseCrossIcon size={16} color="#94a3b8" />
           </button>
         </div>
 
-        <div className="modal-body">
+        <div className="modal-body" role="region" aria-label={t("ipfsNodeConfig") || "IPFS Node Configuration"}>
           <div className="form-field">
             <label htmlFor="input-pinata-jwt" className="field-label">{t("ipfsPinataLabel")}</label>
             <input
@@ -66,11 +91,11 @@ export default function IpfsSettingsModal() {
           </div>
         </div>
 
-        <div className="modal-footer-bar">
-          <button className="btn-terminal btn-terminal-ghost" onClick={() => setShowIpfsSettings(false)}>
+        <div className="modal-footer-bar" role="region" aria-label={t("savePreferences") || "IPFS Settings Actions"}>
+          <button type="button" className="btn-terminal btn-terminal-ghost" onClick={() => setShowIpfsSettings(false)}>
             {t("cancel")}
           </button>
-          <button className="btn-terminal btn-terminal-primary" onClick={handleSave}>
+          <button type="button" className="btn-terminal btn-terminal-primary" onClick={handleSave}>
             {t("savePreferences")}
           </button>
         </div>

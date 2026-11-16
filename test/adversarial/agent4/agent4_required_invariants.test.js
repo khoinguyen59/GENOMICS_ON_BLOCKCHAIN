@@ -101,7 +101,8 @@ describe("AGENT4 / PART2 — assertions of the required security invariants (fai
   }
 
   async function register(seed, reg = registry, who = owner, price = PRICE) {
-    const cid = `QmAgent4P2${seed}00000000000000000000000000000000`;
+    const cleanSeed = String(seed).replace(/0/g, "x").replace(/O/g, "o").replace(/I/g, "i").replace(/l/g, "1").replace(/[^1-9A-HJ-NP-Za-km-z]/g, "");
+    const cid = `QmAgent4P2${cleanSeed}11111111111111111111111111111111`;
     const hash = ethers.keccak256(ethers.toUtf8Bytes(`agent4-p2-${seed}`));
     await (await reg.connect(who).registerGenomicData(hash, cid, cid, cid, `ipfs://${seed}`, price, DURATION, 1000)).wait();
     return await reg.dataCount();
@@ -239,7 +240,7 @@ describe("AGENT4 / PART2 — assertions of the required security invariants (fai
 
   // ==================================================================
   describe("DEF4-04 / 05 / 06 / 07 — Task 2: INV-16 lifecycle symmetry & buyer protection", function () {
-    it("DEF4-04: after emitTransformedCapsule the buyer must be able to read the capsule from CHAIN STATE (or keep the refund right)", async function () {
+    it("DEF4-04: after emitTransformedCapsule the buyer must be able to read the capsule from CHAIN STATE while escrow remains fair-locked until confirmation", async function () {
       const dataId = await register("event-only");
       await (await registry.connect(buyerA).grantAccessWithEscrow(dataId, 2n * 86400n)).wait();
       const capsule = JSON.stringify({ version: "GNC1", keyCipher: "ab".repeat(512) });
@@ -250,13 +251,16 @@ describe("AGENT4 / PART2 — assertions of the required security invariants (fai
       const onChain = await registry.connect(buyerA).getTransformedCapsule.staticCall(dataId);
       const ownerView = await registry.getCapsuleForBuyer.staticCall(dataId, buyerA.address);
       console.log(
-        `AGENT4/DEF4-04 sellerPaid=${(seller1 - seller0) / E18}GENO getTransformedCapsule="${onChain}"` +
+        `AGENT4/DEF4-04 sellerPaidPreConfirm=${(seller1 - seller0) / E18}GENO getTransformedCapsule="${onChain}"` +
           ` getCapsuleForBuyer="${ownerView}"`
       );
-      // money already left the escrow, so the buyer's only protection is on-chain availability:
-      expect(seller1 - seller0).to.equal(PRICE, "escrow was already released");
-      expect(onChain, "CRITICAL: escrow paid out but the capsule is NOT in chain state").to.equal(capsule);
+      expect(seller1 - seller0).to.equal(0n, "escrow must remain locked until buyer confirmation");
+      expect(onChain, "CRITICAL: capsule must be in chain state before confirmation").to.equal(capsule);
       expect(ownerView).to.equal(capsule);
+
+      await (await registry.connect(buyerA).confirmCapsuleAndReleaseEscrow(dataId)).wait();
+      const seller2 = await token.balanceOf(owner.address);
+      expect(seller2 - seller0).to.equal(PRICE, "escrow must settle to seller upon buyer confirmation");
     });
 
     it("DEF4-05: a buyer who paid through grantAccessWithEscrow and never received a capsule must recover 100% of the payment", async function () {

@@ -7,7 +7,9 @@ import {
   VerifiedBadgeIcon,
   SealedCipherIcon,
   InMemoryDecryptIcon,
-  GenoTokenIcon
+  GenoTokenIcon,
+  AlertTriangleIcon,
+  RefreshSpinIcon
 } from "../../components/icons/GenoIcons";
 import contractAddresses from "../../contracts/contractAddresses.json";
 
@@ -16,6 +18,8 @@ export default function DatasetCatalogTable({ onPurchase }) {
   const {
     filteredDatasets,
     datasets,
+    catalogError,
+    fetchOnChainDatasets,
     purchasedData,
     setSelectedAssetModal,
     getLocalizedTitle,
@@ -26,7 +30,12 @@ export default function DatasetCatalogTable({ onPurchase }) {
   const { t, language } = useLanguage();
 
   return (
-    <div className="terminal-table-container">
+    <div
+      className="terminal-table-container"
+      tabIndex="0"
+      role="region"
+      aria-label={t("datasetTableScrollLabel") || "Dataset table scroll container"}
+    >
       <table className="terminal-table">
         <thead>
           <tr>
@@ -197,7 +206,28 @@ export default function DatasetCatalogTable({ onPurchase }) {
                   fontFamily: "var(--font-mono)"
                 }}
               >
-                {t("noDatasetsFound")}
+                {catalogError ? (
+                  <div role="alert" style={{ color: "var(--accent-rose-text)", padding: "16px", maxWidth: "600px", margin: "0 auto" }}>
+                    <div style={{ display: "inline-flex", alignItems: "center", gap: "8px", fontWeight: 700, fontSize: "14px", marginBottom: "6px" }}>
+                      <AlertTriangleIcon size={18} color="var(--accent-rose-text)" />
+                      <span style={{ color: "var(--accent-rose-text)" }}>{t("rpcOfflineTitle") || "Mất kết nối Node RPC Blockchain"}</span>
+                    </div>
+                    <div style={{ fontSize: "12px", color: "var(--text-secondary)", marginBottom: "12px", lineHeight: "1.5" }}>
+                      {t("rpcOfflineDesc") || "Không thể tải danh mục dữ liệu do lỗi kết nối node EVM. Vui lòng kiểm tra Hardhat Node."} ({catalogError})
+                    </div>
+                    <button
+                      type="button"
+                      className="btn-terminal btn-terminal-primary"
+                      onClick={() => fetchOnChainDatasets?.(account)}
+                      style={{ padding: "0 16px", height: "32px", fontSize: "12px", margin: "0 auto" }}
+                    >
+                      <RefreshSpinIcon size={13} />
+                      <span>{t("retryConnection") || "Thử lại kết nối RPC"}</span>
+                    </button>
+                  </div>
+                ) : (
+                  t("noDatasetsFound")
+                )}
               </td>
             </tr>
           )}
@@ -207,7 +237,7 @@ export default function DatasetCatalogTable({ onPurchase }) {
         <span>
           {t("tableShowingCount")} {filteredDatasets.length} {t("tableOfCount")} {datasets.length} {t("tableVerifiedDatasets")}
         </span>
-        <span style={{ color: "var(--text-disabled)" }}>
+        <span style={{ color: "var(--text-secondary)" }}>
           Escrow:{" "}
           {contractAddresses.GenomicsRegistry
             ? `${contractAddresses.GenomicsRegistry.substring(0, 10)}...`

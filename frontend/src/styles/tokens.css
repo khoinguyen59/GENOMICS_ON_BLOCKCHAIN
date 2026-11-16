@@ -39,7 +39,7 @@
   --text-primary: #0f172a;
   --text-secondary: #334155;
   --text-muted: #64748b;
-  --text-disabled: #94a3b8;
+  --text-disabled: #475569;
 
   /* Curated Biotech Vibrant Accent Palettes */
   --accent-cyan: #0369a1;
@@ -62,7 +62,7 @@
   --accent-amber-light: #d97706;
   --accent-amber-glow: rgba(245, 158, 11, 0.15);
   --accent-amber-subtle: #fffbeb;
-  --accent-amber-text: #b45309;
+  --accent-amber-text: #92400e;
 
   --accent-purple: #7c3aed;
   --accent-purple-light: #6d28d9;
@@ -126,7 +126,7 @@
   --text-primary: #f8fafc;
   --text-secondary: #cbd5e1;
   --text-muted: #8492a6;
-  --text-disabled: #4b5563;
+  --text-disabled: #94a3b8;
 
   --accent-cyan: #06b6d4;
   --accent-cyan-light: #38bdf8;

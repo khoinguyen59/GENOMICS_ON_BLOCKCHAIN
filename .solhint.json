@@ -8,7 +8,7 @@
     "not-rely-on-time": "off",
     "reason-string": ["warn", { "maxLength": 64 }],
     "const-name-snakecase": "warn",
-    "event-name-camelcase": "warn",
+    "event-name-capwords": "warn",
     "payable-fallback": "error",
     "state-visibility": "error",
     "quotes": ["error", "double"]

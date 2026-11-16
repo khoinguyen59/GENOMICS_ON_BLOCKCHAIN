@@ -43,6 +43,8 @@ export default function GenomicFilterBar({ children, onPurchase }) {
     setFilterZygosity,
     filterRegion,
     setFilterRegion,
+    filterBloodType,
+    setFilterBloodType,
     filterFormat,
     setFilterFormat,
     filterAssembly,
@@ -119,7 +121,8 @@ export default function GenomicFilterBar({ children, onPurchase }) {
     chromosome: true,
     format: false,
     zygosity: false,
-    ancestry: false
+    ancestry: false,
+    bloodType: false
   });
 
   // Local Min/Max inputs
@@ -241,6 +244,13 @@ export default function GenomicFilterBar({ children, onPurchase }) {
       clear: () => setFilterRegion("All")
     });
   }
+  if (filterBloodType !== "All") {
+    activeChips.push({
+      id: "bloodType",
+      label: `${t("filterBloodType") || "Blood Type"}: ${filterBloodType}`,
+      clear: () => setFilterBloodType("All")
+    });
+  }
 
   const isFiltersActive = activeChips.length > 0 || (sortBy && sortBy !== "newest");
 
@@ -318,18 +328,22 @@ export default function GenomicFilterBar({ children, onPurchase }) {
 
           <div className="opensea-view-switcher">
             <button
+              id="btn-view-grid"
               type="button"
               className={`view-btn ${viewMode === "grid" ? "active" : ""}`}
               onClick={() => setViewMode("grid")}
               title={t("viewGrid") || "Grid view"}
+              aria-label={t("viewGrid") || "Grid view"}
             >
               <GridIcon size={15} />
             </button>
             <button
+              id="btn-view-table"
               type="button"
               className={`view-btn ${viewMode === "table" ? "active" : ""}`}
               onClick={() => setViewMode("table")}
               title={t("viewTable") || "Table view"}
+              aria-label={t("viewTable") || "Table view"}
             >
               <ListIcon size={15} />
             </button>
@@ -455,7 +469,7 @@ export default function GenomicFilterBar({ children, onPurchase }) {
       <div className={`opensea-split-layout ${showSidebar ? "has-sidebar" : "no-sidebar"}`}>
         {/* Left Sidebar */}
         {showSidebar && (
-          <aside className="opensea-filter-sidebar">
+          <div className="opensea-filter-sidebar" role="region" aria-label="Dataset Filters">
             <div className="sidebar-sticky-scroll">
               {/* Group 1: Status */}
               <div className="sidebar-accordion-item">
@@ -736,8 +750,39 @@ export default function GenomicFilterBar({ children, onPurchase }) {
                   </div>
                 )}
               </div>
+
+              {/* Group 8: Blood Type (ABO-Rh) */}
+              <div className="sidebar-accordion-item">
+                <button
+                  type="button"
+                  className="sidebar-accordion-header"
+                  onClick={() => toggleSection("bloodType")}
+                >
+                  <div className="accordion-header-left">
+                    <MetabolismIcon size={13} color="var(--accent-rose)" />
+                    <span>{t("filterBloodType") || "BLOOD TYPE (ABO-Rh)"}</span>
+                  </div>
+                  {openSections.bloodType ? <ChevronUpIcon size={13} /> : <ChevronDownIcon size={13} />}
+                </button>
+                {openSections.bloodType && (
+                  <div className="sidebar-accordion-body">
+                    <div className="sidebar-chip-cluster">
+                      {["All", "O+", "A+", "B+", "AB+", "O-", "A-", "B-", "AB-"].map((bt) => (
+                        <button
+                          key={bt}
+                          type="button"
+                          className={`sidebar-chip ${filterBloodType === bt ? "active" : ""}`}
+                          onClick={() => setFilterBloodType(bt)}
+                        >
+                          {bt === "All" ? (t("filterAllBloodTypes") || "All Types") : bt}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
-          </aside>
+          </div>
         )}
 
         {/* Right Main Catalog Content */}

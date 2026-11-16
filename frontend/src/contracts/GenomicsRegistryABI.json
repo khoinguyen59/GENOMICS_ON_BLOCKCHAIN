@@ -57,6 +57,21 @@
   },
   {
     "inputs": [],
+    "name": "CommitmentAlreadyExists",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "CommitmentNotFound",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "CommitmentTooNew",
+    "type": "error"
+  },
+  {
+    "inputs": [],
     "name": "ConsentPermanentlyRevoked",
     "type": "error"
   },
@@ -82,6 +97,11 @@
   },
   {
     "inputs": [],
+    "name": "DisputeWindowExpired",
+    "type": "error"
+  },
+  {
+    "inputs": [],
     "name": "EmptyCapsule",
     "type": "error"
   },
@@ -97,7 +117,17 @@
   },
   {
     "inputs": [],
+    "name": "EscrowDisputedError",
+    "type": "error"
+  },
+  {
+    "inputs": [],
     "name": "EscrowNotActive",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "EscrowNotDisputed",
     "type": "error"
   },
   {
@@ -113,6 +143,11 @@
   {
     "inputs": [],
     "name": "InvalidCapsuleFormat",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "InvalidCommitment",
     "type": "error"
   },
   {
@@ -378,6 +413,19 @@
     "anonymous": false,
     "inputs": [
       {
+        "indexed": false,
+        "internalType": "bool",
+        "name": "required",
+        "type": "bool"
+      }
+    ],
+    "name": "CommitRevealRequirementUpdated",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
         "indexed": true,
         "internalType": "uint256",
         "name": "dataId",
@@ -463,6 +511,25 @@
         "internalType": "address",
         "name": "buyer",
         "type": "address"
+      }
+    ],
+    "name": "EscrowConfirmed",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "uint256",
+        "name": "dataId",
+        "type": "uint256"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "buyer",
+        "type": "address"
       },
       {
         "indexed": false,
@@ -478,6 +545,56 @@
       }
     ],
     "name": "EscrowDeposited",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "uint256",
+        "name": "dataId",
+        "type": "uint256"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "buyer",
+        "type": "address"
+      },
+      {
+        "indexed": true,
+        "internalType": "bool",
+        "name": "refundBuyer",
+        "type": "bool"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "amount",
+        "type": "uint256"
+      }
+    ],
+    "name": "EscrowDisputeResolved",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "uint256",
+        "name": "dataId",
+        "type": "uint256"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "buyer",
+        "type": "address"
+      }
+    ],
+    "name": "EscrowDisputed",
     "type": "event"
   },
   {
@@ -540,6 +657,31 @@
       }
     ],
     "name": "EscrowReleased",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "bytes32",
+        "name": "commitment",
+        "type": "bytes32"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "donor",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "blockNumber",
+        "type": "uint256"
+      }
+    ],
+    "name": "GenomicDataCommitted",
     "type": "event"
   },
   {
@@ -913,6 +1055,32 @@
   {
     "inputs": [
       {
+        "internalType": "bytes32",
+        "name": "commitment",
+        "type": "bytes32"
+      }
+    ],
+    "name": "commitGenomicData",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "commitRevealRequired",
+    "outputs": [
+      {
+        "internalType": "bool",
+        "name": "",
+        "type": "bool"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
         "internalType": "string",
         "name": "traitKey",
         "type": "string"
@@ -937,6 +1105,19 @@
       }
     ],
     "stateMutability": "pure",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "dataId",
+        "type": "uint256"
+      }
+    ],
+    "name": "confirmCapsuleAndReleaseEscrow",
+    "outputs": [],
+    "stateMutability": "nonpayable",
     "type": "function"
   },
   {
@@ -1020,6 +1201,19 @@
         "internalType": "uint256",
         "name": "dataId",
         "type": "uint256"
+      }
+    ],
+    "name": "disputeCapsule",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "dataId",
+        "type": "uint256"
       },
       {
         "internalType": "address",
@@ -1090,6 +1284,30 @@
       {
         "internalType": "bool",
         "name": "capsuleDelivered",
+        "type": "bool"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      },
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "name": "escrowDisputed",
+    "outputs": [
+      {
+        "internalType": "bool",
+        "name": "",
         "type": "bool"
       }
     ],
@@ -1648,6 +1866,54 @@
         "type": "uint256"
       },
       {
+        "internalType": "address",
+        "name": "worker",
+        "type": "address"
+      }
+    ],
+    "name": "isAuthorizedWorker",
+    "outputs": [
+      {
+        "internalType": "bool",
+        "name": "",
+        "type": "bool"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      },
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "name": "manualEscrowRelease",
+    "outputs": [
+      {
+        "internalType": "bool",
+        "name": "",
+        "type": "bool"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "dataId",
+        "type": "uint256"
+      },
+      {
         "internalType": "bytes32",
         "name": "blindTag",
         "type": "bytes32"
@@ -1879,6 +2145,25 @@
   {
     "inputs": [
       {
+        "internalType": "bytes32",
+        "name": "",
+        "type": "bytes32"
+      }
+    ],
+    "name": "registrationCommitments",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
         "internalType": "uint256",
         "name": "dataId",
         "type": "uint256"
@@ -1978,6 +2263,73 @@
       },
       {
         "internalType": "address",
+        "name": "buyer",
+        "type": "address"
+      },
+      {
+        "internalType": "bool",
+        "name": "refundBuyer",
+        "type": "bool"
+      }
+    ],
+    "name": "resolveEscrowDispute",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "rawDataHash",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "salt",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "string[4]",
+        "name": "cidsAndUri",
+        "type": "string[4]"
+      },
+      {
+        "internalType": "uint256",
+        "name": "price",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "accessDuration",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint96",
+        "name": "royaltyBps",
+        "type": "uint96"
+      }
+    ],
+    "name": "revealAndRegisterGenomicData",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "dataId",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "dataId",
+        "type": "uint256"
+      },
+      {
+        "internalType": "address",
         "name": "worker",
         "type": "address"
       },
@@ -2008,6 +2360,19 @@
   {
     "inputs": [
       {
+        "internalType": "bool",
+        "name": "required",
+        "type": "bool"
+      }
+    ],
+    "name": "setCommitRevealRequired",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
         "internalType": "uint256",
         "name": "dataId",
         "type": "uint256"
@@ -2019,6 +2384,24 @@
       }
     ],
     "name": "setDatasetBlindTags",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "dataId",
+        "type": "uint256"
+      },
+      {
+        "internalType": "bool",
+        "name": "manual",
+        "type": "bool"
+      }
+    ],
+    "name": "setManualEscrowRelease",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
@@ -2189,6 +2572,59 @@
         "internalType": "bool",
         "name": "verified",
         "type": "bool"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "dataId",
+        "type": "uint256"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "traitId",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "variantCommitment",
+        "type": "bytes32"
+      }
+    ],
+    "name": "verifyDatasetTraitPossession",
+    "outputs": [
+      {
+        "internalType": "bool",
+        "name": "verified",
+        "type": "bool"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      },
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "name": "workerAuthorizedEpoch",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
       }
     ],
     "stateMutability": "view",

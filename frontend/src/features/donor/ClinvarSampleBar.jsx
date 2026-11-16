@@ -204,7 +204,7 @@ export default function ClinvarSampleBar({ onSelectPreset }) {
                   border: "1px solid",
                   borderColor: isSelected ? cat.color : "var(--border-subtle)",
                   background: isSelected ? "var(--bg-surface)" : "transparent",
-                  color: isSelected ? "var(--text-primary)" : "var(--text-muted)",
+                  color: isSelected ? "var(--text-primary)" : "var(--text-secondary)",
                   cursor: "pointer",
                   display: "inline-flex",
                   alignItems: "center",
@@ -212,7 +212,7 @@ export default function ClinvarSampleBar({ onSelectPreset }) {
                   transition: "all var(--transition-fast)"
                 }}
               >
-                <CatIcon size={12} color={isSelected ? cat.color : "var(--text-muted)"} />
+                <CatIcon size={12} color={isSelected ? cat.color : "var(--text-secondary)"} />
                 <span>{cat.label}</span>
               </button>
             );

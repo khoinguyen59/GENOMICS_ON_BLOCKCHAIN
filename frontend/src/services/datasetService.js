@@ -59,6 +59,7 @@ export async function publishGenomicDataset({
   rawFileText,
   rawFileBlob,
   isChunked = false,
+  fileSize = 0,
   subjectId,
   disease,
   geneSymbol,
@@ -118,6 +119,8 @@ export async function publishGenomicDataset({
   const summaryUpload = await uploadEncryptedSummaryReport(encryptedSummary.payload, `${subjectId}_report.enc`);
   const summaryCid = summaryUpload?.cid || summaryUpload;
 
+  const actualFileSize = fileSize || (rawFileBlob ? rawFileBlob.size : (encryptedRaw.totalPlaintextSize || (typeof rawFileText === "string" ? new TextEncoder().encode(rawFileText).length : 0)));
+
   const phenopacket = buildPhenopacket({
     subjectId,
     disease,
@@ -127,7 +130,10 @@ export async function publishGenomicDataset({
     rawCid: rawCid,
     summaryCid: summaryCid,
     summaryDataHash: encryptedSummary.rawDataHash,
-    ancestry: ancestryRegion
+    ancestry: ancestryRegion,
+    fileFormat: fileFormat || format || "VCF",
+    format: format || fileFormat || "VCF",
+    fileSize: actualFileSize
   });
   const metaUpload = await uploadPhenopacketMetadata(phenopacket);
   const metadataCid = metaUpload?.cid || metaUpload;
@@ -370,6 +376,61 @@ export async function claimDatasetEscrowRefund({ dataId, signer }) {
 }
 
 /**
+ * Buyer explicitly confirms satisfactory capsule delivery and releases escrow immediately
+ */
+export async function confirmCapsuleAndReleaseEscrow({ dataId, signer }) {
+  if (!signer) throw new Error("Wallet not connected.");
+  const registry = new ethers.Contract(contractAddresses.GenomicsRegistry, GenomicsRegistryABI, signer);
+  const tx = await registry.confirmCapsuleAndReleaseEscrow(dataId);
+  await tx.wait();
+  return tx;
+}
+
+/**
+ * Dispute a delivered or undelivered capsule during the active dispute window
+ */
+export async function disputeCapsule({ dataId, signer }) {
+  if (!signer) throw new Error("Wallet not connected.");
+  const registry = new ethers.Contract(contractAddresses.GenomicsRegistry, GenomicsRegistryABI, signer);
+  const tx = await registry.disputeCapsule(dataId);
+  await tx.wait();
+  return tx;
+}
+
+/**
+ * Buyer toggles manual confirmation release for their escrow
+ */
+export async function setManualEscrowRelease({ dataId, manual, signer }) {
+  if (!signer) throw new Error("Wallet not connected.");
+  const registry = new ethers.Contract(contractAddresses.GenomicsRegistry, GenomicsRegistryABI, signer);
+  const tx = await registry.setManualEscrowRelease(dataId, manual);
+  await tx.wait();
+  return tx;
+}
+
+/**
+ * Manually release escrowed payment to seller once capsule is verified/delivered and dispute window passes
+ */
+export async function releaseEscrow({ dataId, buyer, signer }) {
+  if (!signer) throw new Error("Wallet not connected.");
+  const registry = new ethers.Contract(contractAddresses.GenomicsRegistry, GenomicsRegistryABI, signer);
+  const tx = await registry.releaseEscrow(dataId, buyer);
+  await tx.wait();
+  return tx;
+}
+
+/**
+ * Arbiter admin resolves a post-delivery escrow dispute (refund buyer 100% or release to seller + EIP-2981 royalty)
+ */
+export async function resolveEscrowDispute({ dataId, buyer, refundBuyer, signer }) {
+  if (!signer) throw new Error("Wallet not connected.");
+  const registry = new ethers.Contract(contractAddresses.GenomicsRegistry, GenomicsRegistryABI, signer);
+  const tx = await registry.resolveEscrowDispute(dataId, buyer, Boolean(refundBuyer));
+  await tx.wait();
+  return tx;
+}
+
+/**
  * Query active escrow deposit details for a dataset purchase
  */
 export async function checkDatasetEscrowStatus({ dataId, account, contracts }) {
@@ -577,7 +638,7 @@ export async function setDatasetCapsuleWorker({ dataId, workerAddress, authorize
   if (!signer) throw new Error("Wallet not connected.");
   if (!ethers.isAddress(workerAddress)) throw new Error("Invalid worker EVM address.");
   const registry = new ethers.Contract(contractAddresses.GenomicsRegistry, GenomicsRegistryABI, signer);
-  const tx = await registry.authorizeCapsuleWorker(dataId, workerAddress, authorized);
+  const tx = await registry.setAuthorizedCapsuleWorker(dataId, workerAddress, authorized);
   await tx.wait();
   return tx;
 }
@@ -730,13 +791,16 @@ export async function verifyDatasetTraitZkStatus({ dataId, contracts, variantCom
             await smartReadWithRetry(() => zkContract.hasVerifiedTraitVariant(targetTraitId, commitment, owner))
           );
         } catch {
-          // Fall back to registry verification
+          result.verified = false;
         }
-      }
-      if (!result.verified) {
-        result.verified = Boolean(
-          await smartReadWithRetry(() => contracts.registry.verifyDatasetTraitPossession(dataId, commitment))
-        );
+      } else if (!targetTraitId) {
+        try {
+          result.verified = Boolean(
+            await smartReadWithRetry(() => contracts.registry.verifyDatasetTraitPossession(dataId, commitment))
+          );
+        } catch {
+          result.verified = false;
+        }
       }
     }
   } catch (err) {

@@ -19,7 +19,50 @@ export function getKuboRpcEndpoint() {
       return import.meta.env.VITE_KUBO_RPC.trim();
     }
   } catch (e) {}
+  if (typeof process !== "undefined" && process.env) {
+    if (process.env.IPFS_RPC) return process.env.IPFS_RPC.trim();
+    if (process.env.KUBO_RPC) return process.env.KUBO_RPC.trim();
+  }
   return "http://127.0.0.1:5001";
+}
+
+/**
+ * Retrieve configured IPFS Kubo Gateway Endpoint
+ * Reads from sessionStorage, import.meta.env, process.env with fallback to default port 8080
+ * @returns {string}
+ */
+export function getKuboGatewayEndpoint() {
+  if (typeof window !== "undefined") {
+    if (window.sessionStorage) {
+      const sessionSaved = window.sessionStorage.getItem("GENO_KUBO_GATEWAY");
+      if (sessionSaved && sessionSaved.trim().length > 0) return sessionSaved.trim();
+    }
+  }
+  try {
+    if (typeof import.meta !== "undefined" && import.meta.env?.VITE_KUBO_GATEWAY) {
+      return import.meta.env.VITE_KUBO_GATEWAY.trim();
+    }
+  } catch (e) {}
+  if (typeof process !== "undefined" && process.env) {
+    if (process.env.IPFS_GATEWAY) return process.env.IPFS_GATEWAY.trim();
+    if (process.env.KUBO_GATEWAY) return process.env.KUBO_GATEWAY.trim();
+  }
+  return "http://127.0.0.1:8080";
+}
+
+/**
+ * Persist Kubo Gateway endpoint in storage
+ * @param {string} endpoint 
+ */
+export function setKuboGatewayEndpoint(endpoint) {
+  if (typeof window !== "undefined") {
+    if (window.sessionStorage) {
+      window.sessionStorage.setItem("GENO_KUBO_GATEWAY", endpoint || "");
+    }
+    if (window.localStorage) {
+      window.localStorage.removeItem("GENO_KUBO_GATEWAY");
+    }
+  }
 }
 
 /**
@@ -47,17 +90,22 @@ export function setKuboRpcEndpoint(endpoint) {
  */
 export async function pinFileToKubo(fileBytes, fileName, mimeType, customRpc = null) {
   if (typeof fetch === "undefined") return null;
-  const kuboRpc = customRpc || getKuboRpcEndpoint();
+  const rawRpc = customRpc || getKuboRpcEndpoint();
+  const kuboRpc = String(rawRpc || "http://127.0.0.1:5001").replace(/\/+$/, "");
   try {
     const formData = new FormData();
     const blob = new Blob([fileBytes], { type: mimeType });
     formData.append("file", blob, fileName);
 
     const isBrowser = typeof window !== "undefined";
-    const kuboUrl = (isBrowser && (kuboRpc === "http://127.0.0.1:5001" || kuboRpc === "/ipfs-rpc"))
+    const isLocalDefault = kuboRpc === "http://127.0.0.1:5001" || kuboRpc === "http://localhost:5001" || kuboRpc === "/ipfs-rpc";
+    const kuboUrl = (isBrowser && isLocalDefault)
       ? "/ipfs-rpc/add"
       : `${kuboRpc}/api/v0/add`;
 
+    const directUrl = kuboRpc === "/ipfs-rpc"
+      ? "http://127.0.0.1:5001/api/v0/add"
+      : `${kuboRpc}/api/v0/add`;
     let res = null;
     try {
       res = await fetch(kuboUrl, {
@@ -66,13 +114,14 @@ export async function pinFileToKubo(fileBytes, fileName, mimeType, customRpc = n
         signal: AbortSignal.timeout(3000),
       });
     } catch (_) {
-      if (kuboUrl !== `${kuboRpc}/api/v0/add`) {
-        res = await fetch(`${kuboRpc}/api/v0/add`, {
-          method: "POST",
-          body: formData,
-          signal: AbortSignal.timeout(3000),
-        });
-      }
+      res = null;
+    }
+    if ((!res || res.status === 404 || res.status === 405) && kuboUrl !== directUrl) {
+      res = await fetch(directUrl, {
+        method: "POST",
+        body: formData,
+        signal: AbortSignal.timeout(3000),
+      });
     }
 
     if (res && res.ok) {
@@ -92,7 +141,8 @@ export async function pinFileToKubo(fileBytes, fileName, mimeType, customRpc = n
  */
 export async function pinJsonToKubo(jsonData, fileName = "metadata.json", customRpc = null) {
   if (typeof fetch === "undefined") return null;
-  const kuboRpc = customRpc || getKuboRpcEndpoint();
+  const rawRpc = customRpc || getKuboRpcEndpoint();
+  const kuboRpc = String(rawRpc || "http://127.0.0.1:5001").replace(/\/+$/, "");
   try {
     const jsonString = typeof jsonData === "string" ? jsonData : JSON.stringify(jsonData, null, 2);
     const jsonBytes = new TextEncoder().encode(jsonString);
@@ -101,10 +151,14 @@ export async function pinJsonToKubo(jsonData, fileName = "metadata.json", custom
     formData.append("file", blob, fileName);
 
     const isBrowser = typeof window !== "undefined";
-    const kuboUrl = (isBrowser && (kuboRpc === "http://127.0.0.1:5001" || kuboRpc === "/ipfs-rpc"))
+    const isLocalDefault = kuboRpc === "http://127.0.0.1:5001" || kuboRpc === "http://localhost:5001" || kuboRpc === "/ipfs-rpc";
+    const kuboUrl = (isBrowser && isLocalDefault)
       ? "/ipfs-rpc/add"
       : `${kuboRpc}/api/v0/add`;
 
+    const directUrl = kuboRpc === "/ipfs-rpc"
+      ? "http://127.0.0.1:5001/api/v0/add"
+      : `${kuboRpc}/api/v0/add`;
     let res = null;
     try {
       res = await fetch(kuboUrl, {
@@ -113,13 +167,14 @@ export async function pinJsonToKubo(jsonData, fileName = "metadata.json", custom
         signal: AbortSignal.timeout(3000),
       });
     } catch (_) {
-      if (kuboUrl !== `${kuboRpc}/api/v0/add`) {
-        res = await fetch(`${kuboRpc}/api/v0/add`, {
-          method: "POST",
-          body: formData,
-          signal: AbortSignal.timeout(3000),
-        });
-      }
+      res = null;
+    }
+    if ((!res || res.status === 404 || res.status === 405) && kuboUrl !== directUrl) {
+      res = await fetch(directUrl, {
+        method: "POST",
+        body: formData,
+        signal: AbortSignal.timeout(3000),
+      });
     }
 
     if (res && res.ok) {
@@ -132,14 +187,18 @@ export async function pinJsonToKubo(jsonData, fileName = "metadata.json", custom
 
 /**
  * Fetch raw bytes from local Kubo IPFS gateway
+ * Dynamically resolves gateway URL from environment/session configuration
  * @param {string} cid 
- * @param {string} [customGateway] 
+ * @param {string|null} [customGateway] 
  * @returns {Promise<Uint8Array|null>}
  */
-export async function fetchFromKuboGateway(cid, customGateway = "http://127.0.0.1:8080") {
+export async function fetchFromKuboGateway(cid, customGateway = null) {
   if (typeof fetch === "undefined") return null;
+  const gateway = (customGateway && customGateway.trim().length > 0)
+    ? customGateway.trim()
+    : getKuboGatewayEndpoint();
   try {
-    const res = await fetch(`${customGateway}/ipfs/${cid}`, {
+    const res = await fetch(`${gateway}/ipfs/${cid}`, {
       signal: AbortSignal.timeout(3000),
     });
     if (res.ok) {

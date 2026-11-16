@@ -85,6 +85,16 @@ export default function AssetDetailModal({ onPurchase }) {
     contracts,
   ]);
 
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === "Escape") {
+        setSelectedAssetModal(null);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [setSelectedAssetModal]);
+
   if (!selectedAssetModal) return null;
 
   const isOwner = Boolean(
@@ -158,7 +168,13 @@ export default function AssetDetailModal({ onPurchase }) {
 
   return (
     <div className="terminal-modal-backdrop" onClick={() => setSelectedAssetModal(null)}>
-      <div className="terminal-modal-window opensea-modal-container" onClick={(e) => e.stopPropagation()}>
+      <div
+        className="terminal-modal-window opensea-modal-container"
+        role="dialog"
+        aria-modal="true"
+        aria-label={t("modalSpecTitle") || "Dataset Specifications"}
+        onClick={(e) => e.stopPropagation()}
+      >
         {/* Top Header Bar */}
         <div className="modal-header-bar">
           <div className="modal-title-left">
@@ -180,6 +196,7 @@ export default function AssetDetailModal({ onPurchase }) {
             onClick={() => setSelectedAssetModal(null)}
             type="button"
             title={t("close")}
+            aria-label={t("close") || "Close modal"}
           >
             <CloseCrossIcon size={16} color="var(--text-muted)" />
           </button>
@@ -215,7 +232,8 @@ export default function AssetDetailModal({ onPurchase }) {
                       type="button"
                       className="icon-copy-btn"
                       onClick={() => copyText(registryAddress, "contract")}
-                      title="Copy contract address"
+                      title={t("copyContractAddress") || (lang === "vi" ? "Sao chép địa chỉ hợp đồng" : "Copy contract address")}
+                      aria-label={t("copyContractAddress") || (lang === "vi" ? "Sao chép địa chỉ hợp đồng" : "Copy contract address")}
                     >
                       {copiedKey === "contract" ? <CheckCircleIcon size={12} color="var(--accent-emerald)" /> : <CopyIcon size={12} />}
                     </button>
@@ -239,7 +257,7 @@ export default function AssetDetailModal({ onPurchase }) {
 
                 <div className="opensea-spec-row">
                   <span className="opensea-spec-key">{t("creatorRoyaltyLabel") || "Creator Earnings"}</span>
-                  <span className="opensea-spec-val" style={{ color: "var(--accent-amber)", fontWeight: 700 }}>
+                  <span className="opensea-spec-val" style={{ color: "var(--accent-amber-text)", fontWeight: 700 }}>
                     {`${royaltyPct}% (${t("eip2981EnforcedSuffix")})`}
                   </span>
                 </div>
@@ -253,7 +271,8 @@ export default function AssetDetailModal({ onPurchase }) {
                         type="button"
                         className="icon-copy-btn"
                         onClick={() => copyText(selectedAssetModal.metadataCid, "metaCid")}
-                        title="Copy Metadata CID"
+                        title={t("copyMetadataCid") || (lang === "vi" ? "Sao chép CID Metadata" : "Copy Metadata CID")}
+                        aria-label={t("copyMetadataCid") || (lang === "vi" ? "Sao chép CID Metadata" : "Copy Metadata CID")}
                       >
                         {copiedKey === "metaCid" ? <CheckCircleIcon size={12} color="var(--accent-emerald)" /> : <CopyIcon size={12} />}
                       </button>
@@ -270,7 +289,8 @@ export default function AssetDetailModal({ onPurchase }) {
                         type="button"
                         className="icon-copy-btn"
                         onClick={() => copyText(selectedAssetModal.rawCid, "rawCid")}
-                        title="Copy Raw CID"
+                        title={t("copyRawCid") || (lang === "vi" ? "Sao chép CID Dữ liệu thô" : "Copy Raw CID")}
+                        aria-label={t("copyRawCid") || (lang === "vi" ? "Sao chép CID Dữ liệu thô" : "Copy Raw CID")}
                       >
                         {copiedKey === "rawCid" ? <CheckCircleIcon size={12} color="var(--accent-emerald)" /> : <CopyIcon size={12} />}
                       </button>
@@ -374,17 +394,17 @@ export default function AssetDetailModal({ onPurchase }) {
                         style={{
                           fontSize: "12.5px",
                           fontWeight: 700,
-                          color: useEscrow ? "var(--accent-emerald)" : "var(--text-secondary)",
+                          color: useEscrow ? "var(--accent-emerald-text)" : "var(--text-secondary)",
                           cursor: "pointer",
                           display: "flex",
                           alignItems: "center",
                           gap: "6px"
                         }}
                       >
-                        <ShieldCheckIcon size={14} color={useEscrow ? "var(--accent-emerald)" : "var(--text-muted)"} />
+                        <ShieldCheckIcon size={14} color={useEscrow ? "var(--accent-emerald-text)" : "var(--text-secondary)"} />
                         <span>{t("escrowProtectionToggle")}</span>
                       </label>
-                      <div style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: "2px" }}>
+                      <div style={{ fontSize: "11px", color: "var(--text-secondary)", marginTop: "2px" }}>
                         {t("escrowGuaranteeDesc") || "Funds held in smart contract until capsule dispatch. 100% refund guarantee."}
                       </div>
                     </div>
@@ -396,8 +416,8 @@ export default function AssetDetailModal({ onPurchase }) {
                       fontFamily: "var(--font-mono)",
                       padding: "3px 8px",
                       borderRadius: "var(--radius-sm)",
-                      background: useEscrow ? "rgba(16, 185, 129, 0.15)" : "rgba(255, 255, 255, 0.05)",
-                      color: useEscrow ? "var(--accent-emerald)" : "var(--text-muted)",
+                      background: useEscrow ? "#065f46" : "var(--bg-elevated)",
+                      color: useEscrow ? "#ffffff" : "var(--text-secondary)",
                       fontWeight: 800,
                       whiteSpace: "nowrap"
                     }}
@@ -423,8 +443,8 @@ export default function AssetDetailModal({ onPurchase }) {
                     style={
                       isEscrowPending
                         ? {
-                            color: "#f59e0b",
-                            borderColor: "rgba(245, 158, 11, 0.45)",
+                            color: "var(--accent-amber-text)",
+                            borderColor: "var(--accent-amber)",
                             background: "rgba(245, 158, 11, 0.14)"
                           }
                         : undefined
@@ -467,7 +487,7 @@ export default function AssetDetailModal({ onPurchase }) {
                 <span style={{ fontSize: "11px", fontWeight: 700, color: "var(--accent-cyan)", letterSpacing: "0.04em", textTransform: "uppercase" }}>
                   {t("modalHashLabel")}
                 </span>
-                <span style={{ fontSize: "10.5px", color: "var(--accent-emerald)", fontFamily: "var(--font-mono)", fontWeight: 700 }}>
+                <span style={{ fontSize: "10.5px", color: "var(--accent-emerald-text)", fontFamily: "var(--font-mono)", fontWeight: 700 }}>
                   {t("evmSha256Match") || "✓ EVM SHA-256 MATCH"}
                 </span>
               </div>
@@ -477,12 +497,13 @@ export default function AssetDetailModal({ onPurchase }) {
                   type="button"
                   className="icon-copy-btn"
                   onClick={() => copyText(selectedAssetModal.rawDataHash, "hash")}
-                  title="Copy SHA-256 hash"
+                  title={t("copyRawHash") || (lang === "vi" ? "Sao chép mã băm SHA-256" : "Copy SHA-256 hash")}
+                  aria-label={t("copyRawHash") || (lang === "vi" ? "Sao chép mã băm SHA-256" : "Copy SHA-256 hash")}
                 >
                   {copiedKey === "hash" ? <CheckCircleIcon size={12} color="var(--accent-emerald)" /> : <CopyIcon size={12} />}
                 </button>
               </div>
-              <div style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: "6px", lineHeight: "1.4" }}>
+              <div style={{ fontSize: "11px", color: "var(--text-secondary)", marginTop: "6px", lineHeight: "1.4" }}>
                 {t("provenanceZeroPlaintext")}
               </div>
               <div
@@ -497,12 +518,12 @@ export default function AssetDetailModal({ onPurchase }) {
                   fontFamily: "var(--font-mono)"
                 }}
               >
-                <span style={{ color: "var(--text-muted)" }}>
+                <span style={{ color: "var(--text-secondary)" }}>
                   {zkStatus.linked
                     ? `${t("zkVerifierLinkedLabel")}: ${zkStatus.verifierAddress.slice(0, 8)}... (${zkStatus.bountyCount} ${t("zkBountiesUnit")})`
                     : t("zkVerifierNotLinked")}
                 </span>
-                <span style={{ color: zkStatus.verified ? "var(--accent-emerald)" : "var(--accent-cyan)", fontWeight: 700 }}>
+                <span style={{ color: zkStatus.verified ? "var(--accent-emerald-text)" : "var(--accent-cyan)", fontWeight: 700 }}>
                   {zkStatus.verified ? t("zkTraitVerifiedBadge") : t("zkAnchoredBadge")}
                 </span>
               </div>

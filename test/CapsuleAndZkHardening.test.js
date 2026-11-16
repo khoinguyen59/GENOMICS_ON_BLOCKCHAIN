@@ -44,7 +44,7 @@ describe("Protocol Hardening: Canonical Key Capsule Validation, ZK Epoch Isolati
     JSON.stringify({
       version: "GENO-ASYM-RSA-OAEP-v2",
       tag,
-      keyCipher: "ab".repeat(hexLen / 2),
+      keyCipher: crypto.randomBytes(hexLen / 2).toString("hex"),
     });
 
   const MALFORMED_CAPSULES = [
@@ -54,6 +54,11 @@ describe("Protocol Hardening: Canonical Key Capsule Validation, ZK Epoch Isolati
     ["short keyCipher JSON", '{"keyCipher":"deadbeef"}'],
     ["non-hex 512-char keyCipher JSON", '{"keyCipher":"' + "zz".repeat(256) + '"}'],
     ["raw non-JSON 600-char string", "x".repeat(600)],
+    ["malformed unquoted keyC bypass", '{""""keyC:' + "a".repeat(517) + "}"],
+    ["odd-length 513-hex keyCipher", '{"keyCipher":"' + "a".repeat(513) + '"}'],
+    ["trailing comma malformed JSON", '{"keyCipher":"' + "ab".repeat(256) + '",}'],
+    ["duplicate keyCipher override", '{"keyCipher":"' + "ab".repeat(256) + '","keyCipher":"' + "cd".repeat(256) + '"}'],
+    ["trailing garbage outside braces", '{"keyCipher":"' + "ab".repeat(256) + '"}garbage'],
   ];
 
   // ---------------------------------------------------------------------------
@@ -260,7 +265,31 @@ describe("Protocol Hardening: Canonical Key Capsule Validation, ZK Epoch Isolati
     return { alphaG1, betaG2, gammaG2, deltaG2, ic0G1, ic1G1 };
   }
 
-  async function createAuthenticZkProof(donorAddress, traitId, commitment, cScalar = 1n) {
+  async function createAuthenticZkProof(donorAddress, traitId, commitment, bountyId = 1n, cScalar = 1n) {
+    const epoch = zkVerifier ? await zkVerifier.vkEpoch() : 0n;
+    const packed = ethers.solidityPacked(
+      ["bytes32", "bytes32", "address", "uint256", "address", "uint256", "uint256"],
+      [commitment, traitId, donorAddress, bountyId, zkVerifier.target, 31337n, epoch]
+    );
+    const publicSignal = BigInt(ethers.keccak256(packed)) % R_MOD;
+
+    const bScalar = randomScalar();
+    const bPoint = g2MulEip197(bScalar);
+    const cPoint = await ecMulG1(cScalar);
+
+    const vkXScalar = (ceremony.ic0S + publicSignal * ceremony.ic1S) % R_MOD;
+    const rhs =
+      (ceremony.alphaS * ceremony.betaS +
+        vkXScalar * ceremony.gammaS +
+        cScalar * ceremony.deltaS) %
+      R_MOD;
+    const aScalar = (rhs * modInv(bScalar, R_MOD)) % R_MOD;
+    const aPoint = await ecMulG1(aScalar);
+
+    return { a: aPoint, b: bPoint, c: cPoint };
+  }
+
+  async function createLegacyZkProof(donorAddress, traitId, commitment, cScalar = 1n) {
     const packed = ethers.solidityPacked(
       ["bytes32", "bytes32", "address"],
       [commitment, traitId, donorAddress]
@@ -430,7 +459,7 @@ describe("Protocol Hardening: Canonical Key Capsule Validation, ZK Epoch Isolati
   describe("3. Real Crypto Acceptance", function () {
     const SAMPLE_VCF = "##fileformat=VCFv4.2\nchr12\t111803962\trs671\tG\tA\t100\tPASS\tDP=60\n";
 
-    it("accepts real packageKeyCapsule() RSA-OAEP capsules on BOTH storeTransformedCapsule and emitTransformedCapsule and releases escrow cleanly", async function () {
+    it("accepts real packageKeyCapsule() RSA-OAEP capsules on BOTH storeTransformedCapsule and emitTransformedCapsule and releases escrow cleanly upon confirmation", async function () {
       const enc = await encryptGenomicData(SAMPLE_VCF);
       const hash = enc.rawDataHash;
       await (
@@ -457,17 +486,20 @@ describe("Protocol Hardening: Canonical Key Capsule Validation, ZK Epoch Isolati
 
       await (await registry.connect(seller).storeTransformedCapsule(dataId, buyer.address, realCapsule1)).wait();
 
-      expect(await token.balanceOf(seller.address) - sellerBefore1).to.equal(PRICE);
-      expect(await token.balanceOf(registry.target)).to.equal(0n);
-
-      const dep1 = await registry.escrowDeposits(dataId, buyer.address);
-      expect(dep1.released).to.equal(true);
-      expect(dep1.capsuleDelivered).to.equal(true);
+      // Escrow remains locked until buyer verifies decryption & confirms
+      expect((await registry.escrowDeposits(dataId, buyer.address)).released).to.equal(false);
+      expect((await registry.escrowDeposits(dataId, buyer.address)).capsuleDelivered).to.equal(true);
+      expect(await token.balanceOf(registry.target)).to.equal(PRICE);
 
       const fetched1 = await registry.connect(buyer).getTransformedCapsule.staticCall(dataId);
       expect(fetched1).to.equal(realCapsule1);
       const decKey1 = await decryptKeyCapsule(fetched1, kp1.privateKey);
       expect(await decryptGenomicPayload(enc.payload, decKey1.keyHex)).to.equal(SAMPLE_VCF);
+
+      await (await registry.connect(buyer).confirmCapsuleAndReleaseEscrow(dataId)).wait();
+      expect(await token.balanceOf(seller.address) - sellerBefore1).to.equal(PRICE);
+      expect(await token.balanceOf(registry.target)).to.equal(0n);
+      expect((await registry.escrowDeposits(dataId, buyer.address)).released).to.equal(true);
 
       // Buyer 2: escrow + emitTransformedCapsule with real Web Crypto RSA-OAEP 2048 capsule
       const kp2 = await generateAsymmetricKeyPair(false);
@@ -483,18 +515,19 @@ describe("Protocol Hardening: Canonical Key Capsule Validation, ZK Epoch Isolati
         .to.emit(registry, "CapsuleStored")
         .withArgs(dataId, buyer2.address, realCapsule2);
 
-      expect(await token.balanceOf(seller.address) - sellerBefore2).to.equal(PRICE);
-      expect(await token.balanceOf(registry.target)).to.equal(0n);
-
-      const dep2 = await registry.escrowDeposits(dataId, buyer2.address);
-      expect(dep2.released).to.equal(true);
-      expect(dep2.capsuleDelivered).to.equal(true);
+      expect((await registry.escrowDeposits(dataId, buyer2.address)).released).to.equal(false);
+      expect((await registry.escrowDeposits(dataId, buyer2.address)).capsuleDelivered).to.equal(true);
 
       const fetched2 = await registry.connect(buyer2).getTransformedCapsule.staticCall(dataId);
       expect(fetched2).to.equal(realCapsule2);
       expect(await registry.connect(buyer2).buyerCapsules.staticCall(dataId, buyer2.address)).to.equal(realCapsule2);
       const decKey2 = await decryptKeyCapsule(fetched2, kp2.privateKey);
       expect(await decryptGenomicPayload(enc.payload, decKey2.keyHex)).to.equal(SAMPLE_VCF);
+
+      await (await registry.connect(buyer2).confirmCapsuleAndReleaseEscrow(dataId)).wait();
+      expect(await token.balanceOf(seller.address) - sellerBefore2).to.equal(PRICE);
+      expect(await token.balanceOf(registry.target)).to.equal(0n);
+      expect((await registry.escrowDeposits(dataId, buyer2.address)).released).to.equal(true);
     });
 
     it("accepts valid 1024-hex (4096-bit) JSON capsules on both storeTransformedCapsule and emitTransformedCapsule", async function () {
@@ -504,14 +537,20 @@ describe("Protocol Hardening: Canonical Key Capsule Validation, ZK Epoch Isolati
 
       await (await registry.connect(buyer).grantAccessWithEscrow(dataId, DISPUTE_WINDOW)).wait();
       await (await registry.connect(seller).storeTransformedCapsule(dataId, buyer.address, capsule4096Store)).wait();
-      expect((await registry.escrowDeposits(dataId, buyer.address)).released).to.equal(true);
+      expect((await registry.escrowDeposits(dataId, buyer.address)).capsuleDelivered).to.equal(true);
+      expect((await registry.escrowDeposits(dataId, buyer.address)).released).to.equal(false);
       expect(await registry.connect(buyer).getTransformedCapsule.staticCall(dataId)).to.equal(capsule4096Store);
+      await (await registry.connect(buyer).confirmCapsuleAndReleaseEscrow(dataId)).wait();
+      expect((await registry.escrowDeposits(dataId, buyer.address)).released).to.equal(true);
 
       await (await registry.connect(buyer2).grantAccessWithEscrow(dataId, DISPUTE_WINDOW)).wait();
       await (await registry.connect(seller).emitTransformedCapsule(dataId, buyer2.address, capsule4096Emit)).wait();
-      expect((await registry.escrowDeposits(dataId, buyer2.address)).released).to.equal(true);
+      expect((await registry.escrowDeposits(dataId, buyer2.address)).capsuleDelivered).to.equal(true);
+      expect((await registry.escrowDeposits(dataId, buyer2.address)).released).to.equal(false);
       expect(await registry.connect(buyer2).getTransformedCapsule.staticCall(dataId)).to.equal(capsule4096Emit);
       expect(await registry.connect(buyer2).buyerCapsules.staticCall(dataId, buyer2.address)).to.equal(capsule4096Emit);
+      await (await registry.connect(buyer2).confirmCapsuleAndReleaseEscrow(dataId)).wait();
+      expect((await registry.escrowDeposits(dataId, buyer2.address)).released).to.equal(true);
     });
   });
 
@@ -544,28 +583,44 @@ describe("Protocol Hardening: Canonical Key Capsule Validation, ZK Epoch Isolati
       expect(await zkVerifier.verifiedCommitments(commitment, donor1.address)).to.equal(true);
       expect(await zkVerifier.hasVerifiedTraitVariant(traitId, commitment, donor1.address)).to.equal(true);
 
-      // Rotate the Verification Key via a fresh ceremony
+      // Owner CANNOT rotate VK while an active bounty with remaining escrow exists (BUG-SC-ZK-02 defense)
+      await expect(
+        configureEphemeralTestCeremony(zkVerifier)
+      ).to.be.revertedWithCustomError(zkVerifier, "ActiveBountiesExist");
+
+      // Donor 2 claims the 2nd claim, fully exhausting bounty 1 (remainingFunding becomes 0)
+      const proofEpoch0Donor2 = await createAuthenticZkProof(donor2.address, traitId, commitment);
+      await (await zkVerifier.connect(donor2).claimZkBounty(1n, proofEpoch0Donor2, commitment)).wait();
+
+      // Rotate the Verification Key via a fresh ceremony (now allowed because active bounties are exhausted)
       await configureEphemeralTestCeremony(zkVerifier);
       const epoch1 = await zkVerifier.vkEpoch();
       expect(epoch1).to.equal(epoch0 + 1n);
 
-      // All pre-rotation verification records MUST now report false
-      expect(await zkVerifier.hasVerifiedVariant(commitment, donor1.address)).to.equal(false);
-      expect(await zkVerifier.verifiedCommitments(commitment, donor1.address)).to.equal(false);
-      expect(await zkVerifier.hasVerifiedTraitVariant(traitId, commitment, donor1.address)).to.equal(false);
+      // Prior verified trait claims MUST persist across VK rotations!
+      expect(await zkVerifier.hasVerifiedVariant(commitment, donor1.address)).to.equal(true);
+      expect(await zkVerifier.verifiedCommitments(commitment, donor1.address)).to.equal(true);
+      expect(await zkVerifier.hasVerifiedTraitVariant(traitId, commitment, donor1.address)).to.equal(true);
 
       // Create a second bounty to test replay rejection and re-proving under new VK
       await (
         await zkVerifier.connect(buyer).createZkBounty(traitId, "Epoch Isolation Study 2", reward, 2, 86400)
       ).wait();
 
-      // Pre-rotation proof MUST fail under the rotated VK
+      // Pre-rotation proof MUST fail under the rotated VK (different epoch & bountyId)
       await expect(
         zkVerifier.connect(donor1).claimZkBounty(2n, proofEpoch0, commitment)
       ).to.be.revertedWithCustomError(zkVerifier, "InvalidZkProof");
 
-      // Re-prove using the new ceremony VK
-      const proofEpoch1 = await createAuthenticZkProof(donor1.address, traitId, commitment);
+      // Cross-bounty replay under same epoch must also fail (bounty 1 proof cannot claim bounty 2)
+      // Legacy un-scoped proof without domain separation MUST be rejected!
+      const legacyProof = await createLegacyZkProof(donor1.address, traitId, commitment);
+      await expect(
+        zkVerifier.connect(donor1).claimZkBounty(2n, legacyProof, commitment)
+      ).to.be.revertedWithCustomError(zkVerifier, "InvalidZkProof");
+
+      // Re-prove using the new ceremony VK with domain-separated signal for bounty 2
+      const proofEpoch1 = await createAuthenticZkProof(donor1.address, traitId, commitment, 2n);
       await (await zkVerifier.connect(donor1).claimZkBounty(2n, proofEpoch1, commitment)).wait();
 
       expect(await zkVerifier.hasVerifiedVariant(commitment, donor1.address)).to.equal(true);
@@ -648,6 +703,408 @@ describe("Protocol Hardening: Canonical Key Capsule Validation, ZK Epoch Isolati
       await expect(
         zkVerifier.connect(owner).setupVerificationKey(alphaG1, g2a, g2b, qEip197, ic0G1, ic1G1)
       ).to.be.revertedWithCustomError(zkVerifier, "InvalidCurvePoint");
+    });
+  });
+
+  // ===========================================================================
+  // 7. Escrow State Transition & Loophole Closure (BUG-SC-01)
+  // ===========================================================================
+  describe("7. Escrow State Transition Hardening & Self-Release Defense", function () {
+    it("allows buyer manual release confirmation and prevents seller self-release during dispute window", async function () {
+      const dataId = await registerSampleDataset("ESCROW_HARDENING_1");
+      await (await registry.connect(buyer).grantAccessWithEscrow(dataId, DISPUTE_WINDOW)).wait();
+
+      // Buyer sets manual escrow release preference
+      await (await registry.connect(buyer).setManualEscrowRelease(dataId, true)).wait();
+      expect(await registry.manualEscrowRelease(dataId, buyer.address)).to.equal(true);
+
+      const validCapsule = makeValidCapsule("manual_release_test");
+      await (await registry.connect(seller).storeTransformedCapsule(dataId, buyer.address, validCapsule)).wait();
+
+      // Capsule is delivered, but escrow is NOT auto-released due to manualEscrowRelease
+      let dep = await registry.escrowDeposits(dataId, buyer.address);
+      expect(dep.capsuleDelivered).to.equal(true);
+      expect(dep.released).to.equal(false);
+
+      // Seller cannot self-release during active dispute window
+      await expect(
+        registry.connect(seller).releaseEscrow(dataId, buyer.address)
+      ).to.be.revertedWithCustomError(registry, "DisputeWindowActive");
+
+      // Attacker or dispatcher cannot release escrow
+      await expect(
+        registry.connect(attacker).releaseEscrow(dataId, buyer.address)
+      ).to.be.revertedWithCustomError(registry, "DisputeWindowActive");
+
+      // Buyer confirms capsule delivery, triggering clean escrow release
+      const sellerBalBefore = await token.balanceOf(seller.address);
+      await expect(
+        registry.connect(buyer).confirmCapsuleAndReleaseEscrow(dataId)
+      )
+        .to.emit(registry, "EscrowConfirmed")
+        .withArgs(dataId, buyer.address);
+
+      dep = await registry.escrowDeposits(dataId, buyer.address);
+      expect(dep.released).to.equal(true);
+      expect(await token.balanceOf(seller.address) - sellerBalBefore).to.equal(PRICE);
+    });
+
+    it("freezes escrow on post-delivery dispute, blocks unilateral buyer self-refund, and resolves via arbiter governance", async function () {
+      const dataId = await registerSampleDataset("ESCROW_DISPUTE_ARBITER");
+      await (await registry.connect(buyer).grantAccessWithEscrow(dataId, DISPUTE_WINDOW)).wait();
+
+      const validCapsule = makeValidCapsule("disputed_payload");
+      await (await registry.connect(seller).storeTransformedCapsule(dataId, buyer.address, validCapsule)).wait();
+
+      // Buyer disputes defective capsule
+      await expect(
+        registry.connect(buyer).disputeCapsule(dataId)
+      )
+        .to.emit(registry, "EscrowDisputed")
+        .withArgs(dataId, buyer.address);
+
+      expect(await registry.escrowDisputed(dataId, buyer.address)).to.equal(true);
+      expect(await registry.hasActiveAccess(dataId, buyer.address)).to.equal(false);
+
+      // Post-delivery unilateral self-refund MUST be blocked (fixes BUG-SC-01 buyer refund theft)
+      await expect(
+        registry.connect(buyer).claimEscrowRefund(dataId)
+      ).to.be.revertedWithCustomError(registry, "CapsuleAlreadyDelivered");
+
+      // Seller cannot release escrow while disputed even after dispute window elapses
+      await ethers.provider.send("evm_increaseTime", [DISPUTE_WINDOW + 10]);
+      await ethers.provider.send("evm_mine", []);
+
+      await expect(
+        registry.connect(seller).releaseEscrow(dataId, buyer.address)
+      ).to.be.revertedWithCustomError(registry, "EscrowDisputedError");
+
+      // Non-owner cannot arbitrate dispute
+      await expect(
+        registry.connect(buyer).resolveEscrowDispute(dataId, buyer.address, true)
+      ).to.be.revertedWithCustomError(registry, "OwnableUnauthorizedAccount");
+
+      // Owner arbiter resolves dispute with 100% refund to buyer
+      const buyerBalBefore = await token.balanceOf(buyer.address);
+      await expect(
+        registry.connect(owner).resolveEscrowDispute(dataId, buyer.address, true)
+      )
+        .to.emit(registry, "EscrowDisputeResolved")
+        .withArgs(dataId, buyer.address, true, PRICE);
+
+      expect(await token.balanceOf(buyer.address) - buyerBalBefore).to.equal(PRICE);
+      const dep = await registry.escrowDeposits(dataId, buyer.address);
+      expect(dep.refunded).to.equal(true);
+      expect(await registry.escrowDisputed(dataId, buyer.address)).to.equal(false);
+    });
+  });
+
+  // ===========================================================================
+  // 8. Trait-Bound Registry Verification & Front-Running Commitments
+  // ===========================================================================
+  describe("8. Trait-Bound Registry Verification & Front-Running Mitigation", function () {
+    it("verifies trait possession through 3-arg verifyDatasetTraitPossession and blocks rawDataHash front-running", async function () {
+      await (await registry.connect(owner).setZkVerifier(zkVerifier.target)).wait();
+      await configureEphemeralTestCeremony(zkVerifier);
+
+      const traitId = ethers.keccak256(ethers.toUtf8Bytes("ACTN3_R577X_endurance"));
+      const commitment = ethers.keccak256(ethers.toUtf8Bytes("SELLER_WITNESS_DATA"));
+      const reward = ethers.parseEther("20");
+
+      await (
+        await zkVerifier.connect(buyer).createZkBounty(traitId, "ACTN3 Study", reward, 2, 86400)
+      ).wait();
+
+      const proof = await createAuthenticZkProof(seller.address, traitId, commitment);
+      await (await zkVerifier.connect(seller).claimZkBounty(1n, proof, commitment)).wait();
+
+      const rawHash = ethers.keccak256(ethers.toUtf8Bytes("GENOMIC_PROTECTED_HASH"));
+
+      // 1. Seller registers genomic dataset
+      await (
+        await registry.connect(seller).registerGenomicData(
+          rawHash,
+          VALID_RAW_CID,
+          VALID_SUMMARY_CID,
+          VALID_METADATA_CID,
+          VALID_TOKEN_URI,
+          PRICE,
+          ACCESS_DURATION,
+          ROYALTY_BPS
+        )
+      ).wait();
+      const dataId = await registry.dataCount();
+
+      // 2. Duplicate registration of same rawDataHash is rejected
+      await expect(
+        registry.connect(attacker).registerGenomicData(
+          rawHash,
+          VALID_RAW_CID,
+          VALID_SUMMARY_CID,
+          VALID_METADATA_CID,
+          VALID_TOKEN_URI,
+          PRICE,
+          ACCESS_DURATION,
+          ROYALTY_BPS
+        )
+      ).to.be.revertedWithCustomError(registry, "DataAlreadyRegistered");
+
+      // 4. Trait possession verified on registry via 3-arg overload
+      expect(
+        await registry["verifyDatasetTraitPossession(uint256,bytes32,bytes32)"](dataId, traitId, commitment)
+      ).to.equal(true);
+
+      const fakeTraitId = ethers.keccak256(ethers.toUtf8Bytes("DIFFERENT_TRAIT"));
+      expect(
+        await registry["verifyDatasetTraitPossession(uint256,bytes32,bytes32)"](dataId, fakeTraitId, commitment)
+      ).to.equal(false);
+    });
+  });
+
+  // ===========================================================================
+  // 9. Escrow Arbiter Reject, INVARIANT-16 Symmetry, Strict Base58/Base32 CID,
+  //    Salted Commit-Reveal Anti-Front-Running & Zero-Royalty Hygiene
+  // ===========================================================================
+  describe("9. Fair-Exchange, INVARIANT-16 Symmetry, Strict CID, Salted Commit & Royalty Hygiene", function () {
+    it("resolves false buyer dispute via resolveEscrowDispute(false) -> pays seller + secondary EIP-2981 royalty and restores buyer access", async function () {
+      const dataId = await registerSampleDataset("FALSE_DISPUTE_ROYALTY");
+      // Secondary transfer NFT from seller -> sellerAlt (donor2) so EIP-2981 splits 90% donor2 / 10% seller
+      await (await nft.connect(seller).transferFrom(seller.address, donor2.address, dataId)).wait();
+
+      await (await registry.connect(buyer).grantAccessWithEscrow(dataId, DISPUTE_WINDOW)).wait();
+      const cap = makeValidCapsule("valid_disputed");
+      await (await registry.connect(donor2).storeTransformedCapsule(dataId, buyer.address, cap)).wait();
+      await (await registry.connect(buyer).disputeCapsule(dataId)).wait();
+
+      expect(await registry.hasActiveAccess(dataId, buyer.address)).to.equal(false);
+      await expect(registry.connect(buyer).claimEscrowRefund(dataId)).to.be.revertedWithCustomError(
+        registry,
+        "CapsuleAlreadyDelivered"
+      );
+
+      const creatorBefore = await token.balanceOf(seller.address);
+      const sellerBefore = await token.balanceOf(donor2.address);
+      const expectedRoyalty = (PRICE * 1000n) / 10000n;
+      const expectedProceeds = PRICE - expectedRoyalty;
+
+      await expect(registry.connect(owner).resolveEscrowDispute(dataId, buyer.address, false))
+        .to.emit(registry, "EscrowDisputeResolved")
+        .withArgs(dataId, buyer.address, false, PRICE);
+
+      expect(await token.balanceOf(seller.address) - creatorBefore).to.equal(expectedRoyalty);
+      expect(await token.balanceOf(donor2.address) - sellerBefore).to.equal(expectedProceeds);
+      expect(await registry.hasActiveAccess(dataId, buyer.address)).to.equal(true);
+      expect(await registry.connect(buyer).getTransformedCapsule.staticCall(dataId)).to.equal(cap);
+    });
+
+    it("enforces strict INVARIANT-16 4-way symmetry across hasActiveAccess, getTransformedCapsule, buyerCapsules, and recordStudyReuse", async function () {
+      const dataId = await registerSampleDataset("INV16_FOUR_WAY_SYM");
+      const study1 = ethers.keccak256(ethers.toUtf8Bytes("STUDY_SYM_1"));
+      const study2 = ethers.keccak256(ethers.toUtf8Bytes("STUDY_SYM_2"));
+
+      // 1. Pending escrow (undelivered): all 4 deny access
+      await (await registry.connect(buyer).grantAccessWithEscrow(dataId, DISPUTE_WINDOW)).wait();
+      expect(await registry.hasActiveAccess(dataId, buyer.address)).to.equal(false);
+      await expect(registry.connect(buyer).getTransformedCapsule.staticCall(dataId)).to.be.revertedWithCustomError(registry, "AccessNotGranted");
+      await expect(registry.connect(buyer).buyerCapsules.staticCall(dataId, buyer.address)).to.be.revertedWithCustomError(registry, "AccessNotGranted");
+      await expect(registry.connect(buyer).recordStudyReuse(dataId, study1)).to.be.revertedWithCustomError(registry, "AccessNotGranted");
+
+      // 2. Delivered escrow (pre-confirmation): all 4 allow buyer inspection & reuse consistently
+      const cap = makeValidCapsule("sym_delivered");
+      await (await registry.connect(seller).storeTransformedCapsule(dataId, buyer.address, cap)).wait();
+      expect(await registry.hasActiveAccess(dataId, buyer.address)).to.equal(true);
+      expect(await registry.connect(buyer).getTransformedCapsule.staticCall(dataId)).to.equal(cap);
+      expect(await registry.connect(buyer).buyerCapsules.staticCall(dataId, buyer.address)).to.equal(cap);
+      await expect(registry.connect(buyer).recordStudyReuse(dataId, study1)).to.emit(registry, "StudyReuseRecorded");
+
+      // 3. Disputed escrow: all 4 freeze/deny identically
+      await (await registry.connect(buyer).disputeCapsule(dataId)).wait();
+      expect(await registry.hasActiveAccess(dataId, buyer.address)).to.equal(false);
+      await expect(registry.connect(buyer).getTransformedCapsule.staticCall(dataId)).to.be.revertedWithCustomError(registry, "EscrowDisputedError");
+      await expect(registry.connect(buyer).buyerCapsules.staticCall(dataId, buyer.address)).to.be.revertedWithCustomError(registry, "EscrowDisputedError");
+      await expect(registry.connect(buyer).recordStudyReuse(dataId, study2)).to.be.revertedWithCustomError(registry, "EscrowDisputedError");
+
+      // 4. Refunded escrow via arbiter: all 4 revoke identically
+      await (await registry.connect(owner).resolveEscrowDispute(dataId, buyer.address, true)).wait();
+      expect(await registry.hasActiveAccess(dataId, buyer.address)).to.equal(false);
+      await expect(registry.connect(buyer).getTransformedCapsule.staticCall(dataId)).to.be.revertedWithCustomError(registry, "AccessNotGranted");
+      await expect(registry.connect(buyer).buyerCapsules.staticCall(dataId, buyer.address)).to.be.revertedWithCustomError(registry, "AccessNotGranted");
+      await expect(registry.connect(buyer).recordStudyReuse(dataId, study2)).to.be.revertedWithCustomError(registry, "AccessNotGranted");
+    });
+
+    it("rejects non-Base58 Qm... chars (0, O, I, l, -, !) and invalid/short bafy... CIDs, while accepting valid CIDv0/CIDv1", async function () {
+      const invalidCids = [
+        "Qm0YwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG", // '0'
+        "QmOYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG", // 'O'
+        "QmIYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG", // 'I'
+        "QmlYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG", // 'l'
+        "QmYwAPJzv5CZs-A625s3Xf2nemtYgPpHdWEz79ojWnPbdG", // '-'
+        "QmYwAPJzv5CZs!A625s3Xf2nemtYgPpHdWEz79ojWnPbdG", // '!'
+        "bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oc", // < 50 chars
+        "bafyBEIGDYRZT5SFP7UDM7HU76UH7Y26NF3EFUYLQABF3OCLGTQY55FBZDI", // uppercase
+        "bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzd1", // invalid base32 '1'
+      ];
+      for (const badCid of invalidCids) {
+        const h = ethers.keccak256(ethers.toUtf8Bytes("badcid_" + badCid));
+        await expect(
+          registry.connect(seller).registerGenomicData(h, badCid, VALID_SUMMARY_CID, VALID_METADATA_CID, VALID_TOKEN_URI, PRICE, ACCESS_DURATION, ROYALTY_BPS),
+          `must reject invalid CID ${badCid}`
+        ).to.be.revertedWithCustomError(registry, "InvalidDataHashOrCid");
+      }
+
+      const validBafy = "bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi";
+      const okHash = ethers.keccak256(ethers.toUtf8Bytes("valid_bafy_dataset"));
+      await expect(
+        registry.connect(seller).registerGenomicData(okHash, validBafy, VALID_SUMMARY_CID, VALID_METADATA_CID, `ipfs://${validBafy}`, PRICE, ACCESS_DURATION, ROYALTY_BPS)
+      ).to.emit(registry, "GenomicDataRegistered");
+    });
+
+    it("supports salted commitGenomicData anti-front-running reveal flow and blocks attacker replay even with leaked salt", async function () {
+      const rawHash = ethers.keccak256(ethers.toUtf8Bytes("SALTED_COMMIT_GENOME"));
+      const salt = ethers.keccak256(ethers.toUtf8Bytes("SECRET_SALT_2026"));
+      const commitment = ethers.solidityPackedKeccak256(
+        ["bytes32", "bytes32", "address"],
+        [rawHash, salt, seller.address]
+      );
+
+      // Enable strict commit-reveal mode
+      await (await registry.connect(owner).setCommitRevealRequired(true)).wait();
+      expect(await registry.commitRevealRequired()).to.equal(true);
+
+      // Plain registerGenomicData is blocked under strict commit-reveal mode
+      await expect(
+        registry.connect(attacker).registerGenomicData(rawHash, VALID_RAW_CID, VALID_SUMMARY_CID, VALID_METADATA_CID, VALID_TOKEN_URI, PRICE, ACCESS_DURATION, ROYALTY_BPS)
+      ).to.be.revertedWithCustomError(registry, "CommitmentNotFound");
+
+      await (await registry.connect(seller).commitGenomicData(commitment)).wait();
+
+      // Attacker sniffing (rawHash, salt) from mempool cannot hijack because commitment binds msg.sender
+      await expect(
+        registry.connect(attacker).revealAndRegisterGenomicData(
+          rawHash,
+          salt,
+          [VALID_RAW_CID, VALID_SUMMARY_CID, VALID_METADATA_CID, VALID_TOKEN_URI],
+          PRICE,
+          ACCESS_DURATION,
+          ROYALTY_BPS
+        )
+      ).to.be.revertedWithCustomError(registry, "CommitmentNotFound");
+
+      // Seller reveals successfully in next block
+      const dataCountBefore = await registry.dataCount();
+      await (
+        await registry.connect(seller).revealAndRegisterGenomicData(
+          rawHash,
+          salt,
+          [VALID_RAW_CID, VALID_SUMMARY_CID, VALID_METADATA_CID, VALID_TOKEN_URI],
+          PRICE,
+          ACCESS_DURATION,
+          ROYALTY_BPS
+        )
+      ).wait();
+      expect(await registry.dataCount()).to.equal(dataCountBefore + 1n);
+
+      // Replay of same commitment fails
+      await expect(
+        registry.connect(seller).revealAndRegisterGenomicData(
+          rawHash,
+          salt,
+          [VALID_RAW_CID, VALID_SUMMARY_CID, VALID_METADATA_CID, VALID_TOKEN_URI],
+          PRICE,
+          ACCESS_DURATION,
+          ROYALTY_BPS
+        )
+      ).to.be.revertedWithCustomError(registry, "CommitmentNotFound");
+    });
+
+    it("suppresses spurious RoyaltyPaid(dataId, creator, 0) on tiny primary sales where royaltyAmount == 0", async function () {
+      const tinyHash = ethers.keccak256(ethers.toUtf8Bytes("TINY_PRIMARY_1_WEI"));
+      await (
+        await registry.connect(seller).registerGenomicData(
+          tinyHash,
+          VALID_RAW_CID,
+          VALID_SUMMARY_CID,
+          VALID_METADATA_CID,
+          VALID_TOKEN_URI,
+          1n, // 1 wei -> 10% = 0 wei on primary sale (creator == seller)
+          ACCESS_DURATION,
+          1000
+        )
+      ).wait();
+      const dataId = await registry.dataCount();
+      await expect(registry.connect(buyer)["grantAccess(uint256)"](dataId))
+        .to.not.emit(registry, "RoyaltyPaid");
+    });
+
+    it("rejects late capsule delivery after disputeWindow expires and extends inspection grace on last-second delivery", async function () {
+      const dataIdLate = await registerSampleDataset("LATE_DELIVERY_EXPIRED");
+      await (await registry.connect(buyer).grantAccessWithEscrow(dataIdLate, DISPUTE_WINDOW)).wait();
+
+      // Advance past disputeWindow without delivering capsule
+      await ethers.provider.send("evm_increaseTime", [DISPUTE_WINDOW + 10]);
+      await ethers.provider.send("evm_mine", []);
+
+      // Seller cannot deliver after disputeWindow expired to lock out claimEscrowRefund and steal funds
+      await expect(
+        registry.connect(seller).storeTransformedCapsule(dataIdLate, buyer.address, makeValidCapsule("too_late"))
+      ).to.be.revertedWithCustomError(registry, "DisputeWindowExpired");
+
+      // Buyer still recovers 100% escrow refund
+      const balBefore = await token.balanceOf(buyer.address);
+      await (await registry.connect(buyer).claimEscrowRefund(dataIdLate)).wait();
+      expect(await token.balanceOf(buyer.address) - balBefore).to.equal(PRICE);
+
+      // Last-second delivery within final 15 minutes extends disputeWindow by 15 minutes so buyer can dispute
+      const dataIdSnipe = await registerSampleDataset("SNIPE_DELIVERY_GRACE");
+      await (await registry.connect(buyer2).grantAccessWithEscrow(dataIdSnipe, DISPUTE_WINDOW)).wait();
+      await ethers.provider.send("evm_increaseTime", [DISPUTE_WINDOW - 5]);
+      await ethers.provider.send("evm_mine", []);
+
+      await (
+        await registry.connect(seller).storeTransformedCapsule(dataIdSnipe, buyer2.address, makeValidCapsule("snipe_delivery"))
+      ).wait();
+
+      // Seller cannot immediately release at original deadline; buyer has >= 15 min to dispute
+      await ethers.provider.send("evm_increaseTime", [20]);
+      await ethers.provider.send("evm_mine", []);
+
+      await expect(
+        registry.connect(seller).releaseEscrow(dataIdSnipe, buyer2.address)
+      ).to.be.revertedWithCustomError(registry, "DisputeWindowActive");
+
+      await expect(registry.connect(buyer2).disputeCapsule(dataIdSnipe))
+        .to.emit(registry, "EscrowDisputed")
+        .withArgs(dataIdSnipe, buyer2.address);
+    });
+
+    it("blocks mempool front-running griefing on commitGenomicData via msg.sender scoping", async function () {
+      const rawHash = ethers.keccak256(ethers.toUtf8Bytes("MEMPOOL_COMMIT_GRIEF_RESIST"));
+      const salt = ethers.keccak256(ethers.toUtf8Bytes("SALT_NO_GRIEF"));
+      const commitment = ethers.solidityPackedKeccak256(
+        ["bytes32", "bytes32", "address"],
+        [rawHash, salt, seller.address]
+      );
+
+      // Attacker copies seller's commitment from mempool and submits commitGenomicData first
+      await (await registry.connect(attacker).commitGenomicData(commitment)).wait();
+
+      // Seller's own commitGenomicData(commitment) MUST still succeed (un-griefable)
+      await expect(registry.connect(seller).commitGenomicData(commitment))
+        .to.emit(registry, "GenomicDataCommitted");
+
+      // Seller reveals cleanly in the next block
+      const before = await registry.dataCount();
+      await (
+        await registry.connect(seller).revealAndRegisterGenomicData(
+          rawHash,
+          salt,
+          [VALID_RAW_CID, VALID_SUMMARY_CID, VALID_METADATA_CID, VALID_TOKEN_URI],
+          PRICE,
+          ACCESS_DURATION,
+          ROYALTY_BPS
+        )
+      ).wait();
+      expect(await registry.dataCount()).to.equal(before + 1n);
     });
   });
 });

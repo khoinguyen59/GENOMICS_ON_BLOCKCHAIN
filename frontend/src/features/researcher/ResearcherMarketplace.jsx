@@ -71,7 +71,7 @@ export default function ResearcherMarketplace({
           <div id="os2-collections-section" className="os2-collections-divider">
             <div className="os2-section-header" style={{ marginBottom: 0 }}>
               <div>
-                <h3 className="os2-section-title">{t("exploreAllCohorts")}</h3>
+                <h2 className="os2-section-title">{t("exploreAllCohorts")}</h2>
                 <p className="os2-section-subtitle">{t("exploreAllCohortsDesc")}</p>
               </div>
             </div>

@@ -7,15 +7,31 @@
 import { computeDataHash } from "../core/symmetric.js";
 
 /**
- * Escape string for PDF literal text formatting
+ * Cleanly normalize Vietnamese diacritics and special characters to their
+ * clean Latin equivalents for standard PDF-1.4 Type1 / Helvetica font rendering,
+ * eliminating corrupt UTF-8 multi-byte mojibake and broken escape sequences.
  * @param {string} str 
  * @returns {string}
  */
-function escapePdfLiteral(str) {
+export function normalizeVietnameseText(str) {
+  if (!str) return "";
+  return String(str)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[đĐ]/g, (c) => (c === "đ" ? "d" : "D"))
+    .replace(/[^\x20-\x7E\xA0-\xFF]/g, " ");
+}
+
+/**
+ * Escape string for PDF literal text formatting with full UTF-8 / Vietnamese protection
+ * @param {string} str 
+ * @returns {string}
+ */
+export function escapePdfLiteral(str) {
   if (!str) return "";
   const dashRegex = new RegExp("[" + String.fromCharCode(0x2014, 0x2013) + "]", "g");
-  return String(str)
-    .replace(dashRegex, "-")
+  const normalized = normalizeVietnameseText(String(str).replace(dashRegex, "-"));
+  return normalized
     .replace(/\\/g, "\\\\")
     .replace(/\(/g, "\\(")
     .replace(/\)/g, "\\)");
@@ -29,6 +45,7 @@ function escapePdfLiteral(str) {
  * @param {string} [params.gene="ALDH2"] Analyzed gene
  * @param {string} [params.variant="rs671 (c.1510G>A, p.Glu504Lys)"] Pathogenic variant notation
  * @param {string} [params.date] Report issue date
+ * @param {string} [params.fontName="Helvetica"] Base Type1 font name
  * @returns {Uint8Array} Valid ISO 32000 / PDF-1.4 binary bytes
  */
 export function generateClinicalPdfReport({
@@ -37,6 +54,7 @@ export function generateClinicalPdfReport({
   gene = "ALDH2",
   variant = "rs671 (c.1510G>A, p.Glu504Lys)",
   date = new Date().toISOString().split("T")[0],
+  fontName = "Helvetica",
 } = {}) {
   const safeSubjectId = escapePdfLiteral(subjectId);
   const safeDisease = escapePdfLiteral(disease);
@@ -86,7 +104,7 @@ export function generateClinicalPdfReport({
   const obj3 =
     "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>\nendobj\n";
   const obj4 = `4 0 obj\n<< /Length ${streamBytes.length} >>\nstream\n${content}\nendstream\nendobj\n`;
-  const obj5 = "5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n";
+  const obj5 = `5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /${fontName} /Encoding /WinAnsiEncoding >>\nendobj\n`;
 
   const header = "%PDF-1.4\n";
   const offset1 = getByteLen(header);

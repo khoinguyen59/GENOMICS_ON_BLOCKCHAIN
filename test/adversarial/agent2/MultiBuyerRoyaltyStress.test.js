@@ -32,11 +32,12 @@ describe("AGENT2 :: Concurrent Multi-Buyer Stress & Royalty Split Conservation (
   const bps = 1000n;
 
   async function deployAndRegister(dataSeed, royaltyBps) {
+    const cleanSeed = String(dataSeed).replace(/0/g, "x").replace(/O/g, "o").replace(/I/g, "i").replace(/l/g, "1").replace(/[^1-9A-HJ-NP-Za-km-z]/g, "");
     const tx = await registry.connect(creator).registerGenomicData(
       ethers.keccak256(ethers.toUtf8Bytes(dataSeed)),
-      `QmAgent2Royalty${dataSeed}111111111111111111111`,
-      `QmAgent2Sum${dataSeed}111111111111111111111111`,
-      `QmAgent2Meta${dataSeed}11111111111111111111111`,
+      `QmAgent2Roya1ty${cleanSeed}111111111111111111111`,
+      `QmAgent2Sum${cleanSeed}111111111111111111111111`,
+      `QmAgent2Meta${cleanSeed}11111111111111111111111`,
       `ipfs://${dataSeed}`, price, 86400 * 30, royaltyBps
     );
     const r = await tx.wait();
@@ -187,13 +188,14 @@ describe("AGENT2 :: Concurrent Multi-Buyer Stress & Royalty Split Conservation (
       expect(preDepositors[i] - (await token.balanceOf(four[i].address))).to.equal(price);
     }
 
-    // dispatcher delivers real capsules -> escrow auto-releases with the 10% creator royalty
+    // dispatcher delivers real capsules -> buyers confirm fair-exchange release -> 10% creator royalty
     const preCreator = await token.balanceOf(creator.address);
     for (const b of four) {
       const t = await registry
         .connect(owner)
         .storeTransformedCapsule(1n, b.address, JSON.stringify({ version: "GENO-ASYM-RSA-OAEP-v2", capsule: `A2-REAL-${b.address}`, keyCipher: "ab".repeat(256) }));
       expect((await t.wait()).status).to.equal(1);
+      await (await registry.connect(b).confirmCapsuleAndReleaseEscrow(1n)).wait();
     }
 
     expect(await token.balanceOf(registryAddr)).to.equal(0n);
@@ -211,8 +213,8 @@ describe("AGENT2 :: Concurrent Multi-Buyer Stress & Royalty Split Conservation (
 
   it("A2-R05 royalty basis-point ceiling is enforced by EIP-2981 (no underflow / no >100% royalty)", async function () {
     const over = await capture(() => registry.connect(creator).registerGenomicData(
-      ethers.keccak256(ethers.toUtf8Bytes("ROY-OVER")), "QmOver11111111111111111111111111111111111",
-      "QmOver21111111111111111111111111111111111", "QmOver31111111111111111111111111111111111",
+      ethers.keccak256(ethers.toUtf8Bytes("ROY-OVER")), "Qmover11111111111111111111111111111111111",
+      "Qmover21111111111111111111111111111111111", "Qmover31111111111111111111111111111111111",
       "ipfs://over", price, 86400, 10001
     ));
     expect(over.ok).to.equal(false);

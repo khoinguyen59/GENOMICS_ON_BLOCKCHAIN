@@ -453,9 +453,11 @@ describe("AGENT3 ADVERSARIAL: GenoChain Registry / Token / NFT / zk-Verifier", f
       // registry holds the escrowed amount
       expect(await nonStd.balanceOf(reg2.target)).to.equal(PRICE);
 
-      // void-return transfer must be accepted by SafeERC20 on delivery
+      // void-return transfer must be accepted by SafeERC20 on buyer escrow confirmation
       const CAPSULE_NONSTD = JSON.stringify({ version: "GENO-ASYM-RSA-OAEP-v2", tag: "CAPSULE-NONSTD", keyCipher: "ab".repeat(256) });
       await reg2.connect(dataOwner).storeTransformedCapsule(1, buyer.address, CAPSULE_NONSTD);
+      expect(await nonStd.balanceOf(reg2.target)).to.equal(PRICE);
+      await reg2.connect(buyer).confirmCapsuleAndReleaseEscrow(1);
       expect(await nonStd.balanceOf(reg2.target)).to.equal(0n);
       expect(await nonStd.balanceOf(dataOwner.address)).to.equal(PRICE);
       expect(await reg2.connect(buyer).getTransformedCapsule.staticCall(1)).to.equal(CAPSULE_NONSTD);

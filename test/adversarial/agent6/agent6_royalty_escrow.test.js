@@ -272,7 +272,10 @@ describe("AGENT6 :: royalty, escrow & reentrancy adversarial suite", function ()
           .connect(owner)
           .storeTransformedCapsule(1, buyers[0].address, JSON.stringify({ version: "GENO-ASYM-RSA-OAEP-v2", keyCipher: "ab".repeat(256) }))
       ).wait();
-      const dep = await reg3.escrowDeposits(1, buyers[0].address);
+      let dep = await reg3.escrowDeposits(1, buyers[0].address);
+      expect(dep.released).to.equal(false);
+      await (await reg3.connect(buyers[0]).confirmCapsuleAndReleaseEscrow(1)).wait();
+      dep = await reg3.escrowDeposits(1, buyers[0].address);
       expect(dep.released).to.equal(true);
       expect(await nst.balanceOf(reg3.target)).to.equal(0n);
       expect(await nst.balanceOf(owner.address)).to.be.greaterThan(0n);
@@ -305,22 +308,20 @@ describe("AGENT6 :: royalty, escrow & reentrancy adversarial suite", function ()
       ).wait();
       expect(rc.status).to.equal(1);
 
-      const dep = await registry.escrowDeposits(1, buyers[0].address);
+      let dep = await registry.escrowDeposits(1, buyers[0].address);
       const stored = await registry.connect(buyers[0]).buyerCapsules(1, buyers[0].address);
 
-      expect(dep.released, "escrow auto-released on emit").to.equal(true);
+      expect(dep.released, "escrow stays locked until buyer confirms receipt").to.equal(false);
       expect(dep.capsuleDelivered, "capsuleDelivered flag set").to.equal(true);
       expect(
         stored,
-        "buyer paid + escrow released, yet buyerCapsules is empty: the gas-optimised " +
-          "emitTransformedCapsule path (GenomicsRegistry.sol:756-789) writes NO storage, and " +
-          "claimEscrowRefund is then blocked by the capsuleDelivered/released checks " +
-          "(GenomicsRegistry.sol:480-483). The only copy of the key material is the event log " +
-          "(datasetService.js:362-373 reads it), so a buyer using a light client, a different " +
-          "wallet, or a pruned node loses all recourse."
+        "emitTransformedCapsule MUST store capsule on-chain so buyer can inspect before releasing escrow"
       ).to.not.equal("");
+      await (await registry.connect(buyers[0]).confirmCapsuleAndReleaseEscrow(1)).wait();
+      dep = await registry.escrowDeposits(1, buyers[0].address);
+      expect(dep.released).to.equal(true);
       const sellerBal = await token.balanceOf(owner.address);
-      expect(sellerBal, "seller was paid in full despite empty storage").to.be.greaterThan(0n);
+      expect(sellerBal, "seller was paid in full after buyer confirmed").to.be.greaterThan(0n);
     });
   });
 });

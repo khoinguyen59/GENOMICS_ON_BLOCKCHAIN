@@ -104,7 +104,8 @@ describe("AGENT4 / PART1 — adversarial controls that HOLD", function () {
   }
 
   async function register(seed, price = PRICE, duration = DURATION, bps = 1000n, who = owner, reg = registry) {
-    const cid = `QmAgent4${seed}0000000000000000000000000000000`;
+    const cleanSeed = String(seed).replace(/0/g, "x").replace(/O/g, "o").replace(/I/g, "i").replace(/l/g, "1").replace(/[^1-9A-HJ-NP-Za-km-z]/g, "");
+    const cid = `QmAgent4${cleanSeed}1111111111111111111111111111111`;
     const hash = ethers.keccak256(ethers.toUtf8Bytes(`agent4-dataset-${seed}`));
     const tx = await reg.connect(who).registerGenomicData(hash, cid, cid, cid, `ipfs://${seed}`, price, duration, bps);
     await tx.wait();
@@ -237,7 +238,7 @@ describe("AGENT4 / PART1 — adversarial controls that HOLD", function () {
     });
 
     it("registration guards revert with custom errors and leave no half-written record", async function () {
-      const cid = "QmAgent4Guard000000000000000000000000000000";
+      const cid = "QmAgent4Guard111111111111111111111111111111";
       const h = ethers.keccak256(ethers.toUtf8Bytes("agent4-guard"));
       await expect(
         registry.registerGenomicData(ethers.ZeroHash, cid, cid, cid, "ipfs://x", PRICE, DURATION, 1000)
@@ -273,9 +274,9 @@ describe("AGENT4 / PART1 — adversarial controls that HOLD", function () {
       await (
         await mal.registerWithRegistry(
           ethers.keccak256(ethers.toUtf8Bytes("agent4-reenter-1")),
-          "QmAgent4A00000000000000000000000000000",
-          "QmAgent4B00000000000000000000000000000",
-          "QmAgent4C00000000000000000000000000000",
+          "QmAgent4A11111111111111111111111111111",
+          "QmAgent4B11111111111111111111111111111",
+          "QmAgent4C11111111111111111111111111111",
           "ipfs://mal-a",
           PRICE,
           DURATION,
@@ -302,9 +303,9 @@ describe("AGENT4 / PART1 — adversarial controls that HOLD", function () {
       await (
         await reg2.registerGenomicData(
           ethers.keccak256(ethers.toUtf8Bytes("agent4-reenter-2")),
-          "QmAgent4D00000000000000000000000000000",
-          "QmAgent4E00000000000000000000000000000",
-          "QmAgent4F00000000000000000000000000000",
+          "QmAgent4D11111111111111111111111111111",
+          "QmAgent4E11111111111111111111111111111",
+          "QmAgent4F11111111111111111111111111111",
           "ipfs://mal-b",
           PRICE,
           DURATION,
@@ -346,9 +347,9 @@ describe("AGENT4 / PART1 — adversarial controls that HOLD", function () {
       await (
         await reg3.registerGenomicData(
           ethers.keccak256(ethers.toUtf8Bytes("agent4-nst")),
-          "QmAgent4N00000000000000000000000000000",
-          "QmAgent4N100000000000000000000000000000",
-          "QmAgent4N200000000000000000000000000000",
+          "QmAgent4N11111111111111111111111111111",
+          "QmAgent4N111111111111111111111111111111",
+          "QmAgent4N211111111111111111111111111111",
           "ipfs://nst",
           PRICE,
           DURATION,
@@ -365,9 +366,12 @@ describe("AGENT4 / PART1 — adversarial controls that HOLD", function () {
       const seller0 = await nst.balanceOf(owner.address);
       const capsuleNst = JSON.stringify({ version: "GENO-ASYM-RSA-OAEP-v2", tag: "GNC1|capsule-nst", keyCipher: "ab".repeat(256) });
       await (await reg3.storeTransformedCapsule(1n, buyerA.address, capsuleNst)).wait();
-      const dep = await reg3.escrowDeposits(1n, buyerA.address);
-      expect(dep.released).to.equal(true);
+      let dep = await reg3.escrowDeposits(1n, buyerA.address);
+      expect(dep.released).to.equal(false);
       expect(dep.capsuleDelivered).to.equal(true);
+      await (await reg3.connect(buyerA).confirmCapsuleAndReleaseEscrow(1n)).wait();
+      dep = await reg3.escrowDeposits(1n, buyerA.address);
+      expect(dep.released).to.equal(true);
       expect(dep.amount).to.equal(PRICE, "DEPOSIT NOT ZEROED -> dead storage, documented");
       expect(await nst.balanceOf(owner.address)).to.equal(seller0 + PRICE);
       expect(await nst.balanceOf(reg3.target)).to.equal(escrow0, "escrow fully drained -> conservation holds");
@@ -430,7 +434,7 @@ describe("AGENT4 / PART1 — adversarial controls that HOLD", function () {
     });
 
     it("royalty bps boundary: 10001 reverts (OZ ERC2981) leaving zero state, 10000 routes 100% to the creator", async function () {
-      const cid = "QmAgent4Bps00000000000000000000000000000000";
+      const cid = "QmAgent4Bps11111111111111111111111111111111";
       await expect(
         registry.registerGenomicData(
           ethers.keccak256(ethers.toUtf8Bytes("bps-high")),
@@ -526,6 +530,7 @@ describe("AGENT4 / PART1 — adversarial controls that HOLD", function () {
         registry,
         "CapsuleAlreadyDelivered"
       );
+      await (await registry.connect(buyerA).confirmCapsuleAndReleaseEscrow(dataId)).wait();
       await ethers.provider.send("evm_increaseTime", [2 * 86400 + 5]);
       await expect(registry.connect(buyerA).claimEscrowRefund(dataId)).to.be.revertedWithCustomError(
         registry,

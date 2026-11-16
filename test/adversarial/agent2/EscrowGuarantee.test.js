@@ -140,8 +140,14 @@ describe("AGENT2 :: Escrow guarantee: capsule validity, counterparty binding, re
     expect(early.error).to.contain("CapsuleNotDelivered()");
     expect(await token.balanceOf(registry.target)).to.equal(price);
 
-    // after delivery the deposit is already released inside the same tx -> no window for a stranger
+    // after delivery escrow stays locked until buyer confirms or disputeWindow passes
     await (await registry.connect(seller).storeTransformedCapsule(1n, buyer.address, REAL_CAPSULE)).wait();
+    const attackerEarly = await capture(() => registry.connect(attacker).releaseEscrow(1n, buyer.address));
+    expect(attackerEarly.ok).to.equal(false);
+    expect(attackerEarly.error).to.contain("DisputeWindowActive()");
+    expect(await token.balanceOf(registry.target)).to.equal(price);
+
+    await (await registry.connect(buyer).confirmCapsuleAndReleaseEscrow(1n)).wait();
     const late = await capture(() => registry.connect(attacker).releaseEscrow(1n, buyer.address));
     expect(late.ok).to.equal(false);
     expect(late.error).to.contain("EscrowNotActive()");

@@ -60,7 +60,7 @@ def main():
         print(f"  ✔ Chain ID             : {chain_id} (Expected 31337 - Hardhat EVM)")
         print(f"  ✔ Current Block Height : #{current_block}")
     except Exception as e:
-        print(f"  ❌ Không thể kết nối tới RPC 8545: {e}")
+        print(f"  [FAIL] Không thể kết nối tới RPC 8545: {e}")
         sys.exit(1)
 
     w3 = Web3(Web3.HTTPProvider(RPC_URL))
@@ -105,7 +105,7 @@ def main():
         # Immediate second claim (MUST REVERT ON-CHAIN)
         tx2 = token.functions.faucet(attacker).transact({"from": attacker})
         w3.eth.wait_for_transaction_receipt(tx2)
-        print("    ❌ LỖI BẢO MẬT: Faucet cho phép rút liên tiếp!")
+        print("    [FAIL] LỖI BẢO MẬT: Faucet cho phép rút liên tiếp!")
         assert False, "Faucet Cooldown bypassed!"
     except Exception as e:
         print(f"    ✔ EVM ĐÃ CHẶN THÀNH CÔNG (On-chain Revert): Cooldown 1 giờ được thực thi nghiêm ngặt.")
@@ -118,7 +118,7 @@ def main():
             attacker, "ipfs://fake", fake_hash, "QmFake", "QmFake", "QmFake", 1000
         ).transact({"from": attacker})
         w3.eth.wait_for_transaction_receipt(bad_tx)
-        print("    ❌ LỖI BẢO MẬT: Non-registry có thể tự mint NFT!")
+        print("    [FAIL] LỖI BẢO MẬT: Non-registry có thể tự mint NFT!")
         assert False, "GenomicNFT access control violated!"
     except Exception as e:
         print(f"    ✔ EVM ĐÃ CHẶN THÀNH CÔNG: Chỉ hợp đồng GenomicsRegistry mới được phép gọi mintGenomicNFT (OnlyRegistry).")
@@ -128,7 +128,7 @@ def main():
     try:
         tamper_tx = registry.functions.updateDataPrice(1, w3.to_wei(99999, "ether")).transact({"from": attacker})
         w3.eth.wait_for_transaction_receipt(tamper_tx)
-        print("    ❌ LỖI BẢO MẬT: Người ngoài có thể sửa giá dataset!")
+        print("    [FAIL] LỖI BẢO MẬT: Người ngoài có thể sửa giá dataset!")
         assert False, "updateDataPrice onlyDataOwner bypassed!"
     except Exception as e:
         print(f"    ✔ EVM ĐÃ CHẶN THÀNH CÔNG: Ràng buộc onlyDataOwner ngăn chặn kẻ tấn công đổi giá.")
@@ -138,7 +138,7 @@ def main():
     try:
         revoke_tx = registry.functions.updateDataStatus(1, 2).transact({"from": attacker})
         w3.eth.wait_for_transaction_receipt(revoke_tx)
-        print("    ❌ LỖI BẢO MẬT: Người ngoài có thể đổi status dataset!")
+        print("    [FAIL] LỖI BẢO MẬT: Người ngoài có thể đổi status dataset!")
         assert False, "updateDataStatus onlyDataOwner bypassed!"
     except Exception as e:
         print(f"    ✔ EVM ĐÃ CHẶN THÀNH CÔNG: Ràng buộc onlyDataOwner ngăn chặn kẻ tấn công đổi status.")
@@ -148,7 +148,7 @@ def main():
     try:
         stolen_capsule = registry.functions.getTransformedCapsule(1).call({"from": attacker})
         if stolen_capsule and len(stolen_capsule) > 0:
-            print(f"    ❌ LỖI BẢO MẬT: Đọc trộm được capsule mà không cần mua quyền!")
+            print(f"    [FAIL] LỖI BẢO MẬT: Đọc trộm được capsule mà không cần mua quyền!")
             assert False, "getTransformedCapsule leak!"
         else:
             print(f"    ✔ EVM ĐÃ CHẶN THÀNH CÔNG: getTransformedCapsule từ chối khi không có active grant.")

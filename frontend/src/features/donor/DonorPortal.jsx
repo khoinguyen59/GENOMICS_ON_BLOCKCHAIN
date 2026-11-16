@@ -16,7 +16,8 @@ export default function DonorPortal({
   onGrantDirectAccess,
   onDispatchCapsule,
   onAuthorizeWorker,
-  onUpdateBlindTags
+  onUpdateBlindTags,
+  onReleaseEscrow
 }) {
   const { donorTab, setDonorTab, account } = useWeb3();
   const { datasets } = useDatasets();
@@ -70,6 +71,7 @@ export default function DonorPortal({
           onDispatchCapsule={onDispatchCapsule}
           onAuthorizeWorker={onAuthorizeWorker}
           onUpdateBlindTags={onUpdateBlindTags}
+          onReleaseEscrow={onReleaseEscrow}
         />
       )}
     </div>

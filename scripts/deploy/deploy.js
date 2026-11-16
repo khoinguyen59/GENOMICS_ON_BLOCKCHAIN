@@ -11,6 +11,7 @@ import {
 } from "../../crypto/client_crypto.js";
 import { buildPhenopacket } from "../../ipfs/phenopacket_builder.js";
 import { computeIpfsCidV0, cacheLocalIpfsContent } from "../../ipfs/pinata_uploader.js";
+import { pinFileToKubo, pinJsonToKubo, getKuboRpcEndpoint } from "../../ipfs/kubo_client.js";
 
 function loadOrCreateDispatcherVaultKey() {
   if (process.env.GENOCHAIN_SEED_VAULT_SECRET) {
@@ -106,7 +107,7 @@ async function main() {
   const na12878Path = path.resolve("data/downloaded_real_samples/NA12878_chr20_sample.vcf");
   if (fs.existsSync(na12878Path)) {
     na12878RealVcf = fs.readFileSync(na12878Path, "utf8");
-    console.log(`📂 Loaded authentic Broad Institute GIAB NA12878 VCF (${na12878RealVcf.length} bytes)`);
+    console.log(`[OK] Loaded authentic Broad Institute GIAB NA12878 VCF (${na12878RealVcf.length} bytes)`);
   } else {
     na12878RealVcf = "##fileformat=VCFv4.2\n##fileDate=20260919\n##source=Broad_Institute_GATK_GIAB\n##reference=GRCh38\n##contig=<ID=chr20,length=64444167,assembly=GRCh38>\n##INFO=<ID=ANN,Number=.,Type=String,Description=\"Functional annotations\">\n##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">\n#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tNA12878\nchr20\t14370\trs6072048\tC\tT\t100\tPASS\tANN=ZNF343|synonymous_variant\tGT\t0/1\n";
   }
@@ -371,6 +372,18 @@ async function main() {
   const publicSeeds = [];
   const secretSeeds = [];
 
+  const kuboRpc = getKuboRpcEndpoint();
+  let kuboReachable = false;
+  try {
+    const probe = await fetch(`${kuboRpc}/api/v0/version`, { method: "POST", signal: AbortSignal.timeout(1200) });
+    kuboReachable = Boolean(probe && probe.ok);
+  } catch (_) {
+    kuboReachable = false;
+  }
+  if (kuboReachable) {
+    console.log(`[IPFS] Local Kubo daemon detected at ${kuboRpc}; seeded cohorts will be pinned.`);
+  }
+
   for (const c of cohortConfigs) {
     // 1. Encrypt raw sequence
     const enc = await encryptGenomicData(c.vcfContent);
@@ -403,22 +416,47 @@ async function main() {
     });
     const metaJson = JSON.stringify(pheno, null, 2);
     const metaCid = await computeIpfsCidV0(metaJson);
+    const metaHash = ethers.keccak256(new TextEncoder().encode(metaJson));
 
-    // 4. Cache in dual-engine local cache
+    // 4. Cache in dual-engine local cache and pin to local Kubo if reachable
     cacheLocalIpfsContent(rawCid, enc.payload);
     cacheLocalIpfsContent(summaryCid, encPdf.payload);
     cacheLocalIpfsContent(metaCid, new TextEncoder().encode(metaJson));
+    if (kuboReachable) {
+      try {
+        const pRaw = await pinFileToKubo(enc.payload, `seed${c.dataId}_raw.enc`, "application/octet-stream", kuboRpc);
+        const pSum = await pinFileToKubo(encPdf.payload, `seed${c.dataId}_report.enc`, "application/pdf", kuboRpc);
+        const pMeta = await pinJsonToKubo(pheno, `phenopacket_seed${c.dataId}.json`, kuboRpc);
+        if (pRaw?.cid !== rawCid || pSum?.cid !== summaryCid || pMeta?.cid !== metaCid) {
+          console.warn(`[IPFS] Kubo pinned CID diff for Seed #${c.dataId}: raw=${pRaw?.cid || "null"}, sum=${pSum?.cid || "null"}, meta=${pMeta?.cid || "null"}`);
+        }
+      } catch (kuboErr) {
+        console.warn(`[IPFS] Kubo pin warning for Seed #${c.dataId}:`, kuboErr?.message || kuboErr);
+      }
+    }
 
-    // 5. Register on-chain
-    const tx = await registry.connect(deployer).registerGenomicData(
-      enc.rawDataHash,
-      rawCid,
-      summaryCid,
-      metaCid,
-      `ipfs://${metaCid}`,
+    const COHORT_BLIND_SALT = ethers.id("GENOCHAIN_COHORT_SALT_V1");
+    const computeBlindTagHex = (traitKey, traitValue) =>
+      ethers.keccak256(
+        ethers.AbiCoder.defaultAbiCoder().encode(
+          ["string", "string", "string", "bytes32"],
+          ["GENOCHAIN_BLIND_TAG_V1", traitKey, traitValue, COHORT_BLIND_SALT]
+        )
+      );
+    const blindTags = [
+      computeBlindTagHex("gene", c.geneSymbol || c.gene || ""),
+      computeBlindTagHex("trait", c.clinicalSignificance || c.disease || ""),
+      computeBlindTagHex("rsid", c.rsId || ""),
+    ];
+
+    // 5. Register on-chain via bundle (ensures bundle hashes / metadataHash parity matching deploy_localhost.js)
+    const tx = await registry.connect(deployer).registerGenomicDataBundle(
+      [enc.rawDataHash, encPdf.rawDataHash, metaHash],
+      [rawCid, summaryCid, metaCid, `ipfs://${metaCid}`],
       ethers.parseUnits(c.priceGeno, 18),
       c.durationDays * 86400,
-      1000 // 10% royalty
+      1000, // 10% royalty
+      blindTags
     );
     await tx.wait();
     console.log(
@@ -448,6 +486,7 @@ async function main() {
       summaryCid: summaryCid,
       rawDataHash: enc.rawDataHash,
       summaryDataHash: encPdf.rawDataHash,
+      metadataHash: metaHash,
     });
 
     // 7. Encapsulated seed key capsules (zero plaintext AES keys on disk - INVARIANT-01 & CRITICAL-02)

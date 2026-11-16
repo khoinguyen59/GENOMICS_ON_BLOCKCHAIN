@@ -101,10 +101,16 @@ export default function DragDropMintingStudio({ onPublishSuccess }) {
     setUploadedFileSize(fileSize);
 
     if (isLargeFile) {
-      const headerSnippet = content.split("\n").slice(0, 20).join("\n");
+      const previewSliceBytes = new TextEncoder().encode(content).length;
+      const previewSnippet = content.split("\n").slice(0, 100).join("\n");
       setRawFileText(
-        `##fileformat=VCFv4.2\n##source=GA4GH_Crypt4GH_Streaming_Pipeline\n##file_size_bytes=${fileSize}\n##streaming_mode=64KB_BLOCK_SLICING\n` +
-          headerSnippet
+        `##fileformat=VCFv4.2\n` +
+        `##source=GA4GH_Crypt4GH_Streaming_Pipeline\n` +
+        `##file_size_bytes=${fileSize}\n` +
+        `##preview_slice_bytes=${previewSliceBytes}\n` +
+        `##streaming_mode=64KB_BLOCK_SLICING\n` +
+        `##[PREVIEW_TRUNCATED: Displaying 256KB preview slice of ${(fileSize / (1024 * 1024)).toFixed(2)} MB dataset]\n` +
+        previewSnippet
       );
     } else {
       setRawFileText(content);
@@ -140,12 +146,13 @@ export default function DragDropMintingStudio({ onPublishSuccess }) {
           plaintextSizeInRam: fileSize,
           plaintextBytesOverWire: 0,
           ciphertextSize: chunkRes.payload.byteLength,
+          previewSliceBytes: new TextEncoder().encode(content).length,
           ivHex: ivHex,
           tagHex: tagHex,
           dataHash: chunkRes.rawDataHash,
-          status: `VERIFIED: GA4GH Crypt4GH Streaming Chunked Engine Active (${(fileSize / (1024 * 1024)).toFixed(1)} MB) - 64KB Slices`
+          status: `VERIFIED: GA4GH Crypt4GH Streaming Engine Active (${(fileSize / (1024 * 1024)).toFixed(1)} MB full dataset, 256KB preview slice hashed) - 64KB Slices`
         });
-        showToast(`Large file detected (${(fileSize / (1024 * 1024)).toFixed(1)} MB): GA4GH Streaming Mode Active`);
+        showToast(`Large file detected (${(fileSize / (1024 * 1024)).toFixed(1)} MB): 256KB preview slice hashed, GA4GH Streaming Mode Active`);
       } catch (err) {
         console.warn("Chunked pre-encryption preview note:", err);
       }
@@ -277,6 +284,7 @@ export default function DragDropMintingStudio({ onPublishSuccess }) {
         rawFileText,
         rawFileBlob,
         isChunked: isChunkedMode,
+        fileSize: uploadedFileSize,
         subjectId,
         disease,
         geneSymbol,

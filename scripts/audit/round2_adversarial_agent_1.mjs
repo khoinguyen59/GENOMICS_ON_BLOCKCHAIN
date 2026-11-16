@@ -156,7 +156,7 @@ async function runRound2AdversarialSuite() {
   );
 
   if (storeCapsuleSucceeded) {
-    console.log(`         ⚠ VULNERABILITY CONFIRMED: Escrow released = ${escrowAfterStore.released}. Alice received tokens while dataset is Revoked!`);
+    console.log(`         [!] VULNERABILITY CONFIRMED: Escrow released = ${escrowAfterStore.released}. Alice received tokens while dataset is Revoked!`);
   }
 
   // ---------------------------------------------------------------------------

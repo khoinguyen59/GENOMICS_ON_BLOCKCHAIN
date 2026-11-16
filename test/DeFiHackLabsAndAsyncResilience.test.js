@@ -64,9 +64,9 @@ describe("Authoritative Security Suite: DeFiHackLabs, Damn Vulnerable DeFi & Asy
       const price = ethers.parseEther("100");
       await registry.connect(creator).registerGenomicData(
         rawHash,
-        "QmSampleRawCid111111111111111111111111111111111",
-        "QmSampleSumCid111111111111111111111111111111111",
-        "QmSampleMetaCid11111111111111111111111111111111",
+        "QmSamp1eRawCid111111111111111111111111111111111",
+        "QmSamp1eSumCid111111111111111111111111111111111",
+        "QmSamp1eMetaCid11111111111111111111111111111111",
         "ipfs://sample",
         price,
         86400 * 30,
@@ -89,9 +89,9 @@ describe("Authoritative Security Suite: DeFiHackLabs, Damn Vulnerable DeFi & Asy
 
       await registry.connect(creator).registerGenomicData(
         rawHash,
-        "QmUnstoppableCid11111111111111111111111111111111",
-        "QmUnstoppableSum11111111111111111111111111111111",
-        "QmUnstoppableMeta1111111111111111111111111111111",
+        "QmUnstoppab1eCid11111111111111111111111111111111",
+        "QmUnstoppab1eSum11111111111111111111111111111111",
+        "QmUnstoppab1eMeta1111111111111111111111111111111",
         "ipfs://unstoppable",
         price,
         86400 * 30,
@@ -209,9 +209,9 @@ describe("Authoritative Security Suite: DeFiHackLabs, Damn Vulnerable DeFi & Asy
       await expect(
         registry.connect(creator).registerGenomicData(
           ethers.ZeroHash,
-          "QmValidCid111111111111111111111111111111111111",
-          "QmValidSum111111111111111111111111111111111111",
-          "QmValidMeta11111111111111111111111111111111111",
+          "QmVa1idCid111111111111111111111111111111111111",
+          "QmVa1idSum111111111111111111111111111111111111",
+          "QmVa1idMeta11111111111111111111111111111111111",
           "ipfs://meta",
           100,
           86400,
@@ -225,8 +225,8 @@ describe("Authoritative Security Suite: DeFiHackLabs, Damn Vulnerable DeFi & Asy
         registry.connect(creator).registerGenomicData(
           validHash,
           "",
-          "QmValidSum111111111111111111111111111111111111",
-          "QmValidMeta11111111111111111111111111111111111",
+          "QmVa1idSum111111111111111111111111111111111111",
+          "QmVa1idMeta11111111111111111111111111111111111",
           "ipfs://meta",
           100,
           86400,
@@ -238,9 +238,9 @@ describe("Authoritative Security Suite: DeFiHackLabs, Damn Vulnerable DeFi & Asy
       await expect(
         registry.connect(creator).registerGenomicData(
           validHash,
-          "QmValidCid111111111111111111111111111111111111",
-          "QmValidSum111111111111111111111111111111111111",
-          "QmValidMeta11111111111111111111111111111111111",
+          "QmVa1idCid111111111111111111111111111111111111",
+          "QmVa1idSum111111111111111111111111111111111111",
+          "QmVa1idMeta11111111111111111111111111111111111",
           "ipfs://meta",
           0,
           86400,
@@ -252,9 +252,9 @@ describe("Authoritative Security Suite: DeFiHackLabs, Damn Vulnerable DeFi & Asy
       await expect(
         registry.connect(creator).registerGenomicData(
           validHash,
-          "QmValidCid111111111111111111111111111111111111",
-          "QmValidSum111111111111111111111111111111111111",
-          "QmValidMeta11111111111111111111111111111111111",
+          "QmVa1idCid111111111111111111111111111111111111",
+          "QmVa1idSum111111111111111111111111111111111111",
+          "QmVa1idMeta11111111111111111111111111111111111",
           "ipfs://meta",
           100,
           0,

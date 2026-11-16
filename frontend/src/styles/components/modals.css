@@ -140,6 +140,59 @@
   }
 }
 
+@media (max-width: 480px) {
+  .terminal-modal-backdrop {
+    padding: 8px 4px !important;
+  }
+
+  .terminal-modal-window.opensea-modal-container {
+    max-width: calc(100vw - 8px) !important;
+    width: calc(100vw - 8px) !important;
+    margin: 0 auto;
+    border-radius: var(--radius-md);
+  }
+
+  .modal-header-bar {
+    padding: 10px 12px !important;
+  }
+
+  .modal-title-left {
+    gap: 6px;
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  .opensea-modal-content-grid {
+    padding: 10px 8px !important;
+    gap: 10px;
+  }
+
+  .opensea-traits-grid {
+    grid-template-columns: 1fr 1fr !important;
+    gap: 6px;
+  }
+
+  .opensea-trait-card {
+    padding: 6px 8px !important;
+  }
+
+  .buybox-escrow-toggle-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .opensea-hash-row {
+    flex-wrap: wrap;
+  }
+
+  .opensea-full-hash {
+    font-size: 10px;
+    max-width: 100%;
+    word-break: break-all;
+  }
+}
+
 /* Left Column */
 .opensea-modal-left-col {
   display: flex;
@@ -405,7 +458,7 @@
 .buybox-royalty-tag {
   background: rgba(245, 158, 11, 0.12);
   border: 1px solid rgba(245, 158, 11, 0.3);
-  color: var(--accent-amber);
+  color: var(--accent-amber-text, #b45309);
   font-size: 12.5px;
   font-weight: 700;
   padding: 3px 8px;
@@ -506,7 +559,7 @@
   font-family: var(--font-mono);
   font-size: 10.5px;
   font-weight: 700;
-  color: #94a3b8;
+  color: var(--text-secondary);
   text-transform: uppercase;
   letter-spacing: 0.06em;
 }
@@ -656,6 +709,16 @@
 
 [data-theme="light"] .opensea-trait-val {
   color: #0f172a;
+}
+
+[data-theme="light"] .opensea-trait-rarity {
+  color: var(--text-secondary);
+}
+
+[data-theme="light"] .buybox-royalty-tag {
+  color: var(--accent-amber-text);
+  background: #fef3c7;
+  border-color: #fde68a;
 }
 
 [data-theme="light"] .opensea-crypto-proof-box {

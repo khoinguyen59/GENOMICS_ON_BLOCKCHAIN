@@ -176,10 +176,11 @@ describe("zk-Genomics: Zero-Knowledge Genetic Variant Verification & Bounties", 
    * Evaluates e(-A, B) * e(alpha, beta) * e(ic0 + publicSignal * ic1, gamma) * e(C, delta) == 1
    * against the ephemeral CSPRNG ceremony parameters generated in beforeEach.
    */
-  async function createAuthenticZkProof(donorAddress, traitId, commitment, cScalar = 1n) {
+  async function createAuthenticZkProof(donorAddress, traitId, commitment, cScalar = 1n, bountyId = 1n) {
+    const epoch = zkVerifier ? await zkVerifier.vkEpoch() : 0n;
     const packed = ethers.solidityPacked(
-      ["bytes32", "bytes32", "address"],
-      [commitment, traitId, donorAddress]
+      ["bytes32", "bytes32", "address", "uint256", "address", "uint256", "uint256"],
+      [commitment, traitId, donorAddress, bountyId, zkVerifier.target, 31337n, epoch]
     );
     const publicSignal = BigInt(ethers.keccak256(packed)) % R_MOD;
 
@@ -405,11 +406,11 @@ describe("zk-Genomics: Zero-Knowledge Genetic Variant Verification & Bounties", 
 
     it("Should automatically deactivate bounty once maximum claims reached", async function () {
       const comm1 = ethers.keccak256(ethers.toUtf8Bytes("COMMITMENT_1"));
-      const proof1 = await createAuthenticZkProof(donor1.address, TRAIT_ALDH2_RS671, comm1, 1n);
+      const proof1 = await createAuthenticZkProof(donor1.address, TRAIT_ALDH2_RS671, comm1, 1n, bountyId);
       await zkVerifier.connect(donor1).claimZkBounty(bountyId, proof1, comm1);
 
       const comm2 = ethers.keccak256(ethers.toUtf8Bytes("COMMITMENT_2"));
-      const proof2 = await createAuthenticZkProof(donor2.address, TRAIT_ALDH2_RS671, comm2, 2n);
+      const proof2 = await createAuthenticZkProof(donor2.address, TRAIT_ALDH2_RS671, comm2, 2n, bountyId);
       await zkVerifier.connect(donor2).claimZkBounty(bountyId, proof2, comm2);
 
       const bounty = await zkVerifier.bounties(bountyId);
@@ -419,7 +420,7 @@ describe("zk-Genomics: Zero-Knowledge Genetic Variant Verification & Bounties", 
 
       // Third claim must revert with BountyExpiredOrInactive or BountyFullyClaimed
       const comm3 = ethers.keccak256(ethers.toUtf8Bytes("COMMITMENT_3"));
-      const proof3 = await createAuthenticZkProof(attacker.address, TRAIT_ALDH2_RS671, comm3, 3n);
+      const proof3 = await createAuthenticZkProof(attacker.address, TRAIT_ALDH2_RS671, comm3, 3n, bountyId);
       await expect(
         zkVerifier.connect(attacker).claimZkBounty(bountyId, proof3, comm3)
       ).to.be.revertedWithCustomError(zkVerifier, "BountyExpiredOrInactive");

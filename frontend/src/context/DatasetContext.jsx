@@ -36,12 +36,17 @@ export function DatasetProvider({ children }) {
       // 1. Catalog & On-chain Data State
       datasets: catalog.datasets,
       setDatasets: catalog.setDatasets,
+      catalogError: catalog.catalogError,
       purchasedData: catalog.purchasedData,
       setPurchasedData: catalog.setPurchasedData,
       loadingChain: catalog.loadingChain,
       fetchOnChainDatasets: catalog.fetchOnChainDatasets,
       selectedAssetModal: catalog.selectedAssetModal,
       setSelectedAssetModal: catalog.setSelectedAssetModal,
+      confirmCapsuleAndReleaseEscrow: catalog.confirmCapsuleAndReleaseEscrow,
+      disputeCapsule: catalog.disputeCapsule,
+      setManualEscrowRelease: catalog.setManualEscrowRelease,
+      releaseEscrow: catalog.releaseEscrow,
 
       // 2. 15-Tier Multi-Attribute Genomic Filters
       filterKeyword: filters.filterKeyword,
@@ -58,6 +63,8 @@ export function DatasetProvider({ children }) {
       setFilterZygosity: filters.setFilterZygosity,
       filterRegion: filters.filterRegion,
       setFilterRegion: filters.setFilterRegion,
+      filterBloodType: filters.filterBloodType,
+      setFilterBloodType: filters.setFilterBloodType,
       filterFormat: filters.filterFormat,
       setFilterFormat: filters.setFilterFormat,
       filterAssembly: filters.filterAssembly,

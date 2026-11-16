@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import "@openzeppelin/contracts/token/ERC721/extensions/ERC721URIStorage.sol";
-import "@openzeppelin/contracts/token/common/ERC2981.sol";
-import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import { ERC721 } from "@openzeppelin/contracts/token/ERC721/ERC721.sol";
+import { ERC721URIStorage } from "@openzeppelin/contracts/token/ERC721/extensions/ERC721URIStorage.sol";
+import { ERC2981 } from "@openzeppelin/contracts/token/common/ERC2981.sol";
+import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
+import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 interface IGenomicsRegistryWorkerSync {
     function resetAuthorizedWorkersForToken(uint256 tokenId) external;
@@ -105,11 +106,11 @@ contract GenomicNFT is ERC721URIStorage, ERC2981, Ownable {
      */
     function mintGenomicNFT(
         address to,
-        string memory uri,
+        string calldata uri,
         bytes32 rawDataHash,
-        string memory rawCid,
-        string memory summaryCid,
-        string memory metadataCid,
+        string calldata rawCid,
+        string calldata summaryCid,
+        string calldata metadataCid,
         uint96 royaltyBps
     ) external onlyRegistry returns (uint256) {
         uint256 tokenId = ++_nextTokenId;

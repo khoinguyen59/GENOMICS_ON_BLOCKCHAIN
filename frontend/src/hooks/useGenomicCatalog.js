@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from "react";
 import { ethers } from "ethers";
 import seedMetadata from "../contracts/seedMetadata.json";
+import contractAddresses from "../contracts/contractAddresses.json";
+import GenomicsRegistryABI from "../contracts/GenomicsRegistryABI.json";
 import { retrieveFromIpfs } from "../../../ipfs/pinata_uploader.js";
 import { PRESET_CATALOG } from "../services/vcfService";
 import { sanitizeGenomicMetadata } from "../utils/asyncResilience";
@@ -31,6 +33,7 @@ export function buildInitialDatasetsFromSeed() {
     const dId = Number(s.dataId);
     const p = PRESET_BY_DATA_ID[dId] || PRESET_CATALOG.ACTN3_PERFORMANCE;
     const sig = s.clinicalSignificance || "Physical Traits & Performance";
+    const bloodGrp = s.bloodGroup || s.bloodType || p?.bloodGroup || p?.bloodType || "O+";
     return {
       dataId: dId, tokenId: dId,
       owner: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266", originalCreator: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
@@ -43,7 +46,8 @@ export function buildInitialDatasetsFromSeed() {
       assembly: s.assembly || "GRCh38", format: "VCF v4.2",
       platform: dId === 1 ? "1000 Genomes WGS" : dId === 7 ? "GATK Pipeline" : "Illumina NovaSeq",
       hpoTerm: p?.variantClass || s.hpoTerm || "SO:0000694", region: p?.ancestryRegion || s.region || "Global",
-      ancestry: p?.ancestryRegion || s.ancestry || "Global", clinvarId: s.clinvarId || "dbSNP:rs671",
+      ancestry: s.ancestry || p?.ancestryRegion || "Global", clinvarId: s.clinvarId || "dbSNP:rs671",
+      bloodGroup: bloodGrp, bloodType: bloodGrp,
       price: Number(p?.priceGeno || 80), durationDays: Number(p?.durationDays || 30),
       accessCount: 0, accumulatedRoyalty: 0, royaltyBps: 1000, status: "Active", statusNum: 0,
       rawCid: s.rawCid, summaryCid: s.summaryCid, metadataCid: s.metadataCid,
@@ -54,13 +58,15 @@ export function buildInitialDatasetsFromSeed() {
 }
 
 export function useGenomicCatalog({ account, getContracts }) {
-  const [datasets, setDatasets] = useState(() => buildInitialDatasetsFromSeed());
+  const [datasets, setDatasets] = useState([]);
+  const [catalogError, setCatalogError] = useState(null);
   const [purchasedData, setPurchasedData] = useState([]);
   const [loadingChain, setLoadingChain] = useState(true);
   const [selectedAssetModal, setSelectedAssetModal] = useState(null);
 
   const fetchOnChainDatasets = useCallback(async (currentAccount) => {
     setLoadingChain(true);
+    setCatalogError(null);
     try {
       const contracts = await getContracts();
       if (!contracts) return;
@@ -90,8 +96,18 @@ export function useGenomicCatalog({ account, getContracts }) {
         if (!seedMatch && raw.metadataCid) {
           try {
             const bytes = await retrieveFromIpfs(raw.metadataCid);
-            if (bytes?.length) ipfsMeta = sanitizeMetaTree(JSON.parse(new TextDecoder().decode(bytes)));
-          } catch {}
+            if (bytes?.length) {
+              if (raw.metadataHash && raw.metadataHash !== ethers.ZeroHash) {
+                const computedHash = ethers.sha256(bytes);
+                if (computedHash.toLowerCase() !== raw.metadataHash.toLowerCase()) {
+                  console.warn(`[Hash Mismatch] Metadata CID ${raw.metadataCid} expected ${raw.metadataHash} got ${computedHash}`);
+                }
+              }
+              ipfsMeta = sanitizeMetaTree(JSON.parse(new TextDecoder().decode(bytes)));
+            }
+          } catch (e) {
+            console.warn(`Failed to fetch IPFS metadata for dataset #${dId}:`, e);
+          }
         }
         let extractedSummaryHash = seedMatch?.summaryDataHash || null;
         if (!extractedSummaryHash && ipfsMeta?.files) {
@@ -139,10 +155,11 @@ export function useGenomicCatalog({ account, getContracts }) {
         const zyg = seedMatch?.zygosity || ([4, 6, 10].includes(dId) ? "1/1 (Homozygous Alt)" : "0/1 (Heterozygous)");
         const refAssembly = seedMatch?.assembly || (dId === 7 ? "GRCh37" : chrom === "chrM" ? "rCRS" : "GRCh38");
         const geneInfo = p?.geneSymbol || seedMatch?.gene || (phenoGene ? `${phenoGene} Molecular Locus` : `Target Locus: ${raw.rawCiphertextCid.substring(0, 8)}...`);
-        const metaMime = ipfsMeta?.files?.[0]?.fileAttributes?.fileFormat || "";
-        const dataFormat = seedMatch?.format || (metaMime.includes("fastq") || geneSym === "FASTQ" || geneInfo.includes("FASTQ") ? "FASTQ (Reads)" : geneSym === "FASTA" || geneInfo.includes("FASTA") || chrom === "chrM" ? "FASTA (Sequence)" : geneSym === "JSON" || geneInfo.includes("Phenopacket") ? "GA4GH JSON" : "VCF v4.2");
+        const metaMime = ipfsMeta?.files?.[0]?.fileAttributes?.fileFormat || ipfsMeta?.format || "";
+        const dataFormat = seedMatch?.format || (metaMime.includes("fastq") || geneSym === "FASTQ" || geneInfo.includes("FASTQ") ? "FASTQ (Reads)" : geneSym === "FASTA" || geneInfo.includes("FASTA") || chrom === "chrM" ? "FASTA (Sequence)" : geneSym === "JSON" || geneInfo.includes("Phenopacket") ? "GA4GH JSON" : (metaMime || "VCF"));
         const seqPlatform = seedMatch?.platform || (dId === 1 ? "1000 Genomes WGS" : dId === 7 ? "GATK Pipeline" : geneInfo.includes("SAMtools") ? "SAMtools Panel" : "Illumina NovaSeq");
 
+        const bloodGrp = seedMatch?.bloodGroup || seedMatch?.bloodType || ipfsMeta?.subject?.bloodGroup || ipfsMeta?.bloodType || p?.bloodGroup || p?.bloodType || "O+";
         return {
           dataId: dId, tokenId: tId, owner: dynamicOwner, originalCreator,
           disease: p?.titleVi || seedMatch?.disease || ipfsMeta?.diseases?.[0]?.term?.label || `Molecular Genomic Cohort #${dId}`,
@@ -156,8 +173,9 @@ export function useGenomicCatalog({ account, getContracts }) {
           clinicalSignificance: sig, consequence: cons, zygosity: zyg, assembly: refAssembly, format: dataFormat, platform: seqPlatform,
           hpoTerm: p?.variantClass || seedMatch?.hpoTerm || ipfsMeta?.phenotypicFeatures?.[0]?.type?.label || "SO:0000694 (Genomic Variant)",
           region: p?.ancestryRegion || seedMatch?.region || ipfsMeta?.subject?.ancestry || "On-Chain Verified Cohort",
-          ancestry: p?.ancestryRegion || seedMatch?.ancestry || ipfsMeta?.phenotypicFeatures?.find((f) => f.type?.id === "HANCESTRO:0009")?.type?.label || ipfsMeta?.subject?.ancestry || "On-Chain Verified Cohort",
+          ancestry: seedMatch?.ancestry || ipfsMeta?.phenotypicFeatures?.find((f) => f.type?.id?.startsWith("HANCESTRO"))?.type?.label || p?.ancestryRegion || ipfsMeta?.subject?.ancestry || "On-Chain Verified Cohort",
           clinvarId: seedMatch?.clinvarId || ipfsMeta?.interpretations?.[0]?.diagnosis?.genomicInterpretations?.[0]?.variantInterpretation?.variationDescriptor?.id || "dbSNP:rs671",
+          bloodGroup: bloodGrp, bloodType: bloodGrp,
           price: priceFmt, durationDays: durationDay, accessCount,
           accumulatedRoyalty: (priceFmt * accessCount * royaltyBps) / 10000, royaltyBps, status: statusStr, statusNum,
           rawCid: raw.rawCiphertextCid, summaryCid: raw.summaryCiphertextCid, metadataCid: raw.metadataCid,
@@ -181,11 +199,20 @@ export function useGenomicCatalog({ account, getContracts }) {
             try {
               const dep = await contracts.registry.escrowDeposits(d.dataId, currentAccount);
               if (dep && dep.amount > 0n) {
+                const [isDisputed, isManual] = await Promise.all([
+                  contracts.registry.escrowDisputed(d.dataId, currentAccount).catch(() => false),
+                  contracts.registry.manualEscrowRelease(d.dataId, currentAccount).catch(() => false)
+                ]);
                 const depTime = Number(dep.depositTime), disputeWin = Number(dep.disputeWindow), deadline = depTime + disputeWin;
-                const canRefund = !dep.released && !dep.refunded && (d.statusNum === 1 || d.statusNum === 2 || chainNowSec >= deadline);
+                const capsuleDelivered = Boolean(dep.capsuleDelivered);
+                const isDisp = Boolean(isDisputed);
+                const canRefund = !dep.released && !dep.refunded && !capsuleDelivered && (
+                  d.statusNum === 1 || d.statusNum === 2 || chainNowSec >= deadline
+                );
                 escrowInfo = {
                   amount: Number(ethers.formatUnits(dep.amount, 18)), depositTime: depTime, disputeWindow: disputeWin,
-                  deadline, released: dep.released, refunded: dep.refunded, isPending: !dep.released && !dep.refunded, canRefund
+                  deadline, released: Boolean(dep.released), refunded: Boolean(dep.refunded), capsuleDelivered,
+                  isDisputed: isDisp, isManual: Boolean(isManual), isPending: !dep.released && !dep.refunded, canRefund
                 };
               }
             } catch {}
@@ -198,19 +225,34 @@ export function useGenomicCatalog({ account, getContracts }) {
           const { d, isOwner, hasAccess, grantData, escrowInfo } = item;
           if (hasAccess || isOwner || escrowInfo?.isPending) {
             const isEscrowPending = Boolean(!isOwner && escrowInfo?.isPending);
-            let expiryLabel = "Perpetual (Owner)";
+            const activeLang = typeof window !== "undefined" && window.localStorage ? (window.localStorage.getItem("geno_lang") || "vi") : "vi";
+            let expiryLabel = activeLang === "vi" ? "Vĩnh viễn (Chủ sở hữu)" : "Perpetual (Owner)";
             if (isEscrowPending) {
-              expiryLabel = escrowInfo.canRefund ? "Escrow Expired (Refund Ready)" : "Escrow Pending Delivery";
+              if (escrowInfo.isDisputed) {
+                expiryLabel = activeLang === "vi" ? "Ký quỹ đang khiếu nại (Chờ Admin)" : "Escrow Disputed (Admin Review)";
+              } else if (escrowInfo.capsuleDelivered) {
+                expiryLabel = activeLang === "vi" ? "Khóa đã giao (Chờ xác nhận)" : "Capsule Delivered (Pending Release)";
+              } else if (escrowInfo.canRefund) {
+                expiryLabel = activeLang === "vi" ? "Hết hạn ký quỹ (Sẵn sàng hoàn tiền)" : "Escrow Expired (Refund Ready)";
+              } else {
+                expiryLabel = activeLang === "vi" ? "Ký quỹ chờ bàn giao" : "Escrow Pending Delivery";
+              }
             } else if (!isOwner && grantData?.expiresAt) {
               const remDays = Math.max(0, Math.ceil((Number(grantData.expiresAt) - chainNowSec) / 86400));
-              expiryLabel = remDays > 0 ? `${remDays} days left` : "Expired";
+              expiryLabel = remDays > 0
+                ? (activeLang === "vi" ? `${remDays} ngày còn lại` : `${remDays} days left`)
+                : (activeLang === "vi" ? "Hết hạn" : "Expired");
             } else if (!isOwner) {
-              expiryLabel = `${d.durationDays} days`;
+              expiryLabel = activeLang === "vi" ? `${d.durationDays} ngày` : `${d.durationDays} days`;
             }
             purchasedList.push({
               ...d, accountAddr: currentAccount.toLowerCase(),
-              purchasedAt: isOwner ? "Data Owner" : isEscrowPending ? "Escrow Active" : "Active",
-              expiresAt: expiryLabel, escrowInfo, isEscrowPending, hasActiveAccess: hasAccess, isOwner,
+              purchasedAt: isOwner
+                ? (activeLang === "vi" ? "Chủ Dữ Liệu" : "Data Owner")
+                : isEscrowPending
+                ? (activeLang === "vi" ? "Ký Quỹ Đang Bật" : "Escrow Active")
+                : (activeLang === "vi" ? "Đang Hoạt Động" : "Active"),
+              expiresAt: expiryLabel, expiryLabel, escrowInfo, isEscrowPending, hasActiveAccess: hasAccess, isOwner,
               decryptedContent: null, decryptedPdfBytes: null, phenopacketJson: null
             });
           }
@@ -228,6 +270,8 @@ export function useGenomicCatalog({ account, getContracts }) {
       }
     } catch (err) {
       console.warn("Dataset sync warning:", err.message);
+      setCatalogError(err.message);
+      setDatasets([]);
     } finally {
       setLoadingChain(false);
     }
@@ -235,10 +279,99 @@ export function useGenomicCatalog({ account, getContracts }) {
 
   useEffect(() => { fetchOnChainDatasets(account); }, [fetchOnChainDatasets, account]);
 
+  const confirmCapsuleAndReleaseEscrow = useCallback(
+    async (dataId) => {
+      const { registry } = await getContracts();
+      const tx = await registry.confirmCapsuleAndReleaseEscrow(dataId);
+      await tx.wait();
+      await fetchOnChainDatasets(account);
+      return tx;
+    },
+    [getContracts, fetchOnChainDatasets, account]
+  );
+
+  const disputeCapsule = useCallback(
+    async (dataId) => {
+      const { registry } = await getContracts();
+      const tx = await registry.disputeCapsule(dataId);
+      await tx.wait();
+      await fetchOnChainDatasets(account);
+      return tx;
+    },
+    [getContracts, fetchOnChainDatasets, account]
+  );
+
+  const setManualEscrowRelease = useCallback(
+    async (dataId, manual) => {
+      const { registry } = await getContracts();
+      const tx = await registry.setManualEscrowRelease(dataId, manual);
+      await tx.wait();
+      await fetchOnChainDatasets(account);
+      return tx;
+    },
+    [getContracts, fetchOnChainDatasets, account]
+  );
+
+  const releaseEscrow = useCallback(
+    async (dataId, buyer) => {
+      const { registry } = await getContracts();
+      const tx = await registry.releaseEscrow(dataId, buyer || account);
+      await tx.wait();
+      await fetchOnChainDatasets(account);
+      return tx;
+    },
+    [getContracts, fetchOnChainDatasets, account]
+  );
+
   return {
     datasets, setDatasets,
+    catalogError,
     purchasedData, setPurchasedData,
     loadingChain, fetchOnChainDatasets,
-    selectedAssetModal, setSelectedAssetModal
+    selectedAssetModal, setSelectedAssetModal,
+    confirmCapsuleAndReleaseEscrow,
+    disputeCapsule,
+    setManualEscrowRelease,
+    releaseEscrow
   };
+}
+
+export async function confirmCapsuleAndReleaseEscrow(registryOrSigner, dataId) {
+  if (!registryOrSigner) throw new Error("Registry contract or signer required.");
+  const registry = registryOrSigner.confirmCapsuleAndReleaseEscrow
+    ? registryOrSigner
+    : new ethers.Contract(contractAddresses.GenomicsRegistry, GenomicsRegistryABI, registryOrSigner);
+  const tx = await registry.confirmCapsuleAndReleaseEscrow(dataId);
+  await tx.wait();
+  return tx;
+}
+
+export async function disputeCapsule(registryOrSigner, dataId) {
+  if (!registryOrSigner) throw new Error("Registry contract or signer required.");
+  const registry = registryOrSigner.disputeCapsule
+    ? registryOrSigner
+    : new ethers.Contract(contractAddresses.GenomicsRegistry, GenomicsRegistryABI, registryOrSigner);
+  const tx = await registry.disputeCapsule(dataId);
+  await tx.wait();
+  return tx;
+}
+
+export async function setManualEscrowRelease(registryOrSigner, dataId, manual) {
+  if (!registryOrSigner) throw new Error("Registry contract or signer required.");
+  const registry = registryOrSigner.setManualEscrowRelease
+    ? registryOrSigner
+    : new ethers.Contract(contractAddresses.GenomicsRegistry, GenomicsRegistryABI, registryOrSigner);
+  const tx = await registry.setManualEscrowRelease(dataId, manual);
+  await tx.wait();
+  return tx;
+}
+
+export async function releaseEscrow(registryOrSigner, dataId, buyer) {
+  if (!registryOrSigner) throw new Error("Registry contract or signer required.");
+  const registry = registryOrSigner.releaseEscrow
+    ? registryOrSigner
+    : new ethers.Contract(contractAddresses.GenomicsRegistry, GenomicsRegistryABI, registryOrSigner);
+  const tx = await registry.releaseEscrow(dataId, buyer);
+  await tx.wait();
+  return tx;
 }

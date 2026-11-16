@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
-import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import { ReentrancyGuard } from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
+import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 /**
  * @title GenomicZkVerifier
@@ -82,6 +82,10 @@ contract GenomicZkVerifier is ReentrancyGuard, Ownable {
     // vkEpoch => targetTraitId => variantCommitment => donorAddress => verified status
     mapping(uint256 => mapping(bytes32 => mapping(bytes32 => mapping(address => bool)))) private _verifiedTraitByEpoch;
 
+    // Persistent across VK rotations (prior verified trait claims are not cleared)
+    mapping(bytes32 => mapping(address => bool)) private _verifiedPersistent;
+    mapping(bytes32 => mapping(bytes32 => mapping(address => bool))) private _verifiedTraitPersistent;
+
     // Custom Errors
     error InvalidPaymentToken();
     error InvalidBountyParameters();
@@ -94,6 +98,7 @@ contract GenomicZkVerifier is ReentrancyGuard, Ownable {
     error BountyNotExpired();
     error CannotRescuePaymentToken();
     error InvalidAddress();
+    error ActiveBountiesExist();
 
     // Events
     event VerificationKeyUpdated(address indexed updater);
@@ -172,6 +177,16 @@ contract GenomicZkVerifier is ReentrancyGuard, Ownable {
         uint256[2] calldata _ic0,
         uint256[2] calldata _ic1
     ) external onlyOwner {
+        for (uint256 i = 1; i <= bountyCount; ) {
+            ZkBounty storage b = bounties[i];
+            if (b.isActive && b.remainingFunding > 0 && block.timestamp < b.expiresAt) {
+                revert ActiveBountiesExist();
+            }
+            unchecked {
+                ++i;
+            }
+        }
+
         if (!_isOnCurveG1(_alpha[0], _alpha[1]) || (_alpha[0] == 0 && _alpha[1] == 0)) revert InvalidCurvePoint();
         if (!_isOnCurveG1(_ic0[0], _ic0[1]) || (_ic0[0] == 0 && _ic0[1] == 0)) revert InvalidCurvePoint();
         if (!_isOnCurveG1(_ic1[0], _ic1[1]) || (_ic1[0] == 0 && _ic1[1] == 0)) revert InvalidCurvePoint();
@@ -225,7 +240,7 @@ contract GenomicZkVerifier is ReentrancyGuard, Ownable {
         uint256 totalRequiredFunding = rewardPerClaim * maxClaims;
         paymentToken.safeTransferFrom(msg.sender, address(this), totalRequiredFunding);
 
-        bountyCount++;
+        ++bountyCount;
         uint256 newBountyId = bountyCount;
 
         bounties[newBountyId] = ZkBounty({
@@ -279,12 +294,22 @@ contract GenomicZkVerifier is ReentrancyGuard, Ownable {
         if (!validateCurvePoints(proof)) revert InvalidCurvePoint();
 
         // 2. Cryptographic Zero-Knowledge Proof Verification
-        // Computes public signal binding: Hash(variantCommitment || traitId || donorAddress)
-        uint256 publicSignal = uint256(
-            keccak256(abi.encodePacked(variantCommitment, bounty.targetTraitId, msg.sender))
+        // Computes public signal binding with domain separation: Hash(variantCommitment || traitId || donorAddress || bountyId || contractAddress || chainId || vkEpoch)
+        uint256 publicSignalBound = uint256(
+            keccak256(
+                abi.encodePacked(
+                    variantCommitment,
+                    bounty.targetTraitId,
+                    msg.sender,
+                    bountyId,
+                    address(this),
+                    block.chainid,
+                    vkEpoch
+                )
+            )
         ) % R_MOD;
 
-        if (!verifyProofInternal(proof, publicSignal)) {
+        if (!verifyProofInternal(proof, publicSignalBound)) {
             revert InvalidZkProof();
         }
 
@@ -292,7 +317,9 @@ contract GenomicZkVerifier is ReentrancyGuard, Ownable {
         hasClaimedBounty[bountyId][msg.sender] = true;
         _verifiedByEpoch[vkEpoch][variantCommitment][msg.sender] = true;
         _verifiedTraitByEpoch[vkEpoch][bounty.targetTraitId][variantCommitment][msg.sender] = true;
-        bounty.currentClaims++;
+        _verifiedPersistent[variantCommitment][msg.sender] = true;
+        _verifiedTraitPersistent[bounty.targetTraitId][variantCommitment][msg.sender] = true;
+        ++bounty.currentClaims;
         bounty.remainingFunding -= bounty.rewardPerClaim;
 
         if (bounty.currentClaims == bounty.maxClaims) {
@@ -333,25 +360,25 @@ contract GenomicZkVerifier is ReentrancyGuard, Ownable {
      * @notice Backward-compatible getter scoped to current verification key epoch
      */
     function verifiedCommitments(bytes32 variantCommitment, address donor) external view returns (bool) {
-        return _verifiedByEpoch[vkEpoch][variantCommitment][donor];
+        return _verifiedPersistent[variantCommitment][donor] || _verifiedByEpoch[vkEpoch][variantCommitment][donor];
     }
 
     /**
-     * @notice Check whether an address has proven possession of a genomic trait under a given commitment in current epoch
+     * @notice Check whether an address has proven possession of a genomic trait under a given commitment
      */
     function hasVerifiedVariant(bytes32 variantCommitment, address donor) external view returns (bool) {
-        return _verifiedByEpoch[vkEpoch][variantCommitment][donor];
+        return _verifiedPersistent[variantCommitment][donor] || _verifiedByEpoch[vkEpoch][variantCommitment][donor];
     }
 
     /**
-     * @notice Check whether an address has proven possession of a specific trait under a given commitment in current epoch
+     * @notice Check whether an address has proven possession of a specific trait under a given commitment
      */
     function hasVerifiedTraitVariant(
         bytes32 targetTraitId,
         bytes32 variantCommitment,
         address donor
     ) external view returns (bool) {
-        return _verifiedTraitByEpoch[vkEpoch][targetTraitId][variantCommitment][donor];
+        return _verifiedTraitPersistent[targetTraitId][variantCommitment][donor] || _verifiedTraitByEpoch[vkEpoch][targetTraitId][variantCommitment][donor];
     }
 
     /**
@@ -467,9 +494,9 @@ contract GenomicZkVerifier is ReentrancyGuard, Ownable {
             return false;
         }
 
-        // Compute vk_x = ic0 + publicSignal * ic1 via precompiles 0x07 (ecMul) & 0x06 (ecAdd)
+        // Compute vkX = ic0 + publicSignal * ic1 via precompiles 0x07 (ecMul) & 0x06 (ecAdd)
         uint256[2] memory scaledIc1;
-        uint256[2] memory vk_x;
+        uint256[2] memory vkX;
         bool mulSuccess;
         bool addSuccess;
         assembly {
@@ -486,12 +513,12 @@ contract GenomicZkVerifier is ReentrancyGuard, Ownable {
             mstore(add(addInput, 0x20), sload(add(ic0.slot, 1)))
             mstore(add(addInput, 0x40), mload(scaledIc1))
             mstore(add(addInput, 0x60), mload(add(scaledIc1, 0x20)))
-            addSuccess := staticcall(sub(gas(), 2000), 0x06, addInput, 0x80, vk_x, 0x40)
+            addSuccess := staticcall(sub(gas(), 2000), 0x06, addInput, 0x80, vkX, 0x40)
         }
         if (!mulSuccess || !addSuccess) return false;
 
         // Prepare pairing check buffer: 24 words (768 bytes = 4 pairs * 192 bytes/pair)
-        // Under Groth16: e(-A, B) * e(alpha, beta) * e(vk_x, gamma) * e(C, delta) == 1
+        // Under Groth16: e(-A, B) * e(alpha, beta) * e(vkX, gamma) * e(C, delta) == 1
         // When precompile 0x08 is called: Gas = 34,000 * 4 + 45,000 = 181,000 gas (EIP-1108)
         bytes memory input = new bytes(768);
         
@@ -515,9 +542,9 @@ contract GenomicZkVerifier is ReentrancyGuard, Ownable {
             mstore(add(input, 352), sload(add(beta.slot, 2)))
             mstore(add(input, 384), sload(add(beta.slot, 3)))
 
-            // Pair 3: Public Signal scaled point (G1 vk_x, G2 gamma)
-            mstore(add(input, 416), mload(vk_x))
-            mstore(add(input, 448), mload(add(vk_x, 0x20)))
+            // Pair 3: Public Signal scaled point (G1 vkX, G2 gamma)
+            mstore(add(input, 416), mload(vkX))
+            mstore(add(input, 448), mload(add(vkX, 0x20)))
             mstore(add(input, 480), sload(gamma.slot))
             mstore(add(input, 512), sload(add(gamma.slot, 1)))
             mstore(add(input, 544), sload(add(gamma.slot, 2)))

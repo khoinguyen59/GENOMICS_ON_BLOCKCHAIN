@@ -137,7 +137,7 @@ export default function OpenSeaActivityFeed() {
         parsedList.push({
           id: `access-${log.blockNumber}-${log.index ?? log.logIndex ?? 0}`,
           type: "purchase",
-          typeColor: "var(--accent-emerald)",
+          typeColor: "var(--accent-emerald-text)",
           dataId: dId,
           price: Number(ethers.formatUnits(paidWei, 18)),
           from: buyer,
@@ -158,7 +158,7 @@ export default function OpenSeaActivityFeed() {
         parsedList.push({
           id: `escrow-${log.blockNumber}-${log.index ?? log.logIndex ?? 0}`,
           type: "escrow",
-          typeColor: "var(--accent-amber)",
+          typeColor: "var(--accent-amber-text)",
           dataId: dId,
           price: Number(ethers.formatUnits(amtWei, 18)),
           from: buyer,
@@ -179,7 +179,7 @@ export default function OpenSeaActivityFeed() {
         parsedList.push({
           id: `royalty-${log.blockNumber}-${log.index ?? log.logIndex ?? 0}`,
           type: "royalty",
-          typeColor: "var(--accent-purple)",
+          typeColor: "var(--accent-purple-text)",
           dataId: dId,
           price: Number(ethers.formatUnits(amtWei, 18)),
           from: registryAddr,
@@ -245,13 +245,18 @@ export default function OpenSeaActivityFeed() {
       </div>
 
       {rpcError && (
-        <div style={{ padding: "10px 14px", marginBottom: "14px", borderRadius: "var(--radius-xs)", background: "rgba(239, 68, 68, 0.12)", border: "1px solid rgba(239, 68, 68, 0.35)", color: "#f87171", fontSize: "12px", fontFamily: "var(--font-mono)" }}>
+        <div style={{ padding: "10px 14px", marginBottom: "14px", borderRadius: "var(--radius-xs)", background: "rgba(239, 68, 68, 0.12)", border: "1px solid rgba(239, 68, 68, 0.35)", color: "var(--accent-rose-text)", fontSize: "12px", fontFamily: "var(--font-mono)" }}>
           <strong>[RPC Event Query Error]</strong> {rpcError}
         </div>
       )}
 
       {/* Activity Table */}
-      <div className="opensea-activity-table-wrap">
+      <div
+        className="opensea-activity-table-wrap"
+        tabIndex="0"
+        role="region"
+        aria-label="Activity table scroll container"
+      >
         <table className="opensea-activity-table">
           <thead>
             <tr>
@@ -267,7 +272,7 @@ export default function OpenSeaActivityFeed() {
           <tbody>
             {rpcError ? (
               <tr>
-                <td colSpan={7} style={{ textAlign: "center", padding: "32px 20px", color: "var(--accent-rose)", fontFamily: "var(--font-mono)", fontSize: "13px", background: "rgba(244, 63, 94, 0.05)" }}>
+                <td colSpan={7} style={{ textAlign: "center", padding: "32px 20px", color: "var(--accent-rose-text)", fontFamily: "var(--font-mono)", fontSize: "13px", background: "rgba(244, 63, 94, 0.05)" }}>
                   <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "8px" }}>
                     <div style={{ fontWeight: 700, fontSize: "14px", display: "flex", alignItems: "center", gap: "6px" }}>
                       <AlertTriangleIcon size={15} color="var(--accent-rose)" />
@@ -282,8 +287,8 @@ export default function OpenSeaActivityFeed() {
                       style={{
                         marginTop: "8px",
                         padding: "6px 14px",
-                        background: "var(--accent-rose)",
-                        color: "#fff",
+                        background: "#b91c1c",
+                        color: "#ffffff",
                         border: "none",
                         borderRadius: "6px",
                         cursor: "pointer",

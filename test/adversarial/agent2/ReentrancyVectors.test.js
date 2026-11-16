@@ -170,7 +170,7 @@ describe("AGENT2 :: Reentrancy vectors via contracts/mocks (ReentrancyGuard + CE
       "QmFake", "QmFake", "QmFake", 100
     ));
     expect(res.ok).to.equal(false);
-    expect(res.error).to.contain("OnlyRegistry");
+    expect(res.error).to.match(/OnlyRegistry|0x87aa01c8/);
     expect(await nft.nextTokenId()).to.equal(1n); // nothing was ever minted
     const owns = await capture(() => nft.ownerOf.staticCall(1n));
     expect(owns.ok).to.equal(false);

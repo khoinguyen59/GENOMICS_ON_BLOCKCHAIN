@@ -1,6 +1,6 @@
 import React from "react";
 import { ThemeProvider } from "./context/ThemeContext";
-import { LanguageProvider } from "./context/LanguageContext";
+import { LanguageProvider, useLanguage } from "./context/LanguageContext";
 import { Web3Provider, useWeb3 } from "./context/Web3Context";
 import { DatasetProvider, useDatasets } from "./context/DatasetContext";
 import Navbar from "./components/common/Navbar";
@@ -23,10 +23,8 @@ import {
   purchaseDatasetAccess,
   purchaseDatasetWithEscrow,
   claimDatasetEscrowRefund,
-  recordDatasetStudyReuse,
-  decryptDatasetPayload,
-  decryptSummaryReport,
-  fetchPhenopacketMetadata
+  releaseEscrow,
+  recordDatasetStudyReuse
 } from "./services/datasetService";
 
 function AppContent() {
@@ -42,29 +40,34 @@ function AppContent() {
     refreshBalance
   } = useWeb3();
 
+  const { lang, t } = useLanguage();
+
   const {
     datasets,
     fetchOnChainDatasets,
     setPurchasedData,
     selectedAssetModal,
-    setSelectedAssetModal
+    setSelectedAssetModal,
+    handleDecryptData,
+    handleDownloadFile,
+    handleDownloadPdf
   } = useDatasets();
 
   // Minting & Registration Pipeline (Data Owner)
   const handlePublishDataset = async (formData) => {
     try {
-      showToast("1/3: Encrypting genomic sequence client-side...", "info");
+      showToast(lang === "vi" ? "1/3: Đang mã hóa chuỗi gen client-side..." : "1/3: Encrypting genomic sequence client-side...", "info");
       await publishGenomicDataset({
         ...formData,
         account,
         signer
       });
-      showToast("Dataset encrypted client-side and registered on-chain!");
+      showToast(lang === "vi" ? "Dữ liệu đã mã hóa client-side và đăng ký on-chain thành công!" : "Dataset encrypted client-side and registered on-chain!");
       await fetchOnChainDatasets(account);
       await refreshBalance(account);
       setDonorTab("vault");
     } catch (err) {
-      showToast("Publish failed: " + (err.shortMessage || err.message), "error");
+      showToast((lang === "vi" ? "Đăng ký thất bại: " : "Publish failed: ") + (err.shortMessage || err.message), "error");
       throw err;
     }
   };
@@ -72,27 +75,27 @@ function AppContent() {
   // Data Status Updates (Pause / Resume / Revoke)
   const handleUpdateStatus = async (dataId, newStatusNum) => {
     try {
-      showToast(`Broadcasting updateDataStatus(${dataId}, ${newStatusNum})...`, "info");
+      showToast(lang === "vi" ? `Đang gửi cập nhật trạng thái dữ liệu #${dataId}...` : `Broadcasting updateDataStatus(${dataId}, ${newStatusNum})...`, "info");
       await updateDatasetStatus({ dataId, newStatusNum, signer });
       const label = newStatusNum === 0 ? "Active" : newStatusNum === 1 ? "Paused" : "Revoked";
-      showToast(`Dataset #${dataId} status updated to: ${label}`);
+      showToast(lang === "vi" ? `Trạng thái dữ liệu #${dataId} đã cập nhật: ${label}` : `Dataset #${dataId} status updated to: ${label}`);
       await fetchOnChainDatasets(account);
       await refreshBalance(account);
     } catch (err) {
-      showToast("Status update failed: " + (err.shortMessage || err.message), "error");
+      showToast((lang === "vi" ? "Cập nhật trạng thái thất bại: " : "Status update failed: ") + (err.shortMessage || err.message), "error");
     }
   };
 
   // Data Access Fee Update (Access Control Policy)
   const handleUpdatePrice = async (dataId, newPriceGeno) => {
     try {
-      showToast(`Broadcasting updateDataPrice(${dataId}, ${newPriceGeno} GENO)...`, "info");
+      showToast(lang === "vi" ? `Đang cập nhật phí truy cập dữ liệu #${dataId}...` : `Broadcasting updateDataPrice(${dataId}, ${newPriceGeno} GENO)...`, "info");
       await updateDatasetPrice({ dataId, newPriceGeno, signer });
-      showToast(`Dataset #${dataId} access fee successfully updated to ${newPriceGeno} GENO!`);
+      showToast(lang === "vi" ? `Cập nhật phí truy cập dữ liệu #${dataId} thành công: ${newPriceGeno} $GENO!` : `Dataset #${dataId} access fee successfully updated to ${newPriceGeno} GENO!`);
       await fetchOnChainDatasets(account);
       await refreshBalance(account);
     } catch (err) {
-      showToast("Update price failed: " + (err.shortMessage || err.message), "error");
+      showToast((lang === "vi" ? "Cập nhật phí thất bại: " : "Update price failed: ") + (err.shortMessage || err.message), "error");
     }
   };
 
@@ -218,94 +221,27 @@ function AppContent() {
     }
   };
 
-  // In-Memory Decryption (Researcher)
-  const handleDecryptData = async (dataId) => {
+  // Seller Post-Window Release Escrow
+  const handleReleaseEscrow = async (dataId, buyer) => {
     try {
-      const ds = datasets.find((d) => d.dataId === dataId);
-      if (!ds) return;
-
-      showToast("1/4: Fetching encrypted sequence & summary report from IPFS...", "info");
-      const decryptedPlaintext = await decryptDatasetPayload({
-        dataset: ds,
-        account,
-        contracts,
-        researcherKeyPair
-      });
-
-      let decryptedPdfBytes = null;
-      if (ds.summaryCid) {
-        showToast("2/4: Decrypting ISO 32000 / PDF-1.4 Genomic Summary...", "info");
-        try {
-          decryptedPdfBytes = await decryptSummaryReport({
-            dataset: ds,
-            account,
-            contracts,
-            researcherKeyPair
-          });
-        } catch (e) {
-          console.warn("PDF summary report decryption notice:", e);
-        }
-      }
-
-      let phenopacketJson = null;
-      if (ds.metadataCid) {
-        showToast("3/4: Fetching GA4GH Phenopacket v2 JSON metadata...", "info");
-        try {
-          phenopacketJson = await fetchPhenopacketMetadata({
-            metadataCid: ds.metadataCid,
-            expectedMetadataHash: ds.metadataHash
-          });
-        } catch (e) {
-          console.warn("Phenopacket metadata fetch notice:", e);
-        }
-      }
-
-      setPurchasedData((prev) =>
-        prev.map((p) =>
-          p.dataId === dataId
-            ? {
-                ...p,
-                decryptedContent: decryptedPlaintext,
-                decryptedPdfBytes: decryptedPdfBytes,
-                phenopacketJson: phenopacketJson
-              }
-            : p
-        )
+      showToast(
+        lang === "vi"
+          ? `Đang giải phóng ký quỹ #${dataId}...`
+          : `Releasing post-window escrow for Dataset #${dataId}...`,
+        "info"
       );
-      showToast("Decrypted successfully! Raw VCF, Genomic PDF, and Phenopacket verified.");
+      await releaseEscrow({ dataId, buyer, signer });
+      showToast(t("escrowReleasedSuccess") || "Escrow released successfully!");
+      await fetchOnChainDatasets(account);
+      await refreshBalance(account);
     } catch (err) {
-      showToast(`Decryption error: ${err.message}`, "error");
+      showToast(
+        (lang === "vi" ? "Giải phóng ký quỹ thất bại: " : "Release escrow failed: ") +
+          (err.shortMessage || err.message),
+        "error"
+      );
+      throw err;
     }
-  };
-
-  // Export Decrypted VCF File
-  const handleDownloadFile = (content, filename) => {
-    const cleanName = (filename || "Genomic_Data.vcf").replace(/[/\\?%*:|"<>]/g, "_").replace(/\s+/g, "_");
-    const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = cleanName;
-    link.click();
-    URL.revokeObjectURL(url);
-    showToast(`Downloaded ${cleanName}`);
-  };
-
-  // Export Decrypted PDF Report
-  const handleDownloadPdf = (pdfBytes, filename) => {
-    if (!pdfBytes) {
-      showToast("Genomic PDF report not available or still decrypting.", "error");
-      return;
-    }
-    const cleanName = (filename || "Genomic_Report.pdf").replace(/[/\\?%*:|"<>]/g, "_").replace(/\s+/g, "_");
-    const blob = new Blob([pdfBytes], { type: "application/pdf" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = cleanName;
-    link.click();
-    URL.revokeObjectURL(url);
-    showToast(`Downloaded Genomic Summary Report: ${cleanName}`);
   };
 
   return (
@@ -332,6 +268,7 @@ function AppContent() {
             onDispatchCapsule={handleDispatchCapsule}
             onAuthorizeWorker={handleAuthorizeWorker}
             onUpdateBlindTags={handleUpdateBlindTags}
+            onReleaseEscrow={handleReleaseEscrow}
           />
         ) : (
           <ResearcherMarketplace

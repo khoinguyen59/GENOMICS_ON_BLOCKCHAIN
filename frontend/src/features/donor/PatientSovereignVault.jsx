@@ -1,4 +1,4 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { useWeb3 } from "../../context/Web3Context";
 import { useLanguage } from "../../context/LanguageContext";
 import { useDatasets } from "../../context/DatasetContext";
@@ -17,7 +17,8 @@ import {
 import {
   exportSovereignVault,
   importSovereignVault,
-  computeBlindTagHex
+  computeBlindTagHex,
+  releaseEscrow as releaseEscrowSvc
 } from "../../services/datasetService";
 
 export default function PatientSovereignVault({
@@ -26,10 +27,11 @@ export default function PatientSovereignVault({
   onGrantDirectAccess,
   onDispatchCapsule,
   onAuthorizeWorker,
-  onUpdateBlindTags
+  onUpdateBlindTags,
+  onReleaseEscrow
 }) {
-  const { account, signer, getProviderAndSigner, showToast } = useWeb3();
-  const { datasets, getLocalizedTitle } = useDatasets();
+  const { account, signer, contracts, getProviderAndSigner, showToast } = useWeb3();
+  const { datasets, getLocalizedTitle, fetchOnChainDatasets } = useDatasets();
   const { t, language } = useLanguage();
 
   const [editingPriceDataId, setEditingPriceDataId] = useState(null);
@@ -44,12 +46,33 @@ export default function PatientSovereignVault({
   const [tagKeyInput, setTagKeyInput] = useState("gene");
   const [tagValInput, setTagValInput] = useState("ALDH2");
   const [tagSaltInput, setTagSaltInput] = useState("GENOCHAIN_COHORT_SALT_V1");
+  const [escrowModalData, setEscrowModalData] = useState(null);
+  const [escrowBuyerInput, setEscrowBuyerInput] = useState("");
+  const [detectedEscrows, setDetectedEscrows] = useState([]);
+  const [busyEscrowRelease, setBusyEscrowRelease] = useState(false);
 
   const [vaultLoading, setVaultLoading] = useState(false);
   const [vaultFeedback, setVaultFeedback] = useState(null);
   const [vaultPassphrase, setVaultPassphrase] = useState("");
   const [showPassphraseInput, setShowPassphraseInput] = useState(false);
   const fileInputRef = useRef(null);
+
+  useEffect(() => {
+    const anyModalOpen =
+      grantModalData || dispatchModalData || workerModalData || tagsModalData || escrowModalData;
+    if (!anyModalOpen) return undefined;
+    const onKeyDown = (e) => {
+      if (e.key === "Escape") {
+        setGrantModalData(null);
+        setDispatchModalData(null);
+        setWorkerModalData(null);
+        setTagsModalData(null);
+        setEscrowModalData(null);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [grantModalData, dispatchModalData, workerModalData, tagsModalData, escrowModalData]);
 
   const myDatasets = datasets.filter(
     (d) => account && d.owner.toLowerCase() === account.toLowerCase()
@@ -274,7 +297,7 @@ export default function PatientSovereignVault({
               fontSize: "11.5px",
               fontFamily: "var(--font-mono)",
               background: vaultFeedback.type === "success" ? "rgba(16, 185, 129, 0.12)" : "rgba(239, 68, 68, 0.12)",
-              color: vaultFeedback.type === "success" ? "#10b981" : "#ef4444",
+              color: vaultFeedback.type === "success" ? "var(--accent-emerald-text)" : "var(--accent-rose-text)",
               border: `1px solid ${vaultFeedback.type === "success" ? "rgba(16, 185, 129, 0.3)" : "rgba(239, 68, 68, 0.3)"}`
             }}
           >
@@ -288,7 +311,12 @@ export default function PatientSovereignVault({
         <span style={{ fontSize: "14px", fontWeight: 700 }}>{t("vaultTitle")}</span>
       </div>
 
-      <div className="terminal-table-container">
+      <div
+        className="terminal-table-container"
+        tabIndex="0"
+        role="region"
+        aria-label={t("vaultTitle") || "Patient sovereign vault table"}
+      >
         <table className="terminal-table">
           <thead>
             <tr>
@@ -468,6 +496,48 @@ export default function PatientSovereignVault({
                         </button>
                       </>
                     )}
+                    <button
+                      id={`btn-vault-escrow-${d.dataId}`}
+                      type="button"
+                      className="btn-terminal btn-terminal-ghost"
+                      title={t("btnReleaseEscrow")}
+                      style={{ fontSize: "12px", height: "30px" }}
+                      onClick={async () => {
+                        setEscrowModalData(d);
+                        setDetectedEscrows([]);
+                        setEscrowBuyerInput("");
+                        try {
+                          if (contracts?.registry) {
+                            const evs = await contracts.registry.queryFilter(
+                              contracts.registry.filters.EscrowDeposited(d.dataId),
+                              0,
+                              "latest"
+                            );
+                            const seen = new Set();
+                            const found = [];
+                            for (const ev of evs) {
+                              const bAddr = ev.args?.buyer;
+                              if (!bAddr || seen.has(bAddr.toLowerCase())) continue;
+                              seen.add(bAddr.toLowerCase());
+                              const dep = await contracts.registry.escrowDeposits(d.dataId, bAddr);
+                              if (dep && dep.amount > 0n && !dep.released && !dep.refunded) {
+                                const disp = await contracts.registry.escrowDisputed(d.dataId, bAddr).catch(() => false);
+                                found.push({
+                                  buyer: bAddr,
+                                  delivered: Boolean(dep.capsuleDelivered),
+                                  disputed: Boolean(disp),
+                                  deadline: Number(dep.depositTime) + Number(dep.disputeWindow)
+                                });
+                              }
+                            }
+                            setDetectedEscrows(found);
+                            if (found.length > 0) setEscrowBuyerInput(found[0].buyer);
+                          }
+                        } catch {}
+                      }}
+                    >
+                      <span>{t("vaultBtnEscrow")}</span>
+                    </button>
                     {d.status === "Paused" && (
                       <>
                         <button
@@ -520,7 +590,7 @@ export default function PatientSovereignVault({
 
       {/* Modal: Grant Direct Access */}
       {grantModalData && (
-        <div className="terminal-modal-backdrop" onClick={() => setGrantModalData(null)}>
+        <div className="terminal-modal-backdrop" role="dialog" aria-modal="true" aria-label={`${t("modalGrantTitle")}${grantModalData.dataId}`} onClick={() => setGrantModalData(null)}>
           <div className="terminal-modal-window" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header-bar">
               <div className="modal-title-left">
@@ -570,7 +640,7 @@ export default function PatientSovereignVault({
 
       {/* Modal: Dispatch RSA-OAEP Capsule */}
       {dispatchModalData && (
-        <div className="terminal-modal-backdrop" role="dialog" aria-modal="true" onClick={() => setDispatchModalData(null)}>
+        <div className="terminal-modal-backdrop" role="dialog" aria-modal="true" aria-label={`${t("modalDispatchTitle")}${dispatchModalData.dataId}`} onClick={() => setDispatchModalData(null)}>
           <div className="terminal-modal-window" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header-bar">
               <div className="modal-title-left">
@@ -620,7 +690,7 @@ export default function PatientSovereignVault({
 
       {/* Modal: Authorize / Revoke Delegated Capsule Worker */}
       {workerModalData && (
-        <div className="terminal-modal-backdrop" role="dialog" aria-modal="true" onClick={() => setWorkerModalData(null)}>
+        <div className="terminal-modal-backdrop" role="dialog" aria-modal="true" aria-label={`${t("workerAuthLabel")} #${workerModalData.dataId}`} onClick={() => setWorkerModalData(null)}>
           <div className="terminal-modal-window" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header-bar">
               <div className="modal-title-left">
@@ -682,7 +752,7 @@ export default function PatientSovereignVault({
 
       {/* Modal: Update On-Chain Blinded Search Tags */}
       {tagsModalData && (
-        <div className="terminal-modal-backdrop" role="dialog" aria-modal="true" onClick={() => setTagsModalData(null)}>
+        <div className="terminal-modal-backdrop" role="dialog" aria-modal="true" aria-label={`${t("modalBlindTagsTitle")} #${tagsModalData.dataId}`} onClick={() => setTagsModalData(null)}>
           <div className="terminal-modal-window" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header-bar">
               <div className="modal-title-left">
@@ -763,6 +833,114 @@ export default function PatientSovereignVault({
                 }}
               >
                 <span>{t("confirm")}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Seller Post-Window Release Escrow */}
+      {escrowModalData && (
+        <div className="terminal-modal-backdrop" role="dialog" aria-modal="true" aria-label={`${t("modalReleaseEscrowTitle")}${escrowModalData.dataId}`} onClick={() => setEscrowModalData(null)}>
+          <div className="terminal-modal-window" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header-bar">
+              <div className="modal-title-left">
+                <GenoTokenIcon size={16} color="var(--accent-emerald-text)" />
+                <span>{t("modalReleaseEscrowTitle")}{escrowModalData.dataId}</span>
+              </div>
+              <button
+                type="button"
+                className="modal-close-btn"
+                title={t("close")}
+                onClick={() => setEscrowModalData(null)}
+              >
+                <CloseCrossIcon size={16} color="var(--text-secondary)" />
+              </button>
+            </div>
+            <div className="modal-body" style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+              <p style={{ fontSize: "12px", color: "var(--text-secondary)", lineHeight: "1.5" }}>
+                {t("modalReleaseEscrowDesc")}
+              </p>
+              <div>
+                <div className="spec-box-label" style={{ marginBottom: "6px" }}>{t("modalActiveEscrowsLabel")}</div>
+                {detectedEscrows.length === 0 ? (
+                  <div style={{ fontSize: "11px", color: "var(--text-secondary)", fontFamily: "var(--font-mono)" }}>
+                    {t("modalNoActiveEscrows")}
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                    {detectedEscrows.map((e) => (
+                      <button
+                        key={e.buyer}
+                        type="button"
+                        className="btn-terminal btn-terminal-ghost"
+                        style={{ justifyContent: "space-between", fontSize: "11px", height: "30px", width: "100%" }}
+                        onClick={() => setEscrowBuyerInput(e.buyer)}
+                      >
+                        <span style={{ fontFamily: "var(--font-mono)" }}>{e.buyer.slice(0, 10)}...{e.buyer.slice(-6)}</span>
+                        <span>
+                          {e.disputed ? t("escrowDisputedActive") : e.delivered ? t("escrowStatusDelivered") : t("escrowPendingDelivery")}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div>
+                <label htmlFor="input-release-escrow-buyer" className="field-label">
+                  {t("modalReleaseBuyerLabel")}
+                </label>
+                <input
+                  id="input-release-escrow-buyer"
+                  type="text"
+                  className="field-input"
+                  placeholder="0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
+                  aria-label={t("modalReleaseBuyerLabel")}
+                  value={escrowBuyerInput}
+                  onChange={(e) => setEscrowBuyerInput(e.target.value)}
+                />
+              </div>
+            </div>
+            <div className="modal-footer-bar">
+              <button
+                type="button"
+                className="btn-terminal btn-terminal-ghost"
+                onClick={() => setEscrowModalData(null)}
+              >
+                {t("cancel")}
+              </button>
+              <button
+                id={`btn-release-escrow-${escrowModalData.dataId}`}
+                type="button"
+                className="btn-terminal btn-terminal-primary"
+                disabled={busyEscrowRelease}
+                onClick={async () => {
+                  const targetBuyer = escrowBuyerInput.trim();
+                  if (!targetBuyer || !targetBuyer.startsWith("0x") || targetBuyer.length !== 42) {
+                    showToast("Please enter a valid 42-character buyer EVM address (0x...).", "error");
+                    return;
+                  }
+                  setBusyEscrowRelease(true);
+                  try {
+                    if (onReleaseEscrow) {
+                      await onReleaseEscrow(escrowModalData.dataId, targetBuyer);
+                    } else {
+                      const activeSigner = signer || (await getProviderAndSigner?.())?.signer;
+                      await releaseEscrowSvc({ dataId: escrowModalData.dataId, buyer: targetBuyer, signer: activeSigner });
+                      showToast?.(t("escrowReleasedSuccess") || "Escrow released successfully!");
+                      await fetchOnChainDatasets?.(account);
+                    }
+                    setEscrowModalData(null);
+                  } catch (err) {
+                    if (!onReleaseEscrow) {
+                      showToast?.((err.shortMessage || err.message), "error");
+                    }
+                  } finally {
+                    setBusyEscrowRelease(false);
+                  }
+                }}
+              >
+                <span>{busyEscrowRelease ? "..." : t("btnExecuteReleaseEscrow")}</span>
               </button>
             </div>
           </div>

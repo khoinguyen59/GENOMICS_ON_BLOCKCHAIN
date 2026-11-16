@@ -7,7 +7,9 @@ import {
   LockOpenIcon,
   VerifiedBadgeIcon,
   GenoTokenIcon,
-  ShieldCheckIcon
+  ShieldCheckIcon,
+  AlertTriangleIcon,
+  RefreshSpinIcon
 } from "../../components/icons/GenoIcons";
 import GenomicVisualCover from "../../components/common/GenomicVisualCover";
 import { useWeb3 } from "../../context/Web3Context";
@@ -20,6 +22,8 @@ export default function DatasetCatalogGrid({ onPurchase }) {
     filteredDatasets,
     purchasedData,
     loadingChain,
+    catalogError,
+    fetchOnChainDatasets,
     setSelectedAssetModal,
     getLocalizedTitle,
     getLocalizedSignificance
@@ -90,9 +94,9 @@ export default function DatasetCatalogGrid({ onPurchase }) {
               </div>
 
               {/* Dataset Title */}
-              <h4 className="nft-card-title" title={displayTitle}>
+              <h3 className="nft-card-title" title={displayTitle}>
                 {displayTitle}
-              </h4>
+              </h3>
 
               {/* Trait & Biological Chips */}
               <div className="nft-traits-row">
@@ -156,15 +160,50 @@ export default function DatasetCatalogGrid({ onPurchase }) {
 
       {/* Empty State (Only shown after chain sync completes) */}
       {!loadingChain && filteredDatasets.length === 0 && (
-        <div className="opensea-empty-state">
-          <DnaHelixIcon size={48} color="var(--text-muted)" />
-          <h3 className="empty-title">
-            {t("noDatasetsFound") || "No Genomic Datasets Found"}
-          </h3>
-          <p className="empty-desc">
-            {t("noDatasetsFoundDesc")}
-          </p>
-        </div>
+        catalogError ? (
+          <div
+            className="opensea-empty-state rpc-error-state"
+            role="alert"
+            style={{
+              border: "1px dashed var(--accent-rose)",
+              background: "var(--accent-rose-subtle)",
+              padding: "32px 24px",
+              borderRadius: "var(--radius-sm)",
+              textAlign: "center",
+              gridColumn: "1 / -1"
+            }}
+          >
+            <AlertTriangleIcon size={44} color="var(--accent-rose-text)" />
+            <h3 className="empty-title" style={{ color: "var(--accent-rose-text)", marginTop: "12px", fontSize: "16px", fontWeight: 700 }}>
+              {t("rpcOfflineTitle") || "Mất kết nối Node RPC Blockchain"}
+            </h3>
+            <p className="empty-desc" style={{ color: "var(--text-secondary)", maxWidth: "520px", margin: "8px auto 16px" }}>
+              {t("rpcOfflineDesc") || "Không thể đồng bộ danh mục hệ gen on-chain do cổng RPC Ethereum cục bộ (31337) không phản hồi hoặc bị ngắt kết nối. Vui lòng kiểm tra Hardhat Node."}
+            </p>
+            <div style={{ fontFamily: "var(--font-mono)", fontSize: "11px", color: "var(--text-secondary)", marginBottom: "16px" }}>
+              RPC: {catalogError}
+            </div>
+            <button
+              type="button"
+              className="btn-terminal btn-terminal-primary"
+              onClick={() => fetchOnChainDatasets?.(account)}
+              style={{ padding: "0 20px", height: "36px", fontSize: "12px", margin: "0 auto" }}
+            >
+              <RefreshSpinIcon size={13} />
+              <span>{t("retryConnection") || "Thử lại kết nối RPC"}</span>
+            </button>
+          </div>
+        ) : (
+          <div className="opensea-empty-state">
+            <DnaHelixIcon size={48} color="var(--text-muted)" />
+            <h3 className="empty-title">
+              {t("noDatasetsFound") || "No Genomic Datasets Found"}
+            </h3>
+            <p className="empty-desc">
+              {t("noDatasetsFoundDesc")}
+            </p>
+          </div>
+        )
       )}
     </div>
   );

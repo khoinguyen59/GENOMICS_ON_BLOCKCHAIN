@@ -18,7 +18,7 @@ import base64
 import time
 from web3 import Web3
 from cryptography.hazmat.primitives.asymmetric import padding
-from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicNumbers
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 import hashlib
@@ -67,7 +67,9 @@ def b64url_decode(b64_str: str) -> bytes:
 
 
 def import_jwk_rsa_pubkey(jwk_str: str):
-    """Import an RSA public key from JWK JSON string."""
+    """Import an RSA public key from JWK JSON string or SPKI PEM."""
+    if isinstance(jwk_str, str) and jwk_str.strip().startswith("-----BEGIN"):
+        return serialization.load_pem_public_key(jwk_str.strip().encode("utf-8"))
     jwk = json.loads(jwk_str) if isinstance(jwk_str, str) else jwk_str
     n_bytes = b64url_decode(jwk["n"])
     e_bytes = b64url_decode(jwk["e"])
@@ -102,11 +104,39 @@ def package_rsa_capsule(aes_key_hex: str, buyer_pubkey_jwk_str: str, buyer_addr:
 
 
 def main():
+    import argparse
+    parser = argparse.ArgumentParser(
+        description="Genomics on Blockchain - Multi-Worker Automated Capsule Dispatcher Service"
+    )
+    parser.add_argument(
+        "--from-block",
+        type=int,
+        default=None,
+        help="Block bat dau quet su kien (neu bo trong se dung checkpoint hoac block_window gan nhat)"
+    )
+    parser.add_argument(
+        "--block-window",
+        type=int,
+        default=2000,
+        help="So luong block toi da quet nguoc ve truoc khi khong co checkpoint (mac dinh: 2000)"
+    )
+    parser.add_argument(
+        "--rpc-url",
+        default=os.getenv("RPC_URL", "http://127.0.0.1:8545"),
+        help="EVM RPC endpoint URL (mac dinh: http://127.0.0.1:8545)"
+    )
+    parser.add_argument(
+        "--private-key",
+        default=os.getenv("WORKER_PRIVATE_KEY") or os.getenv("DEPLOYER_PRIVATE_KEY"),
+        help="Private key cua worker de ky giao dich offline (tuy chon)"
+    )
+    args, unknown = parser.parse_known_args()
+
     print("=" * 75)
     print("[DAEMON] MULTI-WORKER GENOMICS CAPSULE DISPATCHER - GENOCHAIN PROTOCOL")
     print("=" * 75)
 
-    rpc_url = "http://127.0.0.1:8545"
+    rpc_url = args.rpc_url
     w3 = Web3(Web3.HTTPProvider(rpc_url))
 
     base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -151,31 +181,75 @@ def main():
 
     print("[✔] Da ket noi thanh cong voi EVM RPC Node!")
     registry = w3.eth.contract(address=registry_address, abi=registry_abi)
-    worker_account = addresses.get("Deployer")
+    if args.private_key:
+        try:
+            worker_account = w3.eth.account.from_key(args.private_key).address
+        except Exception:
+            worker_account = addresses.get("Deployer")
+    else:
+        worker_account = addresses.get("Deployer")
+
+    latest_block = w3.eth.block_number
+    checkpoint_file = os.path.join(base_dir, ".local", "dispatcher_checkpoint.json")
+    saved_block = 0
+    if os.path.exists(checkpoint_file):
+        try:
+            with open(checkpoint_file, "r", encoding="utf-8") as cf:
+                saved_block = int(json.load(cf).get("lastBlock", 0))
+        except Exception:
+            saved_block = 0
+
+    if args.from_block is not None:
+        start_block = max(0, args.from_block)
+    elif saved_block > 0:
+        start_block = max(0, saved_block - 5)  # Recheck 5 blocks for chain safety
+    else:
+        start_block = max(0, latest_block - args.block_window)
+
+    print(f"[+] Pham vi block quet su kien: #{start_block} -> #{latest_block}")
 
     # Collect both direct purchase (AccessGranted) and escrow purchase (EscrowDeposited) events
     tasks_to_process = []
 
     try:
         if hasattr(registry.events, "AccessGranted"):
-            events_granted = registry.events.AccessGranted().get_logs(from_block=0)
+            events_granted = registry.events.AccessGranted().get_logs(from_block=start_block, to_block=latest_block)
             for ev in events_granted:
                 tasks_to_process.append({"dataId": ev.args.dataId, "buyer": ev.args.researcher, "isEscrow": False})
 
         if hasattr(registry.events, "EscrowDeposited"):
-            events_escrow = registry.events.EscrowDeposited().get_logs(from_block=0)
+            events_escrow = registry.events.EscrowDeposited().get_logs(from_block=start_block, to_block=latest_block)
             for ev in events_escrow:
                 tasks_to_process.append({"dataId": ev.args.dataId, "buyer": ev.args.buyer, "isEscrow": True})
 
         print(f"[+] Tim thay {len(tasks_to_process)} giao dich mua can kiem tra tren Blockchain.")
 
         dispatched_count = 0
+        failed_count = 0
+        seen_pairs = set()
         for task in tasks_to_process:
             data_id = task["dataId"]
             buyer = task["buyer"]
             is_escrow = task["isEscrow"]
+            pair_key = (data_id, buyer.lower(), is_escrow)
+            if pair_key in seen_pairs:
+                continue
+            seen_pairs.add(pair_key)
 
             try:
+                # Skip frozen/settled/already-delivered escrows cleanly before building tx
+                if is_escrow:
+                    try:
+                        if registry.functions.escrowDisputed(data_id, buyer).call():
+                            print(f"    [-] Bo qua dataId={data_id}, buyer={buyer[:10]}... (Escrow dang tranh chap)")
+                            continue
+                        dep = registry.functions.escrowDeposits(data_id, buyer).call()
+                        # EscrowDeposit: (buyer, seller, amount, depositTime, disputeWindow, released, refunded, capsuleDelivered)
+                        if dep[2] == 0 or dep[5] or dep[6] or dep[7]:
+                            continue
+                    except Exception:
+                        pass
+
                 # Check if capsule already exists via authorized buyerCapsules view
                 try:
                     existing = registry.functions.buyerCapsules(data_id, buyer).call({"from": worker_account})
@@ -194,25 +268,62 @@ def main():
                     capsule_json = package_rsa_capsule(aes_key, buyer_pubkey, buyer, worker_account)
                     print(f"    [+] Worker {worker_account[:10]}... dang dong goi RSA-OAEP capsule cho dataId={data_id}...")
 
-                    # Call storeTransformedCapsule (which automatically releases escrow if active)
-                    tx_hash = registry.functions.storeTransformedCapsule(data_id, buyer, capsule_json).transact({
-                        "from": worker_account
+                    # Dynamic gas estimation with 1.25x safety buffer (never hardcode 450k for viaIR capsules)
+                    tx_fn = registry.functions.storeTransformedCapsule(data_id, buyer, capsule_json)
+                    try:
+                        estimated_gas = tx_fn.estimate_gas({"from": worker_account})
+                        gas_limit = max(int(estimated_gas * 1.25), 500_000)
+                    except Exception:
+                        gas_limit = 1_500_000
+
+                    tx_dict = tx_fn.build_transaction({
+                        "from": worker_account,
+                        "nonce": w3.eth.get_transaction_count(worker_account),
+                        "gas": gas_limit,
                     })
+
+                    worker_key = args.private_key
+                    if worker_key:
+                        signed_tx = w3.eth.account.sign_transaction(tx_dict, private_key=worker_key)
+                        raw_bytes = getattr(signed_tx, "rawTransaction", None) or getattr(signed_tx, "raw_transaction", None)
+                        tx_hash = w3.eth.send_raw_transaction(raw_bytes)
+                    else:
+                        tx_hash = w3.eth.send_transaction(tx_dict)
+
                     receipt = w3.eth.wait_for_transaction_receipt(tx_hash)
+                    if receipt.status != 1:
+                        failed_count += 1
+                        print(f"    [!] Giao dich storeTransformedCapsule bi REVERT (status={receipt.status}, gasUsed={receipt.gasUsed}, TxHash={w3.to_hex(receipt.transactionHash)})")
+                        continue
+
                     dispatched_count += 1
-                    print(f"    [✔] Da luu Capsule thanh cong! TxHash: {w3.to_hex(receipt.transactionHash)}")
+                    print(f"    [+] Da luu Capsule thanh cong! TxHash: {w3.to_hex(receipt.transactionHash)} (gasUsed={receipt.gasUsed})")
                     if is_escrow:
-                        print("        -> Tu dong giai phong tien ky quy Escrow cho nguoi ban va 10% Royalty cho Creator!")
+                        print("        -> Da giao khoa tren chuoi; cho nguoi mua xac nhan (Confirm Release) hoac het han tranh chap.")
             except Exception as item_err:
+                failed_count += 1
                 print(f"    [!] Loi xu ly task dataId={data_id}, buyer={buyer}: {item_err}")
 
-        if dispatched_count == 0:
+        if dispatched_count == 0 and failed_count == 0:
             print("[+] Tat ca giao dich hien tai da co Capsule day du hoac la dataset nguoi dung tu cap.")
+
+        if failed_count > 0:
+            print(f"[!] Phat hien {failed_count} giao dich dispatch that bai/revert tren EVM!")
+            sys.exit(1)
+
+        # Save checkpoint upon successful scan
+        try:
+            os.makedirs(os.path.dirname(checkpoint_file), exist_ok=True)
+            with open(checkpoint_file, "w", encoding="utf-8") as cf:
+                json.dump({"lastBlock": latest_block, "updatedAt": int(time.time())}, cf, indent=2)
+        except Exception:
+            pass
 
     except Exception as e:
         print(f"[!] Loi quet su kien: {e}")
+        sys.exit(1)
 
-    print("\n[✔] Hoan tat chu trinh kiem tra Multi-Worker Capsule Dispatcher.")
+    print("\n[+] Hoan tat chu trinh kiem tra Multi-Worker Capsule Dispatcher.")
 
 
 if __name__ == "__main__":

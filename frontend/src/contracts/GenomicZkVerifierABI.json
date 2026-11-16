@@ -12,6 +12,11 @@
   },
   {
     "inputs": [],
+    "name": "ActiveBountiesExist",
+    "type": "error"
+  },
+  {
+    "inputs": [],
     "name": "BountyExpiredOrInactive",
     "type": "error"
   },

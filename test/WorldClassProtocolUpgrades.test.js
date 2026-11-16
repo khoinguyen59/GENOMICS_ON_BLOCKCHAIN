@@ -114,7 +114,7 @@ describe("Production Protocol Architecture & Security Verification", function ()
       ).to.be.revertedWithCustomError(registry, "DisputeWindowActive");
     });
 
-    it("should automatically release escrow to seller and royalty to creator on storeTransformedCapsule", async function () {
+    it("should hold escrow on storeTransformedCapsule and release seller proceeds + royalty upon buyer confirmation", async function () {
       await registry.connect(researcher).grantAccessWithEscrow(1, DISPUTE_WINDOW);
 
       const sellerBalanceBefore = await token.balanceOf(seller.address);
@@ -125,11 +125,20 @@ describe("Production Protocol Architecture & Security Verification", function ()
         keyCipher: "ab".repeat(256),
       });
 
-      // Seller stores capsule (since seller is both creator & seller, seller gets proceeds 90 + royalty 10 = 100)
       const expectedProceeds = (PRICE * 9000n) / 10000n;
       const expectedRoyalty = (PRICE * 1000n) / 10000n;
 
-      const tx = await registry.connect(seller).storeTransformedCapsule(1, researcher.address, capsulePayload);
+      await registry.connect(seller).storeTransformedCapsule(1, researcher.address, capsulePayload);
+      // Fair-exchange: escrow MUST stay locked until buyer confirms or dispute window expires
+      expect((await registry.escrowDeposits(1, researcher.address)).released).to.be.false;
+      expect(await token.balanceOf(seller.address)).to.equal(sellerBalanceBefore);
+
+      // Cannot refund after capsule is delivered
+      await expect(
+        registry.connect(researcher).claimEscrowRefund(1)
+      ).to.be.revertedWithCustomError(registry, "CapsuleAlreadyDelivered");
+
+      const tx = await registry.connect(researcher).confirmCapsuleAndReleaseEscrow(1);
       await expect(tx)
         .to.emit(registry, "EscrowReleased")
         .withArgs(1, researcher.address, seller.address, expectedProceeds, expectedRoyalty);
@@ -141,11 +150,6 @@ describe("Production Protocol Architecture & Security Verification", function ()
       expect(escrow.released).to.be.true;
       expect(escrow.refunded).to.be.false;
       expect(await registry.hasActiveAccess(1, researcher.address)).to.be.true;
-
-      // Cannot refund after capsule is delivered
-      await expect(
-        registry.connect(researcher).claimEscrowRefund(1)
-      ).to.be.revertedWithCustomError(registry, "CapsuleAlreadyDelivered");
     });
 
     it("should allow 100% refund and revoke access after dispute window expires if capsule not delivered", async function () {

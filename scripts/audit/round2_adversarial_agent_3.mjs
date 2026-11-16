@@ -37,14 +37,14 @@ async function runAdversarialAudit() {
 
   function recordDefect(id, title, severity, details) {
     defectCatalog.push({ id, title, severity, details });
-    console.log(`  🚩 [DEFECT FOUND: ${id}] (${severity}): ${title}`);
-    console.log(`     ↳ ${details}\n`);
+    console.log(`  [DEFECT FOUND: ${id}] (${severity}): ${title}`);
+    console.log(`     -> ${details}\n`);
   }
 
   function recordPass(testName, details) {
     passedTests++;
-    console.log(`  ✅ [PASS #${passedTests}] ${testName}`);
-    if (details) console.log(`     ↳ ${details}`);
+    console.log(`  [PASS #${passedTests}] ${testName}`);
+    if (details) console.log(`     -> ${details}`);
   }
 
   // ─────────────────────────────────────────────────────────────────────────────

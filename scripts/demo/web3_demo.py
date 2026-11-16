@@ -127,6 +127,22 @@ def load_json(filepath: str):
         return json.load(f)
 
 def main():
+    import argparse
+    parser = argparse.ArgumentParser(
+        description="GenoChain - Hệ thống Quản lý và Chia sẻ Dữ liệu Di truyền trên Blockchain (Web3.py Production Engine)"
+    )
+    parser.add_argument(
+        "--offline-demo",
+        action="store_true",
+        help="Cho phép mô phỏng ngoại tuyến (kiểm tra tính hợp lệ ABI & Mật mã học khi chưa khởi động RPC/IPFS node)"
+    )
+    parser.add_argument(
+        "--rpc-url",
+        default=os.getenv("RPC_URL", "http://127.0.0.1:8545"),
+        help="EVM RPC endpoint URL (mặc định: http://127.0.0.1:8545)"
+    )
+    args, unknown = parser.parse_known_args()
+
     print("=" * 80)
     print("  GENOCHAIN PROTOCOL - DECENTRALIZED GENOMIC DATA INFRASTRUCTURE")
     print("  WEB3.PY PRODUCTION INTERACTION SCRIPT & VERIFICATION ENGINE")
@@ -135,7 +151,8 @@ def main():
     print("  CORE INVARIANT: ZERO PLAINTEXT SENSITIVE DATA ON PUBLIC IPFS / BLOCKCHAIN")
     print("=" * 80)
 
-    rpc_url = os.getenv("RPC_URL", "http://127.0.0.1:8545")
+    offline_allowed = args.offline_demo or (os.environ.get("GENOCHAIN_ALLOW_OFFLINE_DEMO") == "1")
+    rpc_url = args.rpc_url
     w3 = Web3(Web3.HTTPProvider(rpc_url))
 
     # Base path to contract artifacts
@@ -213,12 +230,17 @@ def main():
     print("    [OK] burn(uint256) [ERC20Burnable Deflationary]")
 
     if not w3.is_connected():
-        print(f"\n[!] Node RPC tại {rpc_url} chưa khởi động.")
-        print("[*] Để chạy giao dịch trực tiếp:")
+        print(f"\n[!] Lỗi kết nối RPC: Node EVM tại {rpc_url} chưa khởi động.")
+        if not offline_allowed:
+            raise ConnectionError(
+                f"Không thể kết nối RPC Hardhat Node tại {rpc_url}. "
+                "Vui lòng khởi chạy node ('cmd /c npx hardhat node') hoặc truyền cờ --offline-demo."
+            )
+        print("[*] Chế độ --offline-demo: Xác nhận Web3.py ABI binding và cú pháp hợp đồng đạt chuẩn 100%.")
+        print("[*] Để chạy giao dịch trực tiếp trên blockchain:")
         print("    1. Mở terminal mới: cmd /c npx hardhat node")
         print("    2. Deploy hợp đồng: cmd /c npx hardhat run scripts/deploy/deploy.js --network localhost")
         print("    3. Chạy script này : cmd /c python scripts/demo/web3_demo.py")
-        print("\n[OK] Xác nhận: Web3.py ABI binding và cú pháp hợp đồng đạt chuẩn 100%.")
         return
 
     accounts = w3.eth.accounts
@@ -266,7 +288,7 @@ def main():
         if os.path.exists(p):
             with open(p, "r", encoding="utf-8") as vf:
                 raw_vcf_content = vf.read()
-                print(f"[📂] Đã nạp tập tin VCF sinh học thực tế từ: {os.path.relpath(p, base_dir)}")
+                print(f"[VCF] Đã nạp tập tin VCF sinh học thực tế từ: {os.path.relpath(p, base_dir)}")
                 break
 
     if not raw_vcf_content:
@@ -330,7 +352,7 @@ def main():
         if os.path.exists(mp):
             with open(mp, "r", encoding="utf-8") as mf:
                 sample_meta_dict = json.load(mf)
-                print(f"[📂] Đã nạp metadata GA4GH Phenopacket v2 thực tế từ: {os.path.relpath(mp, base_dir)}")
+                print(f"[META] Đã nạp metadata GA4GH Phenopacket v2 thực tế từ: {os.path.relpath(mp, base_dir)}")
                 break
 
     if not sample_meta_dict:
@@ -420,7 +442,13 @@ def main():
             "Khởi chạy IPFS daemon thật hoặc truyền --offline-demo / GENOCHAIN_ALLOW_OFFLINE_DEMO=1."
         )
     real_summary_cid = summary_kubo_cid or compute_ipfs_cidv0(encrypted_summary_payload)
-    real_metadata_cid = upload_to_kubo(sample_meta, "phenopacket_metadata.json") or compute_ipfs_cidv0(sample_meta)
+    metadata_kubo_cid = upload_to_kubo(sample_meta, "phenopacket_metadata.json")
+    if not metadata_kubo_cid and not offline_allowed:
+        raise RuntimeError(
+            "IPFS Kubo Daemon (http://127.0.0.1:5001) không thể ghim metadata Phenopacket. "
+            "Khởi chạy IPFS daemon thật hoặc truyền --offline-demo / GENOCHAIN_ALLOW_OFFLINE_DEMO=1."
+        )
+    real_metadata_cid = metadata_kubo_cid or compute_ipfs_cidv0(sample_meta)
     print(f"[+] Đã mã hóa AES-256-GCM báo cáo PDF phía Client trước khi băm/ghim IPFS: {real_summary_cid}")
 
     # 3. Register Genomic Data on Blockchain

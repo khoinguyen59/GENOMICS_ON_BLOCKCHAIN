@@ -6,23 +6,80 @@
 
 import { base58Encode, encodeUnixFsFileNode, computeIpfsCidV0, calculateFileCID, BASE58_ALPHABET } from "./multihash.js";
 import { getPinataJwt, setPinataJwt, pinFileToPinata, pinJsonToPinata } from "./pinata_client.js";
-import { getKuboRpcEndpoint, setKuboRpcEndpoint, pinFileToKubo, pinJsonToKubo, fetchFromKuboGateway } from "./kubo_client.js";
+import {
+  getKuboRpcEndpoint,
+  setKuboRpcEndpoint,
+  getKuboGatewayEndpoint,
+  setKuboGatewayEndpoint,
+  pinFileToKubo,
+  pinJsonToKubo,
+  fetchFromKuboGateway
+} from "./kubo_client.js";
 
 export {
   base58Encode, encodeUnixFsFileNode, computeIpfsCidV0, calculateFileCID, BASE58_ALPHABET,
   getPinataJwt, setPinataJwt, pinFileToPinata, pinJsonToPinata,
-  getKuboRpcEndpoint, setKuboRpcEndpoint, pinFileToKubo, pinJsonToKubo, fetchFromKuboGateway
+  getKuboRpcEndpoint, setKuboRpcEndpoint, getKuboGatewayEndpoint, setKuboGatewayEndpoint,
+  pinFileToKubo, pinJsonToKubo, fetchFromKuboGateway
 };
 
+// Strictly bounded in-memory LRU storage cache (max 50 entries)
+const MAX_LOCAL_IPFS_CACHE_ENTRIES = 50;
 const localIpfsStorage = new Map();
 
+/**
+ * Cache IPFS content locally with strict LRU eviction policy to prevent memory exhaustion
+ * @param {string} cid 
+ * @param {Uint8Array} bytes 
+ * @param {string} [mimeType="application/octet-stream"] 
+ */
 export function cacheLocalIpfsContent(cid, bytes, mimeType = "application/octet-stream") {
-  localIpfsStorage.set(cid, { bytes, mimeType, size: bytes.length, timestamp: new Date().toISOString() });
+  if (!cid) return;
+  // If already present, remove first so re-insertion places it at MRU position
+  if (localIpfsStorage.has(cid)) {
+    localIpfsStorage.delete(cid);
+  } else if (localIpfsStorage.size >= MAX_LOCAL_IPFS_CACHE_ENTRIES) {
+    // Evict oldest LRU entry (first key in Map iterator)
+    const oldestKey = localIpfsStorage.keys().next().value;
+    if (oldestKey !== undefined) {
+      localIpfsStorage.delete(oldestKey);
+    }
+  }
+  localIpfsStorage.set(cid, {
+    bytes,
+    mimeType,
+    size: bytes ? (bytes.length || bytes.byteLength || 0) : 0,
+    timestamp: new Date().toISOString()
+  });
 }
 
+/**
+ * Retrieve cached IPFS content and refresh its LRU position
+ * @param {string} cid 
+ * @returns {Uint8Array|null}
+ */
 export function getLocalIpfsContent(cid) {
+  if (!cid || !localIpfsStorage.has(cid)) return null;
   const item = localIpfsStorage.get(cid);
+  // Refresh LRU order on access
+  localIpfsStorage.delete(cid);
+  localIpfsStorage.set(cid, item);
   return item ? item.bytes : null;
+}
+
+/**
+ * Clear local IPFS cache (for testing and memory cleanup)
+ */
+export function clearLocalIpfsCache() {
+  localIpfsStorage.clear();
+}
+
+/**
+ * Get current count of cached items
+ * @returns {number}
+ */
+export function getLocalIpfsCacheSize() {
+  return localIpfsStorage.size;
 }
 
 async function pinBytesToIpfsNetwork(fileBytes, fileName, mimeType, customJwt = null) {

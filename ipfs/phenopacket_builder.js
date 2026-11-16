@@ -49,6 +49,9 @@ export function buildPhenopacket({
   rawCid = "",
   summaryCid = "",
   summaryDataHash = "",
+  fileFormat = "",
+  format = "",
+  fileSize = 0,
 }) {
   const rawSubject = String(subjectId || "ANON_SUBJECT").trim();
   const safeSubjectId = /^(ANON_|SEED_|SUBJ_|COHORT_|DONOR_)[a-zA-Z0-9_-]{4,}$/i.test(rawSubject)
@@ -56,17 +59,26 @@ export function buildPhenopacket({
     : `ANON_${hashPseudoId(rawSubject)}`;
   const files = [];
 
+  // Dynamically resolve actual dataset format (e.g. FASTQ, BAM, CRAM, VCF, PHENOPACKET, FASTA)
+  const resolvedFormatRaw = String(format || fileFormat || "VCF").trim();
+  const normalizedFormatUpper = resolvedFormatRaw.toUpperCase().replace(/\s*V\d+(\.\d+)?/i, "").trim() || "VCF";
+  const fileExt = normalizedFormatUpper.toLowerCase().replace(/[^a-z0-9]/g, "");
+
   if (rawCid) {
+    const rawFileAttributes = {
+      fileFormat: resolvedFormatRaw || "VCF",
+      genomeAssembly: "GRCh38",
+      isEncrypted: true,
+      encryptionAlgorithm: "AES-256-GCM",
+      rawDataHash: rawDataHash,
+    };
+    if (fileSize && Number(fileSize) > 0) {
+      rawFileAttributes.fileSize = Number(fileSize);
+    }
     files.push({
       uri: `ipfs://${rawCid}`,
-      individualToFileIdentifiers: { [safeSubjectId]: `${safeSubjectId}.vcf` },
-      fileAttributes: {
-        fileFormat: "VCF",
-        genomeAssembly: "GRCh38",
-        isEncrypted: true,
-        encryptionAlgorithm: "AES-256-GCM",
-        rawDataHash: rawDataHash,
-      },
+      individualToFileIdentifiers: { [safeSubjectId]: `${safeSubjectId}.${fileExt || "vcf"}` },
+      fileAttributes: rawFileAttributes,
     });
   }
 

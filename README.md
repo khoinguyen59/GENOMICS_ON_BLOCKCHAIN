@@ -39,7 +39,7 @@ Dữ liệu giải trình tự hệ gen người (`VCF`, `FASTA`, `FASTQ`) là t
 **GenoChain** giải quyết đồng thời ba thách thức trên bằng một kiến trúc **phi lưu ký phía máy khách (Non-Custodial Client-Side Architecture)** vận hành trên máy ảo Ethereum (`Solidity 0.8.24`, mục tiêu `Cancun`, biên dịch `viaIR`), kết hợp tầng lưu trữ định địa chỉ nội dung **IPFS** (`Pinata Cloud API` + `Local Kubo Daemon`) và lớp xác thực không tiết lộ tri thức **Groth16 BN254**:
 
 - **Bảo mật dữ liệu đầu-cuối trên trình duyệt:** Tệp giải trình tự được mã hóa phân đoạn `64 KB` (`GNC1` streaming container) bằng `AES-256-GCM` qua W3C Web Crypto API ngay tại RAM trình duyệt trước khi rời khỏi thiết bị; bản mã và báo cáo PDF tóm tắt (`HKDF-SHA256` tách miền) cùng siêu dữ liệu `GA4GH Phenopackets v2` được neo bằng ba mã băm `SHA-256` độc lập lên chuỗi.
-- **Ký quỹ trao đổi công bằng (Fair-Exchange Escrow) & Trọng tài tranh chấp:** Tách bạch mua trực tiếp (`grantAccess`) và ký quỹ có bảo vệ thời gian (`grantAccessWithEscrow`), kiểm tra cấu trúc JSON hợp lệ của vỏ bọc khóa (`_isValidCapsule`), tự động gia hạn cửa sổ kiểm tra khi giao khóa sát giờ chót, chống rút hoàn tiền đơn phương sau khi khóa đã giao, kèm cơ chế đóng băng khiếu nại (`disputeCapsule`) và trọng tài phân xử (`resolveEscrowDispute`).
+- **Ký quỹ trao đổi công bằng (Fair-Exchange Escrow) & Trọng tài tranh chấp:** Tách bạch mua trực tiếp (`grantAccess`) và ký quỹ khóa thời gian (`grantAccessWithEscrow`), kiểm tra cấu trúc JSON hợp lệ của vỏ bọc khóa (`_isValidCapsule`), tự động gia hạn cửa sổ kiểm tra khi giao khóa sát giờ chót, chống rút hoàn tiền đơn phương sau khi khóa đã giao, kèm cơ chế đóng băng khiếu nại (`disputeCapsule`) và trọng tài phân xử (`resolveEscrowDispute`).
 - **Hòm khóa bất đối xứng phi trích xuất (`IndexedDB` `extractable: false`):** Khóa riêng `RSA-OAEP-2048` của nhà nghiên cứu không thể đọc thô qua JavaScript thông thường; toàn bộ khóa phiên AES chỉ được trao đổi dưới dạng gói bọc khóa dành riêng cho từng người mua.
 - **Tìm kiếm thẻ mù & Quỹ thưởng ZK-SNARK:** Hỗ trợ lọc bộ dữ liệu qua thẻ băm có muối `GENOCHAIN_BLIND_TAG_V1` kết hợp xác minh sở hữu biến thể qua cặp song tuyến tính `BN254` (`ecPairing`) mà không tiết lộ trình tự DNA thô.
 
@@ -68,18 +68,18 @@ Giao diện web (`React 18.3` + `Vite 8.3`) được tổ chức theo mô hình 
 | Studio Kéo-Thả Mã Hóa & Đúc `GNFT` (Nhà Cung Cấp) | Hòm Khóa Tự Chủ (`IndexedDB` `extractable: false`) |
 | :---: | :---: |
 | <img src="assets/readme/03_donor_minting_studio.png" alt="Studio kéo-thả tệp sinh học, kiểm toán RAM trực tiếp và đúc GNFT" width="100%" /> | <img src="assets/readme/04_sovereign_key_vault.png" alt="Hòm khóa tự chủ quản lý tài sản, worker và sao lưu mật mã" width="100%" /> |
-| *Tự động phân tích header `VCF`/`FASTA`/`FASTQ`, chạy bộ đo kiểm toán truyền tải trực tiếp (`plaintextBytesOverWire = 0`), bảo vệ ngưỡng bộ nhớ xem trước `10 MB`.* | *Quản lý danh mục tài sản đã phát hành (`Active`/`Paused`/`Revoked`), ủy quyền worker giao khóa, quản trị ký quỹ và sao lưu hòm khóa `v2`.* |
+| *Tự động phân tích header `VCF`/`FASTA`/`FASTQ`, chạy bộ đo kiểm toán truyền tải trực tiếp (`plaintextBytesOverWire = 0`), giới hạn ngưỡng bộ nhớ xem trước `10 MB`.* | *Quản lý danh mục tài sản đã phát hành (`Active`/`Paused`/`Revoked`), ủy quyền worker giao khóa, quản trị ký quỹ và sao lưu hòm khóa `v2`.* |
 
-| Giải Mã Tại Bộ Nhớ Đệm & Tái Sử Dụng (`5%`) | Bảng Điều Khiển Quản Trị & Trọng Tài Giao Thức |
+| Giải Mã Tại Bộ Nhớ Đệm & Ký Quỹ Công Bằng | Bảng Điều Khiển Quản Trị & Trọng Tài Giao Thức |
 | :---: | :---: |
-| <img src="assets/readme/05_in_memory_decryption.png" alt="Giải mã gói bản mã tại RAM trình duyệt và ghi nhận tái sử dụng nghiên cứu" width="100%" /> | <img src="assets/readme/06_admin_governance.png" alt="Bảng điều khiển quản trị tham số, trọng tài tranh chấp và quỹ thưởng ZK" width="100%" /> |
-| *Xác thực lại `SHA-256` của bản mã tải từ IPFS trước khi giải mã bằng khóa riêng `IndexedDB`, hiển thị hộp điều khiển vòng đời Escrow và gọi `recordStudyReuse()`.* | *Chuyển nhanh tài khoản vai trò cục bộ, cập nhật `capsuleDispatcher` / `zkVerifier`, tạo & đóng quỹ thưởng ZK, và phân xử tranh chấp ký quỹ.* |
+| <img src="assets/readme/05_in_memory_decryption.png" alt="Điều khiển ký quỹ công bằng và giải mã gói bản mã tại RAM trình duyệt" width="100%" /> | <img src="assets/readme/06_admin_governance.png" alt="Bảng điều khiển quản trị tham số, trọng tài tranh chấp và quỹ thưởng ZK" width="100%" /> |
+| *Đối soát `SHA-256` từ IPFS Kubo, giải mã `.VCF`/`.PDF`/`Phenopacket v2` trên RAM kèm nút `Xác Nhận & Giải Phóng` và `Khiếu Nại Khóa`.* | *Chuyển nhanh tài khoản vai trò cục bộ, theo dõi telemetry (`11 / 2`), cập nhật `capsuleDispatcher` / `zkVerifier`, mở quỹ ZK và phân xử tranh chấp.* |
 
 ### 2.3. Thiết Kế Trải Nghiệm Người Dùng (UX Principles)
 
 - **Hệ thống hai giao diện Sáng / Tối & Song ngữ động (`VI` / `EN`):** Toàn bộ chuỗi văn bản UI được quản lý đồng bộ hai chiều trên `542` khóa ngữ nghĩa (`en.js` / `vi.js`), chuyển đổi tức thời ở cấp độ React Context. Các bảng màu nút hành động, nhãn trạng thái, viền hộp thoại và thẻ cảnh báo được tinh chỉnh đạt ngưỡng tương phản tiêu chuẩn khả năng tiếp cận WCAG trên cả nền sáng lẫn nền tối.
 - **Tối ưu điều hướng đa thiết bị & bàn phím:** Thanh điều hướng trái thu gọn linh hoạt (`52px -> 220px` khi hover trên desktop, drawer đáp ứng trên tablet/mobile), phím tắt `/` nhảy nhanh vào ô tìm kiếm trung tâm, phím `Escape` đóng an toàn mọi modal chi tiết/IPFS/quản lý khóa, cùng cấu trúc tiêu đề phân cấp hợp lệ cho trình đọc màn hình.
-- **Ba chế độ quan sát trên Sàn Nghiên Cứu:** Cho phép chuyển đổi mượt mà giữa chế độ lưới thẻ (`Grid`), bảng đối chiếu tham số sinh học chi tiết (`Table`), luồng sự kiện hợp đồng thời gian thực (`Activity Feed`) và kho lưu trữ các bộ dữ liệu đã cấp quyền (`Licensed Datasets`).
+- **Ba chế độ quan sát trên Sàn Nghiên Cứu:** Cho phép chuyển đổi tức thời giữa chế độ lưới thẻ (`Grid`), bảng đối chiếu tham số sinh học chi tiết (`Table`), luồng sự kiện hợp đồng thời gian thực (`Activity Feed`) và kho lưu trữ các bộ dữ liệu đã cấp quyền (`Licensed Datasets`).
 - **Minh bạch hóa ranh giới mạng & trạng thái RPC:** Hệ thống chủ động phát hiện sai lệch mạng ví (Chain ID không khớp với mạng triển khai của hợp đồng) và trạng thái mất kết nối nút EVM cục bộ để hiển thị banner cảnh báo rõ ràng cùng nguyên bản thông báo lỗi RPC, tuyệt đối không cập nhật giả lập trạng thái UI khi giao dịch thất bại.
 - **Khép kín trải nghiệm Ký quỹ Escrow trên giao diện:** Người mua có đầy đủ nút xác nhận giải ngân (`#btn-confirm-escrow-*`), khiếu nại khóa hỏng (`#btn-dispute-escrow-*`), bật/tắt chế độ xác nhận thủ công và rút hoàn tiền quá hạn (`#btn-claim-refund-*`); chủ sở hữu vẫn truy cập được bảng điều hành ký quỹ kể cả khi bộ dữ liệu đang tạm dừng (`Paused`); và quản trị viên có giao diện trọng tài xử lý trực tiếp lệnh `resolveEscrowDispute`.
 
@@ -212,7 +212,7 @@ Toàn bộ hoạt động mã hóa/giải mã đối xứng, bất đối xứng
 ### 4.2. Hòm Khóa Bất Đối Xứng `RSA-OAEP-2048` & Sao Lưu Ngoại Tuyến
 
 - **Cặp khóa không thể trích xuất:** `crypto/storage/key_vault.js` khởi tạo cặp khóa `RSA-OAEP` độ dài `2048`-bit, số mũ công khai $e = 65537$, hàm băm `SHA-256` với tham số `extractable: false` cho khóa riêng (`PrivateKey`), lưu bền vững trong cơ sở dữ liệu `IndexedDB` (`GenomicsKeyStoreDB v2`, phân tách phạm vi theo địa chỉ ví).
-- **Sao lưu & khôi phục đa thiết bị:** Hỗ trợ xuất/nhập vỏ bọc sao lưu `GENOCHAIN-ENCRYPTED-KEY-VAULT-v2` được bảo vệ bằng khóa dẫn xuất từ chữ ký ví `EIP-191` hoặc mật khẩu người dùng qua `PBKDF2` (`100,000` vòng `HMAC-SHA256`, `16 bytes` muối ngẫu nhiên).
+- **Sao lưu & khôi phục đa thiết bị:** Hỗ trợ xuất/nhập vỏ bọc sao lưu `GENOCHAIN-ENCRYPTED-KEY-VAULT-v2` được mã hóa bằng khóa dẫn xuất từ chữ ký ví `EIP-191` hoặc mật khẩu người dùng qua `PBKDF2` (`100,000` vòng `HMAC-SHA256`, `16 bytes` muối ngẫu nhiên).
 
 ### 4.3. Chỉ Mục Thẻ Mù (Salted Blind Tags)
 
@@ -436,7 +436,7 @@ Nhằm minh bạch hóa ranh giới kỹ thuật hiện hành trước khi cân 
 1. **Biên độ Bytecode của `GenomicsRegistry.sol`:** Hợp đồng lõi hiện có kích thước triển khai `24,539 bytes` (cách trần EIP-170 `24,576 bytes` là `37 bytes`). Khi bổ sung thêm nghiệp vụ mới vào `GenomicsRegistry`, cần tách các hàm tiện ích hoặc bộ kiểm tra cú pháp sang `library` bên ngoài hoặc kiến trúc Diamond (`EIP-2535`).
 2. **Đánh đổi thiết kế Chống Sybil ở `GenomicToken.faucet()`:** Việc kiểm tra `msg.sender == tx.origin` ngăn chặn hiệu quả ví hợp đồng thông minh tự động hóa bòn rút bể faucet thử nghiệm, đồng nghĩa các ví thông minh (`ERC-4337 Account Abstraction`) sẽ không gọi trực tiếp được `faucet()` mà cần nhận token qua ví EOA hoặc cấp phát của quản trị viên (`mint()`).
 3. **Chi phí Gas của Xác thực `Groth16` & Trình chuyển phát Khóa (`Dispatcher`):** Mỗi lượt xác thực `ecPairing` (`k = 4`) tiêu tốn `181,000 gas` cố định ở precompile `0x08`; với trình chuyển phát khóa off-chain hiện hỗ trợ `capsuleDispatcher` và `authorizedCapsuleWorkers`, hướng nghiên cứu tiếp theo là thay thế bằng mạng **Threshold Proxy Re-Encryption (tPRE / MPC)** đa nút không cần tin cậy một thực thể duy nhất.
-4. **Giới hạn Bộ nhớ Trình duyệt với Tệp Giải Trình Tự Cỡ Rất Lớn:** Dù khung `GNC1` 64 KB hỗ trợ mã hóa luồng hiệu quả, việc xem trước bản rõ hàng trăm megabyte trong cùng một tab trình duyệt vẫn bị giới hạn bởi dung lượng heap JavaScript; giao diện chủ động đặt ngưỡng bảo vệ xem trước `10 MB` để tránh treo tab.
+4. **Giới hạn Bộ nhớ Trình duyệt với Tệp Giải Trình Tự Cỡ Rất Lớn:** Dù khung `GNC1` 64 KB hỗ trợ mã hóa luồng hiệu quả, việc xem trước bản rõ hàng trăm megabyte trong cùng một tab trình duyệt vẫn bị giới hạn bởi dung lượng heap JavaScript; giao diện chủ động đặt ngưỡng giới hạn xem trước `10 MB` để tránh treo tab.
 
 ---
 

@@ -17,12 +17,12 @@
       "region": "Vietnamese (Kinh)",
       "bloodGroup": "O+",
       "clinvarId": "1000G:KHV",
-      "rawCid": "QmRbQeyriAFYM8cHe2S6TVzNbh3fUQwszzP8FMdj4zfHMm",
-      "metadataCid": "QmQ7oWkv2rfSJHNdKLu15bVZHcTRErotPhcjW4uyZzXHGa",
-      "summaryCid": "QmNZuaxt76HfA6Zn1jpzw34tniKcDZrbNk4ofwYLsWJvby",
-      "rawDataHash": "0x0b065c1b742990b244f11c6562b82b1c58505b15cb50864f8dd37130bcd495c5",
-      "summaryDataHash": "0x9f1da086630f2415ab9fe18356193596af8fffa38a034f4ad2b987be5a31210a",
-      "metadataHash": "0xa3a262ba3c3ada112c7a985c70f41bb494316d89aed5e1129e92c93702c9d088"
+      "rawCid": "QmcfRU22rQpdk68BsWuDcexJJAHpctFBBAfn8DiGRLZYVN",
+      "metadataCid": "QmP6zeJTDMMpEAthxTCnitXUE5eUZ4qjpS6ZDaSYrmGzpV",
+      "summaryCid": "QmbX12uSpSLNop7MA5cVZtmzwSdULgfK9JSr9ronAKNAJJ",
+      "rawDataHash": "0x93e21c71c0517ed4e9041e206dc32c5b9e4cdb8252622ff0667f24c03798f12b",
+      "summaryDataHash": "0x32c6b1284dce1c0c4f71157a2fce0ff5357722a5310014ea4ab14c7bd1a33e36",
+      "metadataHash": "0x5918a6f02d5647efbdbc4c5371b9037206b31d1db187014a85c33b136a79f0dd"
     },
     {
       "dataId": 2,
@@ -41,12 +41,12 @@
       "region": "Global",
       "bloodGroup": "O+",
       "clinvarId": "dbSNP:rs1815739",
-      "rawCid": "QmPjeD8JGPJWcwd6ye7XM8ErkPjxqXHnR3ChFQwQ1zuRxU",
-      "metadataCid": "QmPcWa5u6n9zCvybG48eZrukTTt6EftnfC7S2Utff83kbC",
-      "summaryCid": "QmRVuoSYe27X9fBDaJWtea4Po4YCtN5Tnyn2Zhpcot9wdR",
-      "rawDataHash": "0x67cf131b1c24a5517ec297713b69eef782676f994c4fdf8383e49109e1bc6f4e",
-      "summaryDataHash": "0x81269597d146e6ecd5794fe391c74b919c1b24ca24c162a4f9d6ff72ea0d5535",
-      "metadataHash": "0x6c66f45bdbb7ca350e60c500535c4a29b023898a926fbd4e4b10fbd2db0e7c88"
+      "rawCid": "QmY7eqGgRXbTuS5zExckvvQRvc3CLLrhKzvFVb5Hishdqc",
+      "metadataCid": "QmbuAByVAN47jMsqUHkCVkZaDhJ64YbpmaFeq4s4RJuf5n",
+      "summaryCid": "QmVn7jSWodxArbe1Q9UMxxnAn8Q93UaVZqpyyzPaQxftLm",
+      "rawDataHash": "0xb3f69c878eb05cd15c2c7dcd7ca6972c951933b0f303fdc5a41cf6a514dd19d5",
+      "summaryDataHash": "0x1990be6641e82b1f6e8c05aca6233b2564284ccae5f42af08089d8a7e97ed333",
+      "metadataHash": "0x82f8920d16472fa7dbb184b3197fca795315f7006fa8a2ad424f7ff5530893ab"
     },
     {
       "dataId": 3,
@@ -65,12 +65,12 @@
       "region": "East Asian",
       "bloodGroup": "A+",
       "clinvarId": "dbSNP:rs671",
-      "rawCid": "QmQBNAGR2xewACi5piGcNbGH1F4y4MJFTgKkXLtUP9fwm5",
-      "metadataCid": "Qmcd2bppkcFiFmFgqmaf8hvvPGeUs2ZN4tXzLJ9LubX6z4",
-      "summaryCid": "QmZdfeX5G6Ugg6p4cTBsHk3dLweHyLEwDSwiwk4F5TMV2J",
-      "rawDataHash": "0x369b46937d3ea981339477071f9b0b29a436d7526654e98500a5c17df096d276",
-      "summaryDataHash": "0xb17ab2169b495fea2f3718efd5b91c29d33335e9989b1f88274fb8676f849c3c",
-      "metadataHash": "0x221302bfb1db62e287659a96c500b26d2bb4b70e57f04afadcd928fe19bdbb47"
+      "rawCid": "QmZ77bjjFGDdyqxxKMgVzTq18Sk3h9ZawxSgM7J6cwqY2R",
+      "metadataCid": "QmYGrHBsecGRkvHLSw7Ym34zY9EZJZhhReUC5ivHrKCmJD",
+      "summaryCid": "QmcYWTEmCZAKae9D5dmR9ss8ZVBrUfYfk5UamJxd5WYbWi",
+      "rawDataHash": "0x3424123d10daf92650b85c645b727a53457df1fd59eafff4544fb52a44b354ef",
+      "summaryDataHash": "0x6464d15b08f0dd7dffacf26b221757658ed1e84ea7d4f7ab3770c1ec05fd8a96",
+      "metadataHash": "0x1e53e39a038e975227369ba133c2f4a1fc8f0b9d6172843b46f33f3b9e9794a0"
     },
     {
       "dataId": 4,
@@ -89,12 +89,12 @@
       "region": "Southeast Asian",
       "bloodGroup": "AB+",
       "clinvarId": "dbSNP:rs4988235",
-      "rawCid": "QmQnpkYCAZw92RLqvwEWP4jzeJopvigvGrXXVGiqWsbe3n",
-      "metadataCid": "QmTpVhoecsJHawrWrhDUrhYDqY3yH3kqc28cyrsACbnvge",
-      "summaryCid": "QmWbzT9jtRNUdwKPpznkLFb8XeHbs6ujkoKAcxq5x75b6G",
-      "rawDataHash": "0x957d7a3f9510b955da97ab98f598110aea5fd5525bce4d5d7147acaac837e24c",
-      "summaryDataHash": "0xba86b47ccd8e426544cb7f09f8f63ae0096964773f6cf78c0019316b1f470898",
-      "metadataHash": "0x011c9b5da7bd8b31d7d0988022f1b27db48f6a061f71c16755d6de47e44ca095"
+      "rawCid": "QmRg3re8i34TKasSqgcARhqsjjsW23uVB7gUTSSw6ABuwq",
+      "metadataCid": "QmUZDVr4xBFuuX2K3EgPUm8789K76iiSUPWdnmDiLVcMEQ",
+      "summaryCid": "QmdVB3exJt5Yrps6HZ4LB8NezjVJwRf5huLnrSgiShRKep",
+      "rawDataHash": "0xd76994bbdc1a9cee12f8200abfece6cb1e1282c49245670f634440e6bf7cb166",
+      "summaryDataHash": "0xdb2ec39ec65e8c06ee50bd04f7e0507daff2ab13cdf3399ecd60e9bf9a27991c",
+      "metadataHash": "0xe3a2b755b4fe42adedf083b357988546abf56b995c44215da25e8cab7a16cf0a"
     },
     {
       "dataId": 5,
@@ -113,12 +113,12 @@
       "region": "East Asian",
       "bloodGroup": "O-",
       "clinvarId": "dbSNP:rs762551",
-      "rawCid": "QmbqUqfmxnz4iZYGHiVPhNZ2hFtFTXvpFSUDQhCWRcpWSM",
-      "metadataCid": "QmcBSzaaqvuzwDV8Ng7US3oKY2DQRnUgo5bzLk7UmRRh9M",
-      "summaryCid": "QmfMCXHiPrjMrEPyKxU5nwKoW2pJAh1LXNcsA224mL2835",
-      "rawDataHash": "0xd0aa203f155f210362b6f60115c7fd00825ea58866e91511be7846f91074f6a5",
-      "summaryDataHash": "0x343923e228fe76467c1fb3c991427911059a628e589c93636fbca7f18c340792",
-      "metadataHash": "0x2a0519a45eb85557521d5f684ec124b9b3152084fdab532ce0d1960a93914f2d"
+      "rawCid": "QmdjFJbkhbSQRyZU8Gvewf9HaHP8qoX5vZTzV6ZY16iDLc",
+      "metadataCid": "QmdVF32A7qZ6bRNbSBhPeqe4Sb4mzytMkE4M9GtLxspZx6",
+      "summaryCid": "QmPSt8WpJP7r3sBuwVWKmSGSrQ65tJC484XHmcPEhSpZYC",
+      "rawDataHash": "0xa05c357435550e656eded2f47af47ad28cd8976fd8f7f88c6ac5bbbad8f4f40f",
+      "summaryDataHash": "0xf5bd4bf662cce78cdc4d1b2985dc46a7d4e2bec482013dc481173e111bfc0ddb",
+      "metadataHash": "0xa94327077498d58f3ec3dcc54f99132d8160ada32178b90939b0c0e4873cd554"
     },
     {
       "dataId": 6,
@@ -137,12 +137,12 @@
       "region": "East Asian",
       "bloodGroup": "B-",
       "clinvarId": "dbSNP:rs17822931",
-      "rawCid": "QmWuZQvo6wTU14PHJmdK9DvSwXGAiRg1SbxHT8cvPUMwqF",
-      "metadataCid": "QmcpZuPb7wJGE5aAUJ7JC1PnfwMrfp5b8AT6RSjhPYojHc",
-      "summaryCid": "QmSZc7syvLaYZEdctpTCGXeFSE6Q79RNsJiPYFSPbidYji",
-      "rawDataHash": "0xc532fa741294940babf93e792fc13b6b7bbfba422dbe52d16ab87d1a7dae1a2b",
-      "summaryDataHash": "0x09eb45b748aef03a7e2a3582c1bd317e009ef92e64822feead6da5eb38d08127",
-      "metadataHash": "0x33d1117216eb60077fb0896cfbf59f56efae5659c2c5b6202c75f675ae0ca97f"
+      "rawCid": "QmVrpDq8aYQnfEfwzqC8mFxRWZ1Qsath1QGktnJ5nQDU3H",
+      "metadataCid": "QmRqecjo8XsPghxtEMtgwCEz4GycenkFGiTWE4ykvuRA11",
+      "summaryCid": "QmSf7a7M54CDsyA5NUCbPqmnAmzEREfdN5L9xz2XJ8TiSC",
+      "rawDataHash": "0xa51ab49be78e40c36cf7813f2085ed11d988ae5acb78e9f8cb66eaa4eafae8f6",
+      "summaryDataHash": "0x74538887e7a1ed112295c29e46f76441dcf0e5969cfc7571d0c49dcc55adab66",
+      "metadataHash": "0x9e3209c40a92590ec6e3c62158356009b4489f7307ab7d04706679b83b05d755"
     },
     {
       "dataId": 7,
@@ -161,12 +161,12 @@
       "region": "Global / CEU",
       "bloodGroup": "O+",
       "clinvarId": "GIAB:NA12878",
-      "rawCid": "Qmce7hyDEnX622ZXzm19xxPfqTEYgDRLSgNP3bV2cWdm5V",
-      "metadataCid": "QmZpVMb5aMJCGZZh1m1EfB8hX1dYJaR92wP6fXtcrgWfWC",
-      "summaryCid": "QmZkUzBzPBfhaQ1erKPb7VgCbaMWQ2y16R2zNNG1obNyaa",
-      "rawDataHash": "0xb622647b402e9abe7987af27610d479b938ea7ffd3a1e9cffa181029d7c3231a",
-      "summaryDataHash": "0x5c233501e365d61baa2469bc6bb2eaac0e3b39361e3124e900e6690b95313883",
-      "metadataHash": "0xd9867e788e20214025e759f575ddbd2ad02329f6c494bfa35ab6400a1c409f6b"
+      "rawCid": "QmZPKG1BW3hyyuf1guZCGMZvdHfqTWr4jXtAEkFaR8BwCx",
+      "metadataCid": "QmPPnWMFobxQ5NmBYTon7busqSX7za3sbjhKErXb62dPmb",
+      "summaryCid": "QmbgXeUX5X9DWjVi4YPFSZnniPhKYWJQze2fawobZ5wtBA",
+      "rawDataHash": "0x5bb846ef99b3386bb76f0ea0ac3a58f9869ede6750d85014e68147c54022863a",
+      "summaryDataHash": "0x5e49acabe4b8ccae8f18cef8283814f947c8ec5c81fe162faeb061ddc8a57263",
+      "metadataHash": "0x90c9e8ad4c9f7ca7135484a726bc3042f973357235f5002df548708094e93076"
     },
     {
       "dataId": 8,
@@ -185,12 +185,12 @@
       "region": "Global",
       "bloodGroup": "A-",
       "clinvarId": "dbSNP:rs12913832",
-      "rawCid": "QmadkFH7BAFhpDKJahCPT7wxKe69wpQx7SVGtVYEj2FykF",
-      "metadataCid": "QmQkCsnaKCCB4YpAe8vpJabD22WXfEdn5GnyGLEkWPqVsU",
-      "summaryCid": "QmcMjSewbKtifC3Lu7BuHTi6nFVr6AXq9eGjiadNCVAp6x",
-      "rawDataHash": "0x1b8a751fb34e9b62b398180753a9022db9619f9c7065837da65acd3c885b1fe9",
-      "summaryDataHash": "0xa3b7e9342778a2cdf8bb6e7a022cf7fcd676f0960a0dea84cbfcf132f9d616b6",
-      "metadataHash": "0x58f765322a0894e2c30ed88a534bd59f691aec08cd0942777650f9b75017b111"
+      "rawCid": "QmRhZimWxcWgWC2dxBgyNNmB38U6tSRHaoE2VUwab6Pc9q",
+      "metadataCid": "QmRYBbyL6dwTJFkbuT3BVLhgBnqetiCuyQvWLbFRMDZLYu",
+      "summaryCid": "QmWmP3boB5NnG82bKx45aGggHDiVqKymYRSeA6258hwELz",
+      "rawDataHash": "0x8c808ac49cdc3bb906979db810c30c6ac80fcb327cd3fe96484409bb19f58888",
+      "summaryDataHash": "0xb4d7e0ad12714fcb8ab0f03a47d6eb301de88fd78ceebff3318adb6dba79fb19",
+      "metadataHash": "0x00502af37b81e96f6446bfc90818b6876e547ad864a14ea17d308850183fd5b1"
     },
     {
       "dataId": 9,
@@ -209,12 +209,12 @@
       "region": "Southeast Asian",
       "bloodGroup": "B+",
       "clinvarId": "dbSNP:rs713598",
-      "rawCid": "QmXyppvwhraNRv7w1Xf1aKBnhRnZnR5bmdu8qhBEncjrzt",
-      "metadataCid": "QmQevd5T6HHaEoWgBmLJJXwLyzWkmKPUa1Q8KduPLdpZ9t",
-      "summaryCid": "QmWXxdFsjbroZwP4xF2YtwDXaZ9WawQFuMmkFb813C2gym",
-      "rawDataHash": "0x6b36ff12369944db11dcc5fc15bd53424f4632c771407fb8c737c6eb9b2431c2",
-      "summaryDataHash": "0x6d117af47a768440030c3db4c1f75d898683e47df09a0e25003774dc7e2a275d",
-      "metadataHash": "0xbf8d5ed7c019c5bf15484730aaf559d71f83845a1439d4689c67c5a7ba54bd26"
+      "rawCid": "QmepwnubLHrDWzc9Ku2sANN1fAYmmfpCrZpWgSAix6H6wE",
+      "metadataCid": "QmSkQkfH4EN1iGXd68vo16as3JF3tTfpMradCLZ4hFziRd",
+      "summaryCid": "QmTNHddrbka7HzCJ5BgZiXaLfJ3iThAHkZ5T6aK4s1k6uN",
+      "rawDataHash": "0xda58a9104a7913f3dc064022b14d29730b726de859d02176cbd6d94c8f3f8eaf",
+      "summaryDataHash": "0x6e25e5d38eb82cb4144477e729ac9fa3000dbdeed9e7aea84792e5c44ae47f9e",
+      "metadataHash": "0x2e90d68e39371b7933add6ec15e886c791efbc01f548146036fc21d188c1376e"
     },
     {
       "dataId": 10,
@@ -233,12 +233,12 @@
       "region": "Southeast Asian",
       "bloodGroup": "AB-",
       "clinvarId": "dbSNP:rs3827760",
-      "rawCid": "QmS3iz8qzVjn74TrsF8j6KckMV1t4WquMQZcoBhoYcMBiV",
-      "metadataCid": "QmPtqyUjHjALvkbdNRzqCnH7jPU52QnX7Nw1CAdHMmBiup",
-      "summaryCid": "QmPCmxvx1RbbQVEwbnpecVZTid3iA1WvzNvYbF5uQZH4Bq",
-      "rawDataHash": "0x9b7929169d98318cc39d8dbe7b64f83316ef52bc7f31fbed81bfb5f82d7f2c86",
-      "summaryDataHash": "0x7bdacce48180d8468548395098fe54a8028c443f1fec97472bd1ffbd4951e424",
-      "metadataHash": "0x461a0f33b44263f8d8845b1c7852121efb82894fff9cea4832aadf72e49e02c0"
+      "rawCid": "QmUxVLY22oLuDRRb1eZWx76FEUk4vkZifuf9NJPYgyLyNx",
+      "metadataCid": "QmRTffetYofmcL63Xmi6MG7WPrw5WPJKpXDHKNjwC7JBW6",
+      "summaryCid": "QmXDWYzNGz6WYHaxB2GFZa3NXBmQc8uaNfQ6cJwc5RsGug",
+      "rawDataHash": "0x08deea24fe6a50a8c9847ea0a707325074856fdb41d30442a39765b99e563c56",
+      "summaryDataHash": "0xb41526fe85661068014cf3d47ccf5f7291ea107806019769fea17c21dcecaed8",
+      "metadataHash": "0x4d54a0b0a6a986774c21b7306f3d6be5ef9b27041538716a3d9a096d0425b961"
     }
   ]
 }

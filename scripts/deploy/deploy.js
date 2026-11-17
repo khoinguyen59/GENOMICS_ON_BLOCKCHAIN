@@ -8,6 +8,7 @@ import {
   generateAsymmetricKeyPair,
   exportPublicKey,
   packageKeyCapsule,
+  computeDataHash,
 } from "../../crypto/client_crypto.js";
 import { buildPhenopacket } from "../../ipfs/phenopacket_builder.js";
 import { computeIpfsCidV0, cacheLocalIpfsContent } from "../../ipfs/pinata_uploader.js";
@@ -49,10 +50,13 @@ async function main() {
 
   const connection = await hre.network.connect("localhost");
   const { ethers } = connection;
-  const [deployer, researcher] = await ethers.getSigners();
+  const [deployer, account1, researcher] = await ethers.getSigners();
   console.log(`Deployer Address   : ${deployer.address}`);
+  if (account1) {
+    console.log(`Provider (#1)      : ${account1.address}`);
+  }
   if (researcher) {
-    console.log(`Researcher Address : ${researcher.address}`);
+    console.log(`Researcher (#2)    : ${researcher.address}`);
   }
 
   // 1. Deploy GenomicToken (ERC-20)
@@ -98,6 +102,32 @@ async function main() {
   const dispTx = await registry.connect(deployer).setCapsuleDispatcher(deployer.address);
   await dispTx.wait();
   console.log("[OK] Capsule Dispatcher authorized!");
+
+  // Fund Account #1 (Provider) and Account #2 (Researcher) with 2,000 $GENO each
+  if (account1) {
+    const f1 = await token.connect(deployer).transfer(account1.address, ethers.parseUnits("2000", 18));
+    await f1.wait();
+  }
+  if (researcher) {
+    const f2 = await token.connect(deployer).transfer(researcher.address, ethers.parseUnits("2000", 18));
+    await f2.wait();
+  }
+  console.log("[OK] Funded Account #1 & Account #2 with 2,000 $GENO each.");
+
+  // Seed ZK Research Bounty #1 (50 $GENO x 5 claims = 250 $GENO escrowed on GenomicZkVerifier)
+  const bountyReward = ethers.parseUnits("50", 18);
+  const bountyMaxClaims = 5n;
+  const approveBountyTx = await token.connect(deployer).approve(zkVerifier.target, bountyReward * bountyMaxClaims);
+  await approveBountyTx.wait();
+  const createBountyTx = await zkVerifier.connect(deployer).createZkBounty(
+    ethers.id("ALDH2_rs671"),
+    "ALDH2 rs671 East Asian Alcohol Flush & Drug Metabolism Cohort",
+    bountyReward,
+    bountyMaxClaims,
+    86400
+  );
+  await createBountyTx.wait();
+  console.log("[OK] Seed ZK Bounty #1 created on GenomicZkVerifier (50 $GENO x 5 claims).");
 
   // 5. Seed 10 Authenticated Clinical & Scientific Genomic Cohorts On-Chain
   console.log("\n5. Seeding 10 authentic clinical & scientific genomic cohorts on-chain...");
@@ -416,7 +446,7 @@ async function main() {
     });
     const metaJson = JSON.stringify(pheno, null, 2);
     const metaCid = await computeIpfsCidV0(metaJson);
-    const metaHash = ethers.keccak256(new TextEncoder().encode(metaJson));
+    const metaHash = await computeDataHash(new TextEncoder().encode(metaJson));
 
     // 4. Cache in dual-engine local cache and pin to local Kubo if reachable
     cacheLocalIpfsContent(rawCid, enc.payload);
@@ -448,6 +478,9 @@ async function main() {
       computeBlindTagHex("trait", c.clinicalSignificance || c.disease || ""),
       computeBlindTagHex("rsid", c.rsId || ""),
     ];
+    if (c.dataId === 1) {
+      blindTags.push(computeBlindTagHex("gene", "ALDH2"));
+    }
 
     // 5. Register on-chain via bundle (ensures bundle hashes / metadataHash parity matching deploy_localhost.js)
     const tx = await registry.connect(deployer).registerGenomicDataBundle(

@@ -176,10 +176,10 @@ def main():
         print("    1. cmd /c npx hardhat node")
         print("    2. cmd /c npx hardhat run scripts/deploy/deploy_localhost.js --network localhost")
         print("    3. cmd /c python scripts/demo/capsule_dispatcher.py")
-        print("[✔] Xac nhan: Logic Multi-Worker Dispatcher va thuat toan RSA-OAEP san sang 100%.")
+        print("[OK] Xac nhan: Logic Multi-Worker Dispatcher va thuat toan RSA-OAEP san sang 100%.")
         return
 
-    print("[✔] Da ket noi thanh cong voi EVM RPC Node!")
+    print("[OK] Da ket noi thanh cong voi EVM RPC Node!")
     registry = w3.eth.contract(address=registry_address, abi=registry_abi)
     if args.private_key:
         try:
@@ -201,7 +201,7 @@ def main():
 
     if args.from_block is not None:
         start_block = max(0, args.from_block)
-    elif saved_block > 0:
+    elif 0 < saved_block <= latest_block:
         start_block = max(0, saved_block - 5)  # Recheck 5 blocks for chain safety
     else:
         start_block = max(0, latest_block - args.block_window)

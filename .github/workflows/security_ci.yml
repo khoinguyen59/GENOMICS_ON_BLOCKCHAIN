@@ -28,10 +28,10 @@ jobs:
       - name: Compile Smart Contracts
         run: npx hardhat compile
 
-      - name: Run 439-Case Hardhat & Adversarial Verification Suite
+      - name: Run Hardhat Smart Contract & Cryptographic Verification Suite
         run: npm test
 
-      - name: Run 24-Case Independent Adversarial Stress Suite
+      - name: Run Independent Adversarial Stress Suite
         run: npx hardhat run scripts/audit/independent_stress_suite.mjs
 
   static-analysis-and-linting:

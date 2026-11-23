@@ -117,8 +117,12 @@ def derive_vault_key_pbkdf2(secret: str, salt_hex: str, iterations: int = VAULT_
     return hashlib.pbkdf2_hmac("sha256", f"{dom}:{secret}".encode("utf-8"), salt, iters, dklen=32)
 
 
-def load_dispatcher_vault_key(base_dir: str, vault_data: dict | None = None) -> bytes:
-    """Load 256-bit vault key from salted PBKDF2-HMAC-SHA256 (v2), legacy v1 secret, or .local/dispatcher_vault.key."""
+def load_dispatcher_vault_key(
+    base_dir: str,
+    vault_data: dict | None = None,
+    vault_file: str | None = None,
+) -> bytes:
+    """Load 256-bit vault key from salted PBKDF2-HMAC-SHA256 (v2), legacy v1 secret, LOCAL_VAULT_DIR, vault_file dir, or .local/dispatcher_vault.key."""
     env_secret = os.environ.get("GENOCHAIN_SEED_VAULT_SECRET")
     if env_secret:
         kdf_meta = vault_data.get("vaultKdf") if isinstance(vault_data, dict) else None
@@ -136,16 +140,32 @@ def load_dispatcher_vault_key(base_dir: str, vault_data: dict | None = None) -> 
             raise ValueError(f"Unsupported or incomplete vault v2 KDF metadata: {kdf_meta}")
         # Legacy v1 unversioned vault compatibility fallback
         return hashlib.sha256(env_secret.encode("utf-8")).digest()
-    key_path = os.path.join(base_dir, ".local", "dispatcher_vault.key")
-    if os.path.exists(key_path):
-        with open(key_path, "r", encoding="utf-8") as kf:
-            key_hex = kf.read().strip()
-        key_bytes = bytes.fromhex(key_hex)
-        if len(key_bytes) != 32:
-            raise ValueError(".local/dispatcher_vault.key must contain exactly 32 bytes (64 hex chars).")
-        return key_bytes
+
+    candidate_paths: list[str] = []
+    env_vault_dir = str(os.environ.get("LOCAL_VAULT_DIR") or "").strip()
+    if env_vault_dir:
+        candidate_paths.append(os.path.join(os.path.abspath(env_vault_dir), "dispatcher_vault.key"))
+    if vault_file:
+        vault_parent = os.path.dirname(os.path.abspath(vault_file))
+        if vault_parent:
+            candidate_paths.append(os.path.join(vault_parent, "dispatcher_vault.key"))
+    candidate_paths.append(os.path.join(base_dir, ".local", "dispatcher_vault.key"))
+
+    seen: set[str] = set()
+    for key_path in candidate_paths:
+        norm = os.path.normcase(os.path.abspath(key_path))
+        if norm in seen:
+            continue
+        seen.add(norm)
+        if os.path.exists(key_path):
+            with open(key_path, "r", encoding="utf-8") as kf:
+                key_hex = kf.read().strip()
+            key_bytes = bytes.fromhex(key_hex)
+            if len(key_bytes) != 32:
+                raise ValueError(f"{key_path} must contain exactly 32 bytes (64 hex chars).")
+            return key_bytes
     raise FileNotFoundError(
-        "Missing dispatcher vault key (.local/dispatcher_vault.key or GENOCHAIN_SEED_VAULT_SECRET). "
+        "Missing dispatcher vault key (LOCAL_VAULT_DIR/dispatcher_vault.key, .local/dispatcher_vault.key, or GENOCHAIN_SEED_VAULT_SECRET). "
         "Refusing predictable key derivation."
     )
 
@@ -319,11 +339,17 @@ def load_vault_keys(vault_file: str, base_dir: str) -> tuple[dict[int, str], dic
     seed_items = data.get("seeds", [])
     needs_local_vault_key = any(
         isinstance(item, dict)
-        and ("encryptedKeyEnvelopeHex" in item or "encryptedSummaryKeyEnvelopeHex" in item)
-        and "kmsKeyEnvelope" not in item
+        and (
+            ("encryptedKeyEnvelopeHex" in item and "kmsKeyEnvelope" not in item)
+            or ("encryptedSummaryKeyEnvelopeHex" in item and "kmsSummaryKeyEnvelope" not in item)
+        )
         for item in seed_items
     )
-    vault_key = load_dispatcher_vault_key(base_dir, vault_data=data) if needs_local_vault_key else None
+    vault_key = (
+        load_dispatcher_vault_key(base_dir, vault_data=data, vault_file=vault_file)
+        if needs_local_vault_key
+        else None
+    )
     for item in seed_items:
         if not isinstance(item, dict):
             continue

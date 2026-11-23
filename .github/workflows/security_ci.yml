@@ -28,7 +28,7 @@ jobs:
       - name: Setup Node.js Runtime
         uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "22.15.0"
           cache: "npm"
 
       - name: Install Dependencies
@@ -65,7 +65,7 @@ jobs:
       - name: Setup Node.js Runtime
         uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "22.15.0"
           cache: "npm"
 
       - name: Install Dependencies, Solc 0.8.24 & Pinned Slither
@@ -96,7 +96,7 @@ jobs:
       - name: Setup Node.js Runtime
         uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "22.15.0"
           cache: "npm"
 
       - name: Install Root & Frontend Dependencies
@@ -139,7 +139,8 @@ jobs:
       - name: Run Shell, Python & Academic Hygiene Verification
         run: |
           bash -n deploy/kubo-private-init.sh
-          python -m py_compile scripts/demo/capsule_dispatcher.py deploy/ipfs_access_gateway.py deploy/generate_swarm_key.py
+          bash -n scripts/audit/swarm_baseline_gate.sh
+          python -c "import py_compile, subprocess; files = subprocess.check_output(['git', 'ls-files', '*.py'], text=True).splitlines(); [py_compile.compile(f, doraise=True) for f in files if f.strip()]; print(f'py_compile OK: {len(files)} tracked .py files')"
           python scripts/audit/academic_hygiene_toolkit.py --selftest
 
       - name: Run Web3.py Contract ABI Verification

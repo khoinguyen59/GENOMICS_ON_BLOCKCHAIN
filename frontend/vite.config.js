@@ -1,5 +1,9 @@
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const ipfsProxyConfig = {
   "/ipfs-rpc": {
@@ -41,6 +45,11 @@ export default defineConfig(({ mode }) => {
   const effectiveChainId = process.env.VITE_CHAIN_ID ?? env.VITE_CHAIN_ID ?? "";
   return {
     plugins: [react(), stripLoopbackCspForNonLocalChains(effectiveChainId)],
+    resolve: {
+      alias: {
+        ethers: path.resolve(__dirname, "node_modules/ethers"),
+      },
+    },
     server: {
       port: 3000,
       open: false,

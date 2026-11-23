@@ -88,7 +88,7 @@ async function runRound3Audit() {
   console.log("--------------------------------------------------------------------------------");
 
   // 1.1 Check data/ sample directory for clinical/hospital cancer records
-  const sampleVcfPath = path.join(ROOT_DIR, "data", "sample_brca1_patient.vcf");
+  const sampleVcfPath = path.join(ROOT_DIR, "data", "sample_metabolic_traits.vcf");
   const samplePhenoPath = path.join(ROOT_DIR, "data", "sample_phenopacket.json");
   const sampleSummaryPath = path.join(ROOT_DIR, "data", "sample_summary_report.txt");
 
@@ -119,13 +119,13 @@ async function runRound3Audit() {
 
   assertTest(
     !vcfContainsProhibited,
-    "INVARIANT-11: data/sample_brca1_patient.vcf must not contain hospital patient IDs or clinical cancer gene records",
+    "INVARIANT-11: data/sample_metabolic_traits.vcf must not contain hospital patient IDs or clinical cancer gene records",
     vcfContainsProhibited
-      ? "Found 'PATIENT_VN_9042' and 'BRCA1 Pathogenic' in data/sample_brca1_patient.vcf"
-      : "sample_brca1_patient.vcf adheres to non-clinical genetics",
+      ? "Found 'PATIENT_VN_9042' and 'BRCA1 Pathogenic' in data/sample_metabolic_traits.vcf"
+      : "sample_metabolic_traits.vcf adheres to non-clinical genetics",
     "DEF3-5-01",
     {
-      file: "data/sample_brca1_patient.vcf",
+      file: "data/sample_metabolic_traits.vcf",
       line: 10,
       severity: "High",
       type: "Domain Boundary / INVARIANT-11",

@@ -1,6 +1,9 @@
 import { expect } from "chai";
 import hre from "hardhat";
-import crypto from "crypto";
+import {
+    encryptGenomicDataChunked,
+    decryptGenomicDataChunked,
+} from "../crypto/core/streaming.js";
 
 
 describe("Independent External Repositories & Formal Security Audit", function () {
@@ -392,7 +395,7 @@ describe("Independent External Repositories & Formal Security Audit", function (
 
     describe("Section 4: GA4GH Crypt4GH & Big Data Streaming Cryptography Audit", function () {
         it("4.1 [Chunked Streaming Crypto] Encrypts and decrypts multi-chunk genomic stream without data loss", async function () {
-            // Generate 256 KB of synthetic genomic sequence (4 chunks of 64 KB)
+            // Generate 256 KB of synthetic genomic sequence (4 chunks of 64 KB) using GenoChain's real GNC2 streaming module
             const CHUNK_SIZE = 64 * 1024;
             const TOTAL_SIZE = 256 * 1024;
             const bases = ["A", "C", "G", "T"];
@@ -400,60 +403,34 @@ describe("Independent External Repositories & Formal Security Audit", function (
             for (let i = 0; i < TOTAL_SIZE; i++) {
                 rawSequence += bases[i % 4];
             }
-            const rawBytes = Buffer.from(rawSequence, "utf-8");
 
-            // Key setup: 256-bit AES session key
-            const sessionKey = crypto.randomBytes(32);
+            const encrypted = await encryptGenomicDataChunked(rawSequence, { chunkSize: CHUNK_SIZE });
+            expect(encrypted.chunkCount).to.equal(4);
+            expect(Array.from(encrypted.payload.slice(0, 4))).to.deep.equal([0x47, 0x4E, 0x43, 0x32]); // "GNC2"
 
-            // Encrypt in 64KB Crypt4GH style chunks
-            const chunks = [];
-            const numChunks = Math.ceil(rawBytes.length / CHUNK_SIZE);
-            for (let i = 0; i < numChunks; i++) {
-                const chunkData = rawBytes.subarray(i * CHUNK_SIZE, Math.min((i + 1) * CHUNK_SIZE, rawBytes.length));
-                const iv = crypto.randomBytes(12);
-                const cipher = crypto.createCipheriv("aes-256-gcm", sessionKey, iv);
-                const ciphertext = Buffer.concat([cipher.update(chunkData), cipher.final()]);
-                const tag = cipher.getAuthTag();
-                chunks.push({ iv, tag, ciphertext });
-            }
-
-            expect(chunks.length).to.equal(4);
-
-            // Decrypt all chunks and reassemble
-            const decryptedChunks = [];
-            for (let i = 0; i < chunks.length; i++) {
-                const { iv, tag, ciphertext } = chunks[i];
-                const decipher = crypto.createDecipheriv("aes-256-gcm", sessionKey, iv);
-                decipher.setAuthTag(tag);
-                const plain = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
-                decryptedChunks.push(plain);
-            }
-
-            const reconstructedBytes = Buffer.concat(decryptedChunks);
-            expect(reconstructedBytes.toString("utf-8")).to.equal(rawSequence);
+            const decryptedText = await decryptGenomicDataChunked(encrypted.payload, encrypted.keyHex, {
+                asString: true,
+            });
+            expect(decryptedText).to.equal(rawSequence);
         });
 
         it("4.2 [Fault Injection Detection] Single-bit tampering on any chunk is detected and rejects decryption", async function () {
-            const CHUNK_SIZE = 64 * 1024;
-            const rawBytes = Buffer.from("GATTACAGATTACAGATTACA_GENOMIC_SURVEILLANCE_PAYLOAD_CHUNK_TEST", "utf-8");
-            const sessionKey = crypto.randomBytes(32);
-            const iv = crypto.randomBytes(12);
+            const rawSequence = "GATTACAGATTACAGATTACA_GENOMIC_SURVEILLANCE_PAYLOAD_CHUNK_TEST".repeat(2048);
+            const encrypted = await encryptGenomicDataChunked(rawSequence, { chunkSize: 64 * 1024 });
 
-            const cipher = crypto.createCipheriv("aes-256-gcm", sessionKey, iv);
-            const ciphertext = Buffer.concat([cipher.update(rawBytes), cipher.final()]);
-            const tag = cipher.getAuthTag();
+            // Tamper 1 bit inside chunk ciphertext (past 20-byte GNC2 header + 12-byte chunk IV)
+            const tamperedBody = new Uint8Array(encrypted.payload);
+            tamperedBody[40] ^= 0x01;
+            await expect(
+                decryptGenomicDataChunked(tamperedBody, encrypted.keyHex, { asString: true })
+            ).to.be.rejected;
 
-            // Tamper 1 bit in ciphertext
-            const tamperedCiphertext = Buffer.from(ciphertext);
-            tamperedCiphertext[0] ^= 0x01;
-
-            const decipher = crypto.createDecipheriv("aes-256-gcm", sessionKey, iv);
-            decipher.setAuthTag(tag);
-
-            expect(() => {
-                decipher.update(tamperedCiphertext);
-                decipher.final();
-            }).to.throw();
+            // Tamper 1 bit inside GNC2 authenticated header (AAD binding check)
+            const tamperedHeader = new Uint8Array(encrypted.payload);
+            tamperedHeader[7] ^= 0x01;
+            await expect(
+                decryptGenomicDataChunked(tamperedHeader, encrypted.keyHex, { asString: true })
+            ).to.be.rejected;
         });
     });
 });

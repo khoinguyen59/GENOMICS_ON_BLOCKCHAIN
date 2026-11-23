@@ -129,7 +129,9 @@ describe("AGENT4 / PART1 — adversarial controls that HOLD", function () {
   describe("Task 6.1 / INV-15 — faucet economic controls (cooldown + Sybil)", function () {
     it("reverts FaucetCooldownActive on BOTH the caller side and the recipient side, and frees at exactly 3600s", async function () {
       const b0 = await token.balanceOf(buyerA.address);
-      await (await token.connect(buyerA).faucet(buyerA.address)).wait();
+      const rc0 = await (await token.connect(buyerA).faucet(buyerA.address)).wait();
+      const blk0 = await ethers.provider.getBlock(rc0.blockNumber);
+      const t0 = Number(blk0.timestamp);
       expect((await token.balanceOf(buyerA.address)) - b0).to.equal(1000n * E18);
 
       // (a) same caller + same recipient
@@ -147,13 +149,13 @@ describe("AGENT4 / PART1 — adversarial controls that HOLD", function () {
         token,
         "FaucetCooldownActive"
       );
-      // (d) boundary: still locked at 3599s, unlocked after 3601s
-      await ethers.provider.send("evm_increaseTime", [3599]);
+      // (d) boundary: deterministically anchored to exact mined block timestamp t0 (still locked at t0 + 3599s, unlocked at t0 + 3600s)
+      await ethers.provider.send("evm_setNextBlockTimestamp", [t0 + 3599]);
       await expect(token.connect(buyerA).faucet(buyerA.address)).to.be.revertedWithCustomError(
         token,
         "FaucetCooldownActive"
       );
-      await ethers.provider.send("evm_increaseTime", [2]);
+      await ethers.provider.send("evm_setNextBlockTimestamp", [t0 + 3600]);
       const b1 = await token.balanceOf(buyerA.address);
       await (await token.connect(buyerA).faucet(buyerA.address)).wait();
       expect((await token.balanceOf(buyerA.address)) - b1).to.equal(1000n * E18);

@@ -7,12 +7,19 @@ const log = (...a) => console.log(...a);
 log("== PART A: IPFS CIDv0 known-vector probe ==");
 const vectors = [
   { input: "hello world\n", expected: "QmT78zSuBmuS4z925WZfrqQ1qHaJ56DQaTfyMUF7F8ff5o" },
-  { input: "hello world", expected: "QmXoypizjW3WknFiJnKLwHCnL72vedxjQkDDP1mXWo6uco" },
-  { input: "", expected: "QmbWqxBEKC3P8tqsKc98xmWNzrzDtRLMiMPL8wBuTGsMnR" },
+  { input: "hello world", expected: "Qmf412jQZiuVUtdgnB36FXFX7xg5V6KEbSJ4dpQuhkLyfD" },
+  { input: "", expected: "QmbFMke1KXqnYyBBWxB74N4c5SBnJMVAiMNRcGu6x1AwQH" },
 ];
+let cidMismatchCount = 0;
 for (const v of vectors) {
   const got = await computeIpfsCidV0(v.input);
-  log(`  input=${JSON.stringify(v.input)} got=${got} knownIPFS=${v.expected} MATCH=${got === v.expected}`);
+  const matched = got === v.expected;
+  if (!matched) cidMismatchCount++;
+  log(`  input=${JSON.stringify(v.input)} got=${got} knownIPFS=${v.expected} MATCH=${matched}`);
+}
+if (cidMismatchCount > 0) {
+  console.error(`[FAIL] ${cidMismatchCount} IPFS CIDv0 reference vector(s) mismatched!`);
+  process.exit(1);
 }
 // raw multihash dump for empty node
 const emptyCid = await computeIpfsCidV0(new Uint8Array(0));

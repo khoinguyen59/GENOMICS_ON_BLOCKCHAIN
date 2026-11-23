@@ -59,3 +59,11 @@ console.log("distinct static t() keys used:", used.size);
 console.log(`t() keys NOT in EN dict (${missingEn.length}):`, JSON.stringify(missingEn.slice(0, 40)));
 console.log(`t() keys NOT in VI dict (${missingVi.length}):`, JSON.stringify(missingVi.slice(0, 40)));
 console.log("files scanned:", files.length);
+
+if (missVi.length > 0 || missEn.length > 0 || missingEn.length > 0 || missingVi.length > 0) {
+  console.error(
+    `[FAIL] i18n parity check failed: missVi=${missVi.length}, missEn=${missEn.length}, missingStaticEn=${missingEn.length}, missingStaticVi=${missingVi.length}`
+  );
+  process.exit(1);
+}
+console.log("[PASS] 100% EN/VI i18n dictionary parity and static t() coverage verified.");

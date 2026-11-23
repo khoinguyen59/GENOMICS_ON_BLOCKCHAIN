@@ -11,6 +11,12 @@ export function LanguageProvider({ children }) {
     return "vi";
   });
 
+  useEffect(() => {
+    if (typeof document !== "undefined" && document.documentElement) {
+      document.documentElement.lang = lang === "en" ? "en" : "vi";
+    }
+  }, [lang]);
+
   const changeLanguage = (newLang) => {
     if (newLang === "vi" || newLang === "en") {
       setLang(newLang);

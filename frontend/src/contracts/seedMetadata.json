@@ -21,12 +21,12 @@
       "clinvarId": "1000G:KHV",
       "priceGeno": 100,
       "durationDays": 45,
-      "rawCid": "QmXAxLk1d8Ris6n6MtYngFqzR4yLxJNdSAUzRJX2AMbfE5",
-      "metadataCid": "QmR3kf46cNzB2cJXVBTVfuXxLzC9qCgx8wmNueG8w5fucC",
-      "summaryCid": "QmPfzmK2T9nRtyhmjf6uGDNiVsNLV1MjcVWjLeEAqfFUwA",
-      "rawDataHash": "0x2404250334a3726f14774023fbbd44854ceef87fce5c03b8219e17a32b9e0980",
-      "summaryDataHash": "0x2ebcd9bef69362399d12a15416c17d320b91a00580c9f402b3902ea9f9e730f6",
-      "metadataHash": "0x0efe583f23542c73bce469257c9a42cb248caa9b9a7a0f3c7bfd96b9cba76a45"
+      "rawCid": "QmTFKo6v3Di7RDE7y8uq6imChW1uDTtQDTKg59cFVsBFXR",
+      "metadataCid": "QmQERWomgDUPLmmf7LiRaFntY4JmogD5d18ctNEdNgUhdq",
+      "summaryCid": "QmXuaBMq7eJgeGJ4Q2Fh9XZdbFWPygb7JS2k2WUBV2eYh6",
+      "rawDataHash": "0x2806730cf9abf2a159aca5831aac224d6e03fea6cffa90eb515a644241e5ba98",
+      "summaryDataHash": "0x26dfefa94d8f088675cd731321e85394acd6494846af9817d653d6078defe6ce",
+      "metadataHash": "0x50786bbe6000dcd4019c488be96e67cadb1a65a0137672afa79af313599fd022"
     },
     {
       "dataId": 2,
@@ -49,12 +49,12 @@
       "clinvarId": "dbSNP:rs1815739",
       "priceGeno": 85,
       "durationDays": 30,
-      "rawCid": "QmT7gffRnVTx7Qb2giNJrLNiHrjH5XFcqVEcCtYUTq22mz",
-      "metadataCid": "QmSzu2RhYZ4LkyARS24Xb1QRNjTqZVgdGzyvHY7RXaMi7w",
-      "summaryCid": "QmWQ5MLhDDodtv5STkGCajYQ1wCuKBNvHzHU9ucTkNM1mn",
-      "rawDataHash": "0x9b520f8b2c875c0731c302ccfcfdf78b86f0acd4535f29a92910a763b0c7b8bc",
-      "summaryDataHash": "0x65adf4aea443bd255ecee1e8998af661348ec644329e240c56d45051b67d5efd",
-      "metadataHash": "0x353e875d8c375d2170dc5a4509852b607cef6d19b4acdea351af59772343ba38"
+      "rawCid": "QmWVkaCyvTXc5bzAtfCxKkMCBf8sLktBjTuEEgN23HX85c",
+      "metadataCid": "Qme7nUACZ25VUFVyJkujRTSdbMhcXMrQGU3hUh4BB7fnFk",
+      "summaryCid": "QmaeK2qFQxW1GbzvYNrm9c6jppBXUXdL6C1TVdBU5e8wVW",
+      "rawDataHash": "0x67216facf879687bd0477da34e1acc999214c378545e7dead670207287cd7275",
+      "summaryDataHash": "0x86054940ab25c12981d4bdda29b20db744e8b0db11e5aaebf102966c3070918d",
+      "metadataHash": "0x15d7c76aab287714fad8b585bad52ca71aff6095b6b81c1f02090b2ed88778c7"
     },
     {
       "dataId": 3,
@@ -77,12 +77,12 @@
       "clinvarId": "dbSNP:rs671",
       "priceGeno": 80,
       "durationDays": 30,
-      "rawCid": "QmYFfnv2up4H51K9vdYG6v6nKxUn1urj8dqnJtvH5shdN9",
-      "metadataCid": "QmNpexuKCYye1MQxSiN1sFvNkmWnmdKpjdamXQ3j7DCArk",
-      "summaryCid": "QmccWpzjesWMxK6K6fBGJHBW8foiCC6SPn4RAwUbZqCzh9",
-      "rawDataHash": "0x7d328a021e9f3659c58fbabbbd8730aff5e3efa0a4b4794389e25255cf194b4a",
-      "summaryDataHash": "0xdf098855ddc300831152701063c7c6eed2236fc0fd14ca7d5934f0867e9f2610",
-      "metadataHash": "0x5e7a0862e7975ffb4ec33fcc947ef1a69e794f169bab2ddccb1e9d65364584e4"
+      "rawCid": "QmcC5VvKdtedvT5Xv5RuzM1X6HGDQvopZiGFLVbyHSzrZE",
+      "metadataCid": "QmePy7WoBXRUYoH1xP19vDoGBj6iJCHW2VyS8FJkheHqzo",
+      "summaryCid": "QmNX6hhDG9XhmCASGpfaoVy88vtV3J7dvuKd6hYLf7Q8hx",
+      "rawDataHash": "0x632370a8dbd6e984c76ffcc9ae10399eedee99865c2bcf51023b3f5218652da1",
+      "summaryDataHash": "0x67cf75a91a3fbc9f7cd1ce346b68bd6d810edaa398540a443230ea59f8c1d96e",
+      "metadataHash": "0xb13d9225f36a2fb0f6a9f32bd8cb180613c1b37ac26f2b565a12ad7e7b92f46c"
     },
     {
       "dataId": 4,
@@ -105,12 +105,12 @@
       "clinvarId": "dbSNP:rs4988235",
       "priceGeno": 75,
       "durationDays": 30,
-      "rawCid": "QmbzvgAXDd88zG255CE2xNZXQNQLZ1HbFmtiNN2NxMfUfo",
-      "metadataCid": "QmSrgpHDyYCjD8qKfwexQJHgoJAGSJrct3vHpgZRwLyhxD",
-      "summaryCid": "QmQTG7z3xqbyGCa358GVcpmBAQmX226MGmA2KDLact9VgY",
-      "rawDataHash": "0x6d317d7a9b35ceeab9bc277f5c070021957d742c11ad10fccf0bc3cc5a97b4ac",
-      "summaryDataHash": "0xbb4922f9801bb7c21b7f01adfb15728de9bf9f28e89517d17e9453dc3b9af4fb",
-      "metadataHash": "0x33dc33c68b10ad2cabe3ea18c143ff82cc5792050f826cdfdddf975cfa461b0b"
+      "rawCid": "QmaAEDmrre5EoVttA1C4TS9mJUSdy5wPh2EyYh48CwRZns",
+      "metadataCid": "QmfYLj7A7XVPW5JAT3nE6z8NJTPL5xaFMUYXu5CmisWgzo",
+      "summaryCid": "QmaLgoFrDnQyjnJJd4i1QLUDeThWMWgkJudsRxKcw5Vw3p",
+      "rawDataHash": "0xa4f0812ee14076aeef82105e6264f6f2d84310259b5dcc810cdf632e499b09b1",
+      "summaryDataHash": "0xb08a3437a413164f97f7d73767368e48063c3979e6b7a1345916d796ab54839c",
+      "metadataHash": "0x547966a20c43a2a47a1fe983c234fc65b221904835bd5b79af2abf3f96be948a"
     },
     {
       "dataId": 5,
@@ -133,12 +133,12 @@
       "clinvarId": "dbSNP:rs762551",
       "priceGeno": 90,
       "durationDays": 45,
-      "rawCid": "QmPxJeEqfmaYiKNQNxyQFaa8iCSYhXoVmUg72op8xbPzFA",
-      "metadataCid": "QmQpWf2PCWfU99Pnt6KYBq3672uzJPCB2p8ntE6eekdJhz",
-      "summaryCid": "QmezykcsdNX129aAJy2grBWeiFBtLTYg3FPGBPTzPRMndT",
-      "rawDataHash": "0xdbb9b22b103a6ce6a49546295b58e88a13ad025686302902f8ec2a288243cd3f",
-      "summaryDataHash": "0x4af4c648f680195b87f1f71636ef08a29a13248a0ed1f4b2bfd9a50009ebd4f5",
-      "metadataHash": "0xad01f51ee1cccb7e9d587f49b9d6c85d8ac8ded376a95860375b6556eb7733ba"
+      "rawCid": "QmYDbeWHtfuv7Yb6jizDVddLcGBZqXeixnH1wxmSeRqPNs",
+      "metadataCid": "QmYaG4iJg5rqUJHWnHtGbCUbWuChdv97hxBof4iFsmMmtZ",
+      "summaryCid": "QmWDNWex4bDAijL3dwTdotpkFSazgcndD2c6wqAgyrYAPY",
+      "rawDataHash": "0x935e9adee8354e4bfae23288698f4141ba1115e767204a89189d72797298aff9",
+      "summaryDataHash": "0x7bbd5451e415b822b931fc9228a68722f678f4188628521ceb0202d16320e9d1",
+      "metadataHash": "0xe89f2d4b27a97cf7437dc03870e69b9627e1f6026e65c5c335576f8829fd6de6"
     },
     {
       "dataId": 6,
@@ -161,12 +161,12 @@
       "clinvarId": "dbSNP:rs17822931",
       "priceGeno": 60,
       "durationDays": 30,
-      "rawCid": "QmbCdKGNoVvdq8BRbetxdVYjzPnfVZQp1XWTq4hCD4NodR",
-      "metadataCid": "QmXqhNUCWMUhhmWmMHn1ijeQEv71KJMr6Q5jjvuba1q9Lm",
-      "summaryCid": "QmfETxXBr9av1b2ff1Vut2fgU3wpdESuV7ByvGMy8BVb2o",
-      "rawDataHash": "0xcfeca301951f278b7bf4fcd94d9ba01ff45464c1d2a1017e4c3f7d24ab6d5b8b",
-      "summaryDataHash": "0x361caddd850dc8f8ae40e6d34aeb6cefff7026a2e16b35ce6cb8ceff81dbad60",
-      "metadataHash": "0x43b9e0dc6ddc23d5e40d55d6066ae9be3dc209915ba1568ea6a9c75455d89d09"
+      "rawCid": "QmabjYhA7CsAAjKtRo7VEaFVy7QRfXhCpCTuRbfgx23jbE",
+      "metadataCid": "QmNea4a7qbu7jVFukAVN3Zre2EF4gwbGWGtrB6WddQvmsR",
+      "summaryCid": "QmQ2ra1MAH6MXgoQqiVgvFtJP2iSQEDetNVKfqA5D5Lts2",
+      "rawDataHash": "0xd0ceca62d44f2f193f94a1397d812b803a135745a49def87cb3c783c1fb67e3e",
+      "summaryDataHash": "0x5e0e89d9f730ea4e34cdd7c686498ed701c513fe46ba2da9feb01a85bed33bb8",
+      "metadataHash": "0x2c18a2a517915952010d73c3219e630eb6a46c9774cde14e1711a5c7b9ea571c"
     },
     {
       "dataId": 7,
@@ -189,12 +189,12 @@
       "clinvarId": "GIAB:NA12878",
       "priceGeno": 110,
       "durationDays": 90,
-      "rawCid": "QmfWTXfm1gLkjpmJGpb46NDZYEdqDC8M8cE68j4NKWjrLS",
-      "metadataCid": "QmXxsQFRebDzXS4hPuDMKmBdWb6MZLcRhngTaR2hrUprKD",
-      "summaryCid": "QmbgCnd1W215MxxTAbsDQYXi9Wq8XMXfLzFSGxNCMCAz6g",
-      "rawDataHash": "0x60e7d445db75eddea56c4b1f1f8e197ef700c6cf99636f001a340d1c5d53a4d8",
-      "summaryDataHash": "0x4a063a359363d74858944aad9745e9fff6c2e00041d9c63584d22309fa56c928",
-      "metadataHash": "0x06bcdb8caab90ee8155dfd382b2cb2805940ec45668049e4e6b631911bddd805"
+      "rawCid": "QmZgeHnY2m3ZCjYv8dC9CjNK1SGxgMDKawgfkrbWucKxVB",
+      "metadataCid": "QmXAWTVF2jmoN6QgQA5aeVw1V49rAs5uJG9jNME88xknxn",
+      "summaryCid": "QmfAmkEuS6rFvEthXkPM8EEXhGNyGzw7SfocqmiaSSudHk",
+      "rawDataHash": "0xe4838934c5aedec458443745488f543df44019a3643029648af8579ffc9f4317",
+      "summaryDataHash": "0x83f8e5380005b637b63999c6dc6257d285ccaf25639c6d25993ef360f3bbd7ba",
+      "metadataHash": "0xf5bdf1e465d091a8b07f1c2d40fd963fcaa435300abcaa60fa454d6dc08b5e59"
     },
     {
       "dataId": 8,
@@ -217,12 +217,12 @@
       "clinvarId": "dbSNP:rs12913832",
       "priceGeno": 70,
       "durationDays": 30,
-      "rawCid": "QmdqLCwsmiBg1qdviJcGiJbRnEaUBJLgKsA7n3GvNEz8yE",
-      "metadataCid": "QmPMxL5RPWbpPgp7rFqkP41eqbkM29sZt5iYWFj21cgSyk",
-      "summaryCid": "QmcH7Z2LzwG3jP6cZvwJtUQp3drmKiMF7WgPeBn6MthLVL",
-      "rawDataHash": "0x128c98e7ccab1651c7c45ef8d3071626c1f97564881f7f468384873245e5f652",
-      "summaryDataHash": "0x94b81abb89323862ba7bb2de8f54982f488d5881670c3ac5d1bd9c9e06a102f2",
-      "metadataHash": "0xbc2e3ecc1cd57f2aa28560d1b9c1f7b93a9e7892f18738251cda4e78ed7f6070"
+      "rawCid": "Qme99APMQT1ZEaVdfAeSWBZSj7wjkRuRiy65DHYwXTGxhe",
+      "metadataCid": "QmQ6T994JXS2FLx5yC6rpQDyKBNA5RmH8PfLwuVsW4Dswf",
+      "summaryCid": "QmRUTNu4zii4fx26YH6tnmB5YmvcoFeEV1R6m4J93wi4fG",
+      "rawDataHash": "0x28d00fc2d68d968e274b636abbcdca8fc9f0671414df19b1e879d614a6f49295",
+      "summaryDataHash": "0x101280920b67b17a61f6229b622ddf2d34ace7a3a25cb6d6ae38529e093e370d",
+      "metadataHash": "0xd90b388d40a17294c586a616ec58311d6ae50281fec8b1f964d483b7a1e966ee"
     },
     {
       "dataId": 9,
@@ -245,12 +245,12 @@
       "clinvarId": "dbSNP:rs713598",
       "priceGeno": 65,
       "durationDays": 30,
-      "rawCid": "QmZrxUvqqqKqFKgnojga7UuwY3vsx1aUvw93mbPK3kukkA",
-      "metadataCid": "QmbkWsVQEuhGwhW5jfhB1huf5dJtpdS4P6bNErrkXiAriz",
-      "summaryCid": "Qme1L4sV1c4RKzpyUGfNMRYX8pHgkRcKcNLrTjZimVdPgk",
-      "rawDataHash": "0x25113e0f59dedf7a56c9ce59faff14a45870d1e3ae5be1428230685c1e318cb2",
-      "summaryDataHash": "0xccda5d850f46627b458459b0b804ed14bc6c1c49e4bcfcc9bb7f5b38317c5a1f",
-      "metadataHash": "0x8884acd201da88239cec53225bc5e466dcb2eb352165bacfbb05c886d9a0883c"
+      "rawCid": "QmazcW9ouTxrbfVQShjpi42V3LQ5cBSX6AEJrTtsZuoPif",
+      "metadataCid": "Qmdh5mskvAmPv9HqZB6Qy7DnThr8aNXiquxWzAcXGbJthQ",
+      "summaryCid": "QmX8sYg91j9evfL7qwcFwcA6F1PjqSgtmiixzqTYUJeSgv",
+      "rawDataHash": "0x787ea44cf12af26dca7a55165d5bdd450043023f8f98be6c7ca80c35407696ac",
+      "summaryDataHash": "0xee280a88049380407f9f484728be189b8e4126dc3560f59943086d6d6fadbb95",
+      "metadataHash": "0x577b0df41f034f81147cd9a36e86bb84d3601a1927a867a22c02f1ed9bceda8b"
     },
     {
       "dataId": 10,
@@ -273,12 +273,12 @@
       "clinvarId": "dbSNP:rs3827760",
       "priceGeno": 75,
       "durationDays": 30,
-      "rawCid": "QmTJ7kvKTELouLhKdtVZUwLNhnHRTffZNC6nrZVvssWSQB",
-      "metadataCid": "QmV5HVwQyxBcyHw7yxyCVjq1MbqsHZ9fuMTpM4sFxXTTQ9",
-      "summaryCid": "QmXXXrwX7L8dH3oz9hMc7BpGRPCZ5mSHoBtUQTYHNjcVoQ",
-      "rawDataHash": "0x5d3a4ce4699ca0cba4cfa935a743f949793ae71b2d2733d61cd680df80b50808",
-      "summaryDataHash": "0x2d97010f4aaf4ec57ca8f070a10e5fd2a6ae86cf504afca1f81472bacb8b6eec",
-      "metadataHash": "0xa43782333d520383fe5cb73440859489ae3e801a0c8bb4f2c58623512ba494dd"
+      "rawCid": "QmYnbZjQex58tMU9GhFeULzrdFoZRMEbZRqf81WHQquMWX",
+      "metadataCid": "QmSHZpE8j6uLxb7kiuewZqKM6eDSCXihvvv163DCDPsSo5",
+      "summaryCid": "QmQSHti6uiJeWj9NjfFdgC1c8FRbjxkScC5fdbLYWEC8gi",
+      "rawDataHash": "0x47b0fee555d591b4a00234f1005dc64197a56b8af730d878675ccc9125de55b0",
+      "summaryDataHash": "0x266ba91583266f019068d31ab85368f9617ee9690ba4b46e3e6d2fa01d4fe09b",
+      "metadataHash": "0x51647017c1cda3f4036d207c4e4ac10a97b884f71c1cfd5c8fb88e1ac283712d"
     },
     {
       "dataId": 11,
@@ -301,12 +301,12 @@
       "clinvarId": "SRA:NovaSeq30x",
       "priceGeno": 120,
       "durationDays": 30,
-      "rawCid": "QmecDVJE2QqTu49buhK9NEExLcTbTVT5E9T966FgM8pWD1",
-      "metadataCid": "QmYm9gLqY6RBrVEfgE7bQnUA5stqDjKxLED4Eb5nzDP57A",
-      "summaryCid": "QmXmxSzRi26s7SYZvxjDyc3VJeDAs4KHdPHxunvxX3Se3J",
-      "rawDataHash": "0xef9b7486b80ecbfad3991dc353b05b129c52e835a1965e353e555d75f84317ab",
-      "summaryDataHash": "0x1e59e855dcd46a8a8c8b245250665bf4e608170512b778345c4f5f71d86a548b",
-      "metadataHash": "0x54e7197b9d4904b63af9aa010106ec1c71014cf12e15d0b20a46ec4c67becbac"
+      "rawCid": "QmPrsgQ6gy2z6TN9Vfy4dZ14GX47BZjaNPV3Te47bS4gRk",
+      "metadataCid": "QmVnRqKrmJjhcnnc7xJdy97nTik4isEa1N3eoCH7qxNooF",
+      "summaryCid": "QmSmMhd8XkhJ3n2heExohNo26aVTLSdshdJpFemQqtrty7",
+      "rawDataHash": "0xbd5796977e25031565d2aeaac90e531cdf09094c003337f56775fb98f07da9d9",
+      "summaryDataHash": "0xf538b8c21a23d0d5ea2d0b8d445289cc695076cc7183e34438f18075055e5cb3",
+      "metadataHash": "0x87ded8e6ec1b587208043e97e8d50bba8612580c9194f7422f03bff9d0af7f37"
     },
     {
       "dataId": 12,
@@ -329,12 +329,12 @@
       "clinvarId": "RefSeq:NC_012920.1",
       "priceGeno": 50,
       "durationDays": 30,
-      "rawCid": "QmQnWevGDmQANuWSBWvgSYtuNoThBaFw7zA6WfTFojdhj2",
-      "metadataCid": "QmWWkACyKP2mdqcbZ9y1NHWwRL4V6fB8UfNv8JQB3pA8Fo",
-      "summaryCid": "Qmbws2gTAzmP2yDnLBjmRbAWkX3zPqGncR5CgDioXyVy8c",
-      "rawDataHash": "0xe48772159dde4db14858e82eb53716ac40e75c810323113ba4175b118e59a90e",
-      "summaryDataHash": "0xceffad51daa782b59a2aba44629380af5d2af5a8e24a5f441f1782cb2409d9f4",
-      "metadataHash": "0x2c12b9c978d02897b72dfcaa8d6e81afe3e869aaa0c3977158fe7ec169c657f8"
+      "rawCid": "QmQeF44xgJvf9YzBT7NvpjGJTKF6z7wVjo5N5Hyn5kR1dF",
+      "metadataCid": "QmUnEnUYjwMAwC8VExs8wJHPXGJ2o4Cnc3tsvf7BJ2CmCZ",
+      "summaryCid": "QmQrrriid7LLv9CXuGe7xbe9nSYj2ttT7ZBBvvpCPXRcVy",
+      "rawDataHash": "0x57c56333f77aefd31b016e52d2cd293688624351ffa058be7d1d0bddf3ac6f1a",
+      "summaryDataHash": "0x773dcf3b813d0b92f2464a73c45e0094c3af7d7d96a2a1b20630d0c70578a733",
+      "metadataHash": "0xa877a19349911a8da9a259e6948afa65abef92c0053bd72903e794ce17a934ae"
     },
     {
       "dataId": 13,
@@ -357,12 +357,12 @@
       "clinvarId": "1000G:NA00001",
       "priceGeno": 95,
       "durationDays": 45,
-      "rawCid": "QmX31JjXTdF5BbHGkNWaYCyDYKNgRkWtvdoYnnc3wzMkoo",
-      "metadataCid": "QmQbFapiaiharmEWJHxjCJSfgTzom5afgyV5Q3PuUvKWJL",
-      "summaryCid": "QmSvQouHhsx35QoCnS4bYs93TMpJEvxyPLuEBsKP8iKepr",
-      "rawDataHash": "0x4d17496b40be7643b902981cbfd97659e066358f160f989874aede34c7ceb388",
-      "summaryDataHash": "0x37ee034db8477dc95667995afc6dcc51dcaf56c2f61935b05b26ffd0de16dab1",
-      "metadataHash": "0x91a12485f01eb6c37fd211074051b11be58af24c9593cdb7acf39308e88be6a8"
+      "rawCid": "QmRBvRyHNmdhpWeT7fGE5yS4VbuayXj3ePBnwDG7iJ8sca",
+      "metadataCid": "QmcfQ3HEvroT2aPx98HNam3MJAQXM8saBmjxkkkDysR3nB",
+      "summaryCid": "QmQtq8Ux1tCPWN9Cu2tjeB35PhDL1UQ5533jGdhoF4QWRB",
+      "rawDataHash": "0x27979d110afe69f375dd48b355a53f5deac06958757acc2cda9002b977f7a32b",
+      "summaryDataHash": "0xcc829daf229456f6a6b8e81db741d734f02ea705f9754a2a0e8c1715dfaffd23",
+      "metadataHash": "0xb1323d04eb03d9ca5656dda17c36319f7d76b7bc9a4d8ccd294a48d429dbfe4b"
     }
   ]
 }

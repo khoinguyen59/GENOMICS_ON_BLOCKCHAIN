@@ -59,10 +59,23 @@ describe("Authoritative Security Suite: DeFiHackLabs, Damn Vulnerable DeFi & Asy
     });
 
     it("1.3 [Mosca Incident Pattern] ReentrancyGuard strictly prevents nested state mutations during grantAccess", async function () {
-      // Register a dataset first
+      // Deploy GenomicsRegistry backed by MaliciousReentrantToken (ERC-20 transferFrom callback attempting nested grantAccess)
+      const MalToken = await ethers.getContractFactory("MaliciousReentrantToken");
+      const malToken = await MalToken.deploy(owner.address);
+      await malToken.waitForDeployment();
+
+      const GenomicNFT = await ethers.getContractFactory("GenomicNFT");
+      const malNft = await GenomicNFT.deploy(owner.address, 1000);
+      await malNft.waitForDeployment();
+
+      const GenomicsRegistry = await ethers.getContractFactory("GenomicsRegistry");
+      const malRegistry = await GenomicsRegistry.deploy(malToken.target, malNft.target, owner.address);
+      await malRegistry.waitForDeployment();
+      await (await malNft.connect(owner).setRegistryContract(malRegistry.target)).wait();
+
       const rawHash = ethers.keccak256(ethers.toUtf8Bytes("Mosca_Test_Raw_Sequence"));
       const price = ethers.parseEther("100");
-      await registry.connect(creator).registerGenomicData(
+      await (await malRegistry.connect(creator).registerGenomicData(
         rawHash,
         "QmfPYRCPEyKhJfBkb7nv7DH2ArTmbATRD75uzCLuBPoy1C",
         "QmYW4MJVyHPTDj2CkKqSFFMoKd4Zoed16tjCjrDQZGJ7an",
@@ -71,12 +84,24 @@ describe("Authoritative Security Suite: DeFiHackLabs, Damn Vulnerable DeFi & Asy
         price,
         86400 * 30,
         1000
-      );
+      )).wait();
 
-      // Owner attempts to buy own dataset -> Reverts with OwnerCannotBuyOwnData
+      // Owner self-purchase still rejected cleanly
       await expect(
-        registry.connect(creator).grantAccess(1)
-      ).to.be.revertedWithCustomError(registry, "OwnerCannotBuyOwnData");
+        malRegistry.connect(creator).grantAccess(1)
+      ).to.be.revertedWithCustomError(malRegistry, "OwnerCannotBuyOwnData");
+
+      // Fund buyer & arm reentrancy callback into grantAccess(1) during payment transferFrom
+      await (await malToken.connect(owner).transfer(buyer.address, price * 2n)).wait();
+      await (await malToken.connect(buyer).approve(malRegistry.target, price * 2n)).wait();
+      await (await malToken.connect(owner).setRegistryAndTarget(malRegistry.target, 1n)).wait();
+
+      // Outer grantAccess completes, while nested reentrant grantAccess MUST be rejected by EIP-1153 ReentrancyGuard
+      await expect(malRegistry.connect(buyer).grantAccess(1n)).to.emit(malRegistry, "AccessGranted");
+      expect(await malToken.attackInitiated()).to.equal(true);
+      expect(await malToken.attackSucceeded()).to.equal(false);
+      expect(await malToken.lastErrorMessage()).to.equal("ReentrancyGuardReentrantCall()");
+      expect(await malRegistry.hasActiveAccess(1n, buyer.address)).to.equal(true);
     });
   });
 
@@ -113,11 +138,53 @@ describe("Authoritative Security Suite: DeFiHackLabs, Damn Vulnerable DeFi & Asy
     });
 
     it("2.2 [Solady Exact Royalty Conservation] Seller proceeds + Creator royalty strictly equals total price", async function () {
-      const price = ethers.parseEther("250");
-      const expectedRoyalty = (price * 1000n) / 10000n; // 25 GENO
-      const expectedSellerProceeds = price - expectedRoyalty; // 225 GENO
+      // Use an odd-wei secondary-sale price (250 GENO + 7 wei) to prove 0-wei dust conservation on live EVM state
+      const price = ethers.parseEther("250") + 7n;
+      const royaltyBps = 1000; // 10%
+      const rawHash = ethers.keccak256(ethers.toUtf8Bytes("Solady_Exact_Royalty_Conservation_Seq"));
 
-      expect(expectedRoyalty + expectedSellerProceeds).to.equal(price);
+      await (await registry.connect(creator).registerGenomicData(
+        rawHash,
+        "QmYrZd8JXWDSykEYGckk92HBd9U7pWAfz2KDPHfcSA4vJB",
+        "QmQAxuArgq1vTWHGQ93ajrSoytvDuNwzj9TeGpytTCbdR4",
+        "Qmcqs6pt9m2qZSfT6ukExiRYdoZyQEBJhizTJja1DSej8d",
+        "ipfs://royalty-conservation",
+        price,
+        86400 * 30,
+        royaltyBps
+      )).wait();
+
+      // Transfer NFT from originalCreator -> secondarySeller (attacker) so active EIP-2981 split executes on-chain
+      const secondarySeller = attacker;
+      await (await nft.connect(creator).transferFrom(creator.address, secondarySeller.address, 1n)).wait();
+
+      // Query on-chain EIP-2981 royaltyInfo(tokenId=1, price)
+      const [royaltyReceiver, quotedRoyalty] = await nft.royaltyInfo(1n, price);
+      expect(royaltyReceiver).to.equal(creator.address);
+      expect(quotedRoyalty).to.equal((price * BigInt(royaltyBps)) / 10000n);
+
+      await (await token.connect(owner).transfer(buyer.address, price)).wait();
+      await (await token.connect(buyer).approve(registry.target, price)).wait();
+
+      const buyerBefore = await token.balanceOf(buyer.address);
+      const creatorBefore = await token.balanceOf(creator.address);
+      const sellerBefore = await token.balanceOf(secondarySeller.address);
+      const registryBefore = await token.balanceOf(registry.target);
+
+      await expect(registry.connect(buyer).grantAccess(1n))
+        .to.emit(registry, "RoyaltyPaid")
+        .withArgs(1n, creator.address, quotedRoyalty);
+
+      const buyerDelta = buyerBefore - (await token.balanceOf(buyer.address));
+      const royaltyDelta = (await token.balanceOf(creator.address)) - creatorBefore;
+      const sellerDelta = (await token.balanceOf(secondarySeller.address)) - sellerBefore;
+      const registryDelta = (await token.balanceOf(registry.target)) - registryBefore;
+
+      expect(buyerDelta).to.equal(price);
+      expect(royaltyDelta).to.equal(quotedRoyalty);
+      expect(sellerDelta).to.equal(price - quotedRoyalty);
+      expect(sellerDelta + royaltyDelta).to.equal(price); // 0 wei dust loss
+      expect(registryDelta).to.equal(0n); // Registry retains 0 wei dust
     });
   });
 

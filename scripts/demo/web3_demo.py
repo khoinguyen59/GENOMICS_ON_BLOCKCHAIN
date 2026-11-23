@@ -381,7 +381,7 @@ def main():
     vcf_candidate_paths = [
         os.path.join(base_dir, "data", "diverse_real_datasets", "KHV_chr12_1000genomes.vcf"),
         os.path.join(base_dir, "frontend", "public", "datasets", "KHV_chr12_1000genomes.vcf"),
-        os.path.join(base_dir, "data", "sample_brca1_patient.vcf"),
+        os.path.join(base_dir, "data", "sample_metabolic_traits.vcf"),
     ]
     raw_vcf_content = None
     for p in vcf_candidate_paths:
@@ -475,7 +475,7 @@ def main():
                     "genomicInterpretations": [
                         {
                             "subjectOrBiosampleId": "SAMPLE_1000G_KHV01",
-                            "interpretationStatus": "CAUSATIVE",
+                            "interpretationStatus": "CONTRIBUTORY",
                             "variantInterpretation": {
                                 "acmgPathogenicityClassification": "BENIGN",
                                 "variationDescriptor": {

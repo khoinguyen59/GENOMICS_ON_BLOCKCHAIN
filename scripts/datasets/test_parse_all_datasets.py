@@ -105,12 +105,12 @@ def parse_genomic_metadata(content, filename):
         "mcm6": ("MCM6 / LCT (c.-13910C>T, rs4988235)", "Adult Lactose Intolerance (Dung nạp đường sữa)", "HP:0004789 - Lactose intolerance", "Vietnamese (Kinh)", "B+"),
         "cyp1a2": ("CYP1A2 (c.-163A>C, rs762551)", "Caffeine Metabolism Rate (Tốc độ chuyển hóa Cafein)", "PharmGKB:PA124 - Caffeine response", "East Asian (Han / Japanese)", "A+"),
         "abcc11": ("ABCC11 (c.538G>A, rs17822931)", "Dry Earwax & Apocrine Trait (Đặc trưng ráy tai khô)", "HP:0030058 - Dry cerumen trait", "Vietnamese (Kinh)", "O+"),
-        "hbb": ("HBB (c.20A>T, rs334)", "Beta-Globin Hemoglobinopathy Carrier Screen", "HP:0001903 - Hemoglobinopathy", "Vietnamese (Kinh)", "B+"),
-        "brca": ("BRCA1 (c.3454G>A, rs80357906)", "Hereditary Breast & Ovarian Carrier Screening", "HP:0003002 - Breast carcinoma risk", "Southeast Asian (Vietnamese)", "O+"),
-        "cftr": ("CFTR (p.Phe508del, rs113993960)", "Cystic Fibrosis Carrier Screening (ClinVar Pathogenic)", "HP:0002099 - Abnormal pulmonary function", "Global / Multi-ethnic", "A+"),
-        "apoe": ("APOE (epsilon 4 allele, rs429358)", "Late-Onset Alzheimer Disease Risk Assessment", "HP:0002511 - Alzheimer disease", "Global / Multi-ethnic", "O+"),
-        "na12878": ("Chr20 RNA-seq Non-Ref Cohort (GIAB)", "CEPH/Utah Reference Genome Benchmark (GIAB NA12878)", "HP:0000001 - Reference Benchmark", "European (CEU)", "O+"),
-        "samtools": ("BCFtools Multi-locus Panel", "Multi-sample Variant Call Standard", "HP:0000001 - Reference Cohort", "Global Multi-ancestry", "A+"),
+        "actn3": ("ACTN3 (c.1729C>T, rs1815739)", "Fast-Twitch Muscle Fiber Composition (Cấu trúc sợi cơ nhanh)", "SO:0001587 - stop_gained", "Global / Multi-ethnic", "O+"),
+        "edar": ("EDAR (c.1109A>G, rs3827760)", "Hair Morphology & Craniofacial Trait (Đặc điểm hình thái tóc)", "SO:0001583 - missense_variant", "East Asian (KHV / CHB)", "A+"),
+        "tas2r38": ("TAS2R38 (p.Pro49Ala, rs713598)", "Bitter Taste Receptor Sensitivity (Cảm thụ vị đắng PTC)", "SO:0001583 - missense_variant", "Global / Multi-ethnic", "B+"),
+        "cyp2c19": ("CYP2C19 (*2 allele, rs4244285)", "Pharmacogenomic Drug Metabolism Variant (Chuyển hóa dược lý)", "SO:0001627 - intron_variant", "Vietnamese (Kinh)", "O+"),
+        "na12878": ("Chr20 RNA-seq Non-Ref Cohort (GIAB)", "CEPH/Utah Reference Genome Benchmark (GIAB NA12878)", "SO:0000694 - Reference Benchmark", "European (CEU)", "O+"),
+        "samtools": ("BCFtools Multi-locus Panel", "Multi-sample Variant Call Standard", "SO:0000694 - Reference Cohort", "Global Multi-ancestry", "A+"),
     }
 
     content_upper = content.upper()

@@ -246,6 +246,9 @@ export function useDatasetDecryption({
       setPurchasedData((prev) =>
         (prev || []).map((p) => {
           if (dataId === null || p.dataId === dataId) {
+            if (p.decryptedPdfBytes instanceof Uint8Array) {
+              p.decryptedPdfBytes.fill(0);
+            }
             return {
               ...p,
               decryptedContent: null,

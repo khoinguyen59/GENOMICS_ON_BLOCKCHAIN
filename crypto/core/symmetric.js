@@ -85,9 +85,13 @@ function parseIvHex(iv) {
  */
 export function packCiphertextPayload(iv, ciphertext) {
   const ivBytes = typeof iv === "string" ? parseIvHex(iv) : iv;
-  const payload = new Uint8Array(ivBytes.length + ciphertext.length);
+  if (!(ivBytes instanceof Uint8Array) || ivBytes.length !== 12) {
+    throw new Error("Invalid AES-GCM IV: expected a 12-byte Uint8Array or 24-character hex string.");
+  }
+  const ctBytes = ciphertext instanceof Uint8Array ? ciphertext : new Uint8Array(ciphertext);
+  const payload = new Uint8Array(ivBytes.length + ctBytes.length);
   payload.set(ivBytes, 0);
-  payload.set(ciphertext, ivBytes.length);
+  payload.set(ctBytes, ivBytes.length);
   return payload;
 }
 
@@ -281,7 +285,7 @@ export async function decryptGenomicData(ciphertext, iv, key, asString = true) {
 
   const decryptedBytes = new Uint8Array(decryptedBuffer);
   if (asString) {
-    return new TextDecoder().decode(decryptedBytes);
+    return new TextDecoder("utf-8", { fatal: true }).decode(decryptedBytes);
   }
   return decryptedBytes;
 }

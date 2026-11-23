@@ -183,11 +183,17 @@ const VALID_ACMG_CLASSIFICATIONS = new Set([
   "PATHOGENIC",
 ]);
 
+const NON_PATHOLOGICAL_ACMG_CLASSIFICATIONS = new Set([
+  "NOT_PROVIDED",
+  "BENIGN",
+  "LIKELY_BENIGN",
+  "UNCERTAIN_SIGNIFICANCE",
+]);
+
 function normalizeAcmgClassification(rawValue) {
   const raw = String(rawValue || "").trim().toUpperCase().replace(/[\s-]+/g, "_");
-  if (VALID_ACMG_CLASSIFICATIONS.has(raw)) return raw;
-  if (raw.includes("LIKELY_PATHOGENIC")) return "LIKELY_PATHOGENIC";
-  if (raw.includes("PATHOGENIC")) return "PATHOGENIC";
+  if (NON_PATHOLOGICAL_ACMG_CLASSIFICATIONS.has(raw)) return raw;
+  // INV-11: Non-pathological benign molecular polymorphism policy — never emit PATHOGENIC / LIKELY_PATHOGENIC
   if (raw.includes("UNCERTAIN") || raw === "VUS") return "UNCERTAIN_SIGNIFICANCE";
   if (raw.includes("LIKELY_BENIGN") && !raw.includes("BENIGN_OR")) return "LIKELY_BENIGN";
   if (raw.includes("BENIGN")) return "BENIGN";
@@ -195,7 +201,7 @@ function normalizeAcmgClassification(rawValue) {
 }
 
 function resolveBloodGroupSnomedCurie(bloodGroup) {
-  return BLOOD_GROUP_SNOMED_MAP[bloodGroup] || "NCIT:C16355";
+  return BLOOD_GROUP_SNOMED_MAP[bloodGroup] || "SNOMED:365636006";
 }
 
 export function buildPhenopacket({
@@ -222,8 +228,11 @@ export function buildPhenopacket({
   pos = 0,
   genomeAssembly = "GRCh38",
 }) {
-  const cleanClinicalSignificance =
+  const rawClinicalSig =
     typeof clinicalSignificance === "string" ? clinicalSignificance.trim() : "";
+  const cleanClinicalSignificance = /pathogenic|causative/i.test(rawClinicalSig)
+    ? "Functional Variation"
+    : rawClinicalSig;
   const cleanDefaultZygosity =
     typeof zygosity === "string" ? zygosity.trim() : "";
   const cleanBloodGroup =
@@ -365,9 +374,16 @@ export function buildPhenopacket({
                   ? "GENO:0000134"
                   : "GENO:0000137";
             const acmgClassification = normalizeAcmgClassification(v.pathogenicity || cleanClinicalSignificance);
+            const rawInterpStatus = String(v.interpretationStatus || "").trim().toUpperCase();
+            const safeInterpretationStatus =
+              rawInterpStatus &&
+              rawInterpStatus !== "CAUSATIVE" &&
+              ["UNKNOWN_STATUS", "REJECTED", "CANDIDATE", "CONTRIBUTORY"].includes(rawInterpStatus)
+                ? rawInterpStatus
+                : "CONTRIBUTORY";
             return {
               subjectOrBiosampleId: safeSubjectId,
-              interpretationStatus: v.interpretationStatus || (acmgClassification === "PATHOGENIC" ? "CAUSATIVE" : "CONTRIBUTORY"),
+              interpretationStatus: safeInterpretationStatus,
               variantInterpretation: {
                 acmgPathogenicityClassification: acmgClassification,
                 variationDescriptor: {

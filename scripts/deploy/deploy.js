@@ -45,7 +45,7 @@ function loadOrCreateDispatcherVaultKey() {
       },
     };
   }
-  const localDir = path.resolve(".local");
+  const localDir = path.resolve(process.env.LOCAL_VAULT_DIR || ".local");
   if (!fs.existsSync(localDir)) {
     fs.mkdirSync(localDir, { recursive: true, mode: 0o700 });
   }
@@ -105,7 +105,8 @@ async function main() {
     }
   }
 
-  const targetNetwork = hre.network?.name || hre.globalOptions?.network || "localhost";
+  const targetNetwork =
+    process.env.DEPLOY_TARGET_NETWORK || hre.network?.name || hre.globalOptions?.network || "localhost";
   const connection = await hre.network.connect(targetNetwork);
   const { ethers } = connection;
   const [deployer, account1, researcher] = await ethers.getSigners();

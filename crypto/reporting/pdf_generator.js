@@ -60,7 +60,7 @@ export function encodeWinAnsiBytes(str) {
  * @param {string} [params.subjectId="1000G_KHV_01"] Patient pseudonym
  * @param {string} [params.disease="1000 Genomes Project - Population Genomic Variation (KHV Cohort)"] Indication or condition
  * @param {string} [params.gene="ALDH2"] Analyzed gene
- * @param {string} [params.variant="rs671 (c.1510G>A, p.Glu504Lys)"] Pathogenic variant notation
+ * @param {string} [params.variant="rs671 (c.1510G>A, p.Glu504Lys)"] Benign/functional variant notation
  * @param {string} [params.date] Report issue date
  * @param {string} [params.fontName="Helvetica"] Base Type1 font name
  * @returns {Uint8Array} Valid ISO 32000 / PDF-1.4 binary bytes

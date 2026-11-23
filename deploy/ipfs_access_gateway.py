@@ -40,6 +40,7 @@ import sys
 import json
 import time
 import base64
+import secrets
 import signal
 import hashlib
 import sqlite3
@@ -71,8 +72,8 @@ MAX_TS_DIGITS = 15
 MAX_AUTH_SKEW_SEC = 300
 DEFAULT_NONCE_TTL_SEC = 2 * MAX_AUTH_SKEW_SEC + 60  # 660s (strictly > 2 * 300s skew window)
 DEFAULT_LOG_CHUNK_SIZE = 5000
-MAX_STREAM_BYTES = 524_288_000  # 500 MiB (matches crypto/core/streaming.js ceiling)
-MAX_UPLOAD_BYTES = 524_288_000  # 500 MiB bounded streaming upload cap
+MAX_STREAM_BYTES = 525 * 1024 * 1024  # 525 MiB (550,502,400 B; accommodates 500 MiB GNC2 framing overhead)
+MAX_UPLOAD_BYTES = 525 * 1024 * 1024  # 525 MiB bounded streaming upload cap matching Caddyfile max_size
 STREAM_CHUNK_BYTES = 65_536     # 64 KiB streaming chunk size
 DEFAULT_MAX_WORKERS = 64
 REORG_LOOKBACK_BLOCKS = 5
@@ -395,6 +396,15 @@ class UploadRateLimiter:
             self._conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_tracked_pins_mh ON tracked_pins(multihash)"
             )
+            self._conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS upload_provenance (
+                    multihash TEXT PRIMARY KEY,
+                    uploader TEXT NOT NULL,
+                    created_at REAL NOT NULL
+                )
+                """
+            )
 
     def _prune_locked(self, cutoff: int) -> None:
         self._conn.execute("DELETE FROM upload_quota_events WHERE ts < ?", (int(cutoff),))
@@ -548,6 +558,14 @@ class UploadRateLimiter:
                         """,
                         (cid, mh, actual, now),
                     )
+                    if mh and addr_key and addr_key != "unknown":
+                        self._conn.execute(
+                            """
+                            INSERT OR IGNORE INTO upload_provenance(multihash, uploader, created_at)
+                            VALUES(?, ?, ?)
+                            """,
+                            (mh, addr_key, float(now)),
+                        )
             self._inflight.pop(token, None)
             self._repo_stat_mono = 0.0
 
@@ -615,6 +633,39 @@ class UploadRateLimiter:
                 """,
                 (cid, mh, sz, ts),
             )
+            if mh and uploader:
+                self._conn.execute(
+                    """
+                    INSERT OR IGNORE INTO upload_provenance(multihash, uploader, created_at)
+                    VALUES(?, ?, ?)
+                    """,
+                    (mh, str(uploader).strip().lower(), float(ts)),
+                )
+
+    def record_upload_provenance(self, multihash: str, uploader: str, created_at: float | None = None) -> None:
+        mh = str(multihash or "").strip()
+        up = str(uploader or "").strip().lower()
+        if not mh or not up:
+            return
+        ts = float(time.time() if created_at is None else created_at)
+        with self._lock, _sqlite_write_tx(self._conn):
+            self._conn.execute(
+                "INSERT OR IGNORE INTO upload_provenance(multihash, uploader, created_at) VALUES(?, ?, ?)",
+                (mh, up, ts),
+            )
+
+    def get_upload_provenance(self, multihash: str) -> str | None:
+        mh = str(multihash or "").strip()
+        if not mh:
+            return None
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT uploader FROM upload_provenance WHERE multihash = ?",
+                (mh,),
+            ).fetchone()
+        if row and row[0]:
+            return str(row[0]).strip().lower()
+        return None
 
     def list_pending_uploads(self) -> list[dict]:
         with self._lock:
@@ -1089,6 +1140,37 @@ class Web3RegistryAdapter:
     def has_active_access(self, data_id: int, buyer: str) -> bool:
         return bool(self.registry.functions.hasActiveAccess(int(data_id), Web3.to_checksum_address(buyer)).call())
 
+    def get_original_creator(self, token_id: int) -> str | None:
+        """Query immutable GenomicNFT.originalCreatorOf(tokenId) to support provenance across NFT transfers."""
+        if int(token_id) <= 0 or not hasattr(self.registry.functions, "genomicNFT"):
+            return None
+        try:
+            nft_addr = self._cached_genomic_nft
+            if not nft_addr:
+                nft_addr = self.registry.functions.genomicNFT().call()
+                if nft_addr and int(nft_addr, 16) != 0:
+                    self._cached_genomic_nft = Web3.to_checksum_address(nft_addr)
+                    nft_addr = self._cached_genomic_nft
+            if nft_addr and int(nft_addr, 16) != 0:
+                nft = self.w3.eth.contract(
+                    address=Web3.to_checksum_address(nft_addr),
+                    abi=[
+                        {
+                            "inputs": [{"name": "tokenId", "type": "uint256"}],
+                            "name": "originalCreatorOf",
+                            "outputs": [{"name": "creator", "type": "address"}],
+                            "stateMutability": "view",
+                            "type": "function",
+                        }
+                    ],
+                )
+                creator = str(nft.functions.originalCreatorOf(int(token_id)).call() or "").strip()
+                if creator and int(creator, 16) != 0:
+                    return creator.lower()
+        except Exception:
+            pass
+        return None
+
     def check_uploader_eligibility(
         self,
         address: str,
@@ -1530,7 +1612,7 @@ class KuboHttpAdapter:
         if parsed.scheme not in ("http", "https") or not parsed.hostname:
             raise ValueError(f"Invalid Kubo RPC URL: {self.rpc_url}")
 
-        boundary = f"----GenoChainBoundary{int(time.time() * 1000000)}"
+        boundary = f"----GenoChainBoundary{secrets.token_hex(16)}"
         prefix = (
             f"--{boundary}\r\n"
             f'Content-Disposition: form-data; name="file"; filename="{safe_name}"\r\n'
@@ -1616,16 +1698,34 @@ class KuboHttpAdapter:
         return True
 
 
+def _resolve_item_original_creator(registry_adapter, item: dict) -> str:
+    explicit = str(item.get("originalCreator") or "").strip().lower()
+    if explicit:
+        return explicit
+    token_id = int(item.get("tokenId") or item.get("dataId") or 0)
+    getter = getattr(registry_adapter, "get_original_creator", None)
+    if token_id > 0 and callable(getter):
+        try:
+            resolved = getter(token_id)
+            if resolved:
+                return str(resolved).strip().lower()
+        except Exception:
+            pass
+    return ""
+
+
 def authorize_cid_access(
     registry_adapter,
     data_id: int,
     cid: str,
     signer_address: str,
     catalog_index: PublicMetadataCatalogIndex | None = None,
+    provenance_lookup=None,
 ) -> tuple[bool, int, str]:
     """
     Enforce on-chain authorization for (dataId, cid, signer_address) with canonical multihash
-    matching and First-Claimant Ownership protection against cross-owner CID aliasing/spoofing.
+    matching, upload_provenance front-run protection, and First-Claimant Ownership protection
+    against cross-owner CID aliasing/spoofing.
     Returns (allowed, http_status, reason).
     """
     try:
@@ -1664,49 +1764,74 @@ def authorize_cid_access(
         return False, 403, f"Requested CID does not belong to dataset #{data_id}."
 
     owner = str(item.get("currentOwner") or "").strip().lower()
+    original_creator = _resolve_item_original_creator(registry_adapter, item)
 
-    # First-Claimant Ownership Rule: block owner-spoof CID reuse even across CIDv0 <-> CIDv1 aliases.
-    # Because SIWE signature + live get_genomic_data(data_id) ALREADY succeeded, an authoritative
-    # catalog refresh bypasses unauthenticated cooldowns AND fails closed (502) if unverifiable on dataId > 1.
-    has_catalog_getter = callable(getattr(registry_adapter, "get_all_datasets", None))
-    first_claim = None
-    catalog_lookup_failed = False
-    if catalog_index is not None:
-        first_claim = catalog_index.get_first_registrant(req_mh, allow_authoritative_refresh=True)
-    elif has_catalog_getter:
+    # Persistent Upload-Provenance First-Claimant Rule (L3-M1 front-run defense):
+    # When this gateway authenticated the initial SIWE /api/v0/upload for `req_mh`, the recorded
+    # uploader is the canonical First-Claimant owner even if a mempool front-runner registered
+    # a dummy dataset at an earlier dataId=N before the victim's dataId=N+1 confirmed on-chain.
+    provenance_uploader = None
+    if callable(provenance_lookup):
         try:
-            all_ds = sorted(
-                [ds for ds in (registry_adapter.get_all_datasets() or []) if isinstance(ds, dict)],
-                key=lambda d: int(d.get("dataId", 0)),
-            )
-            for ds in all_ds:
-                ds_mhs = {
-                    _try_canonical_multihash(ds.get("rawCid")),
-                    _try_canonical_multihash(ds.get("summaryCid")),
-                    _try_canonical_multihash(ds.get("metadataCid")),
-                }
-                if req_mh in ds_mhs:
-                    first_claim = (int(ds.get("dataId", 0)), str(ds.get("currentOwner") or "").strip().lower())
-                    break
+            raw_prov = provenance_lookup(req_mh)
+            if raw_prov:
+                provenance_uploader = str(raw_prov).strip().lower()
         except Exception:
-            catalog_lookup_failed = True
-            first_claim = None
+            provenance_uploader = None
 
-    if first_claim is None and has_catalog_getter and (catalog_lookup_failed or int(data_id) > 1):
-        return (
-            False,
-            502,
-            f"Unable to verify canonical First-Claimant Ownership for dataset #{data_id} (on-chain catalog unavailable).",
+    if provenance_uploader:
+        is_provenance_backed = (owner == provenance_uploader) or (
+            bool(original_creator) and original_creator == provenance_uploader
         )
-
-    if first_claim is not None:
-        earliest_id, earliest_owner = first_claim
-        if int(data_id) != earliest_id and earliest_owner and owner != earliest_owner:
+        if not is_provenance_backed:
             return (
                 False,
                 403,
-                f"CID multihash is canonically owned by earlier dataset #{earliest_id} (cross-owner CID aliasing rejected).",
+                "CID multihash upload provenance belongs to another authenticated uploader (front-run / cross-owner CID aliasing rejected).",
             )
+    else:
+        # On-chain First-Claimant fallback (for CIDs pinned directly to Kubo outside /api/v0/upload).
+        # Because SIWE signature + live get_genomic_data(data_id) ALREADY succeeded, an authoritative
+        # catalog refresh bypasses unauthenticated cooldowns AND fails closed (502) if unverifiable on dataId > 1.
+        has_catalog_getter = callable(getattr(registry_adapter, "get_all_datasets", None))
+        first_claim = None
+        catalog_lookup_failed = False
+        if catalog_index is not None:
+            first_claim = catalog_index.get_first_registrant(req_mh, allow_authoritative_refresh=True)
+        elif has_catalog_getter:
+            try:
+                all_ds = sorted(
+                    [ds for ds in (registry_adapter.get_all_datasets() or []) if isinstance(ds, dict)],
+                    key=lambda d: int(d.get("dataId", 0)),
+                )
+                for ds in all_ds:
+                    ds_mhs = {
+                        _try_canonical_multihash(ds.get("rawCid")),
+                        _try_canonical_multihash(ds.get("summaryCid")),
+                        _try_canonical_multihash(ds.get("metadataCid")),
+                    }
+                    if req_mh in ds_mhs:
+                        first_claim = (int(ds.get("dataId", 0)), str(ds.get("currentOwner") or "").strip().lower())
+                        break
+            except Exception:
+                catalog_lookup_failed = True
+                first_claim = None
+
+        if first_claim is None and has_catalog_getter and (catalog_lookup_failed or int(data_id) > 1):
+            return (
+                False,
+                502,
+                f"Unable to verify canonical First-Claimant Ownership for dataset #{data_id} (on-chain catalog unavailable).",
+            )
+
+        if first_claim is not None:
+            earliest_id, earliest_owner = first_claim
+            if int(data_id) != earliest_id and earliest_owner and owner != earliest_owner:
+                return (
+                    False,
+                    403,
+                    f"CID multihash is canonically owned by earlier dataset #{earliest_id} (cross-owner CID aliasing rejected).",
+                )
 
     if signer_address.lower() == owner:
         return True, 200, "owner"
@@ -1796,6 +1921,15 @@ class GdprErasureReconciler:
                     )
                     """
                 )
+                self._conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS upload_provenance (
+                        multihash TEXT PRIMARY KEY,
+                        uploader TEXT NOT NULL,
+                        created_at REAL NOT NULL
+                    )
+                    """
+                )
             meta = dict(self._conn.execute("SELECT k, v FROM gdpr_meta").fetchall())
             if "last_block" in meta:
                 self.last_block = max(self.deployed_block, int(meta["last_block"]))
@@ -1829,7 +1963,13 @@ class GdprErasureReconciler:
                 pairs,
             )
 
-    def _remove_tracked_pins(self, cids: list[str], multihashes: set[str] | None = None) -> None:
+    def _remove_tracked_pins(
+        self,
+        cids: list[str],
+        multihashes: set[str] | None = None,
+        *,
+        purge_provenance: bool = False,
+    ) -> None:
         if not cids and not multihashes:
             return
         with self._lock, _sqlite_write_tx(self._conn):
@@ -1837,6 +1977,25 @@ class GdprErasureReconciler:
                 self._conn.executemany("DELETE FROM tracked_pins WHERE cid = ?", [(c,) for c in cids])
             if multihashes:
                 self._conn.executemany("DELETE FROM tracked_pins WHERE multihash = ?", [(m,) for m in multihashes])
+                if purge_provenance:
+                    self._conn.executemany(
+                        "DELETE FROM upload_provenance WHERE multihash = ?",
+                        [(m,) for m in multihashes],
+                    )
+
+    def _get_upload_provenance_map(self, multihashes: set[str]) -> dict[str, str]:
+        if not multihashes:
+            return {}
+        out: dict[str, str] = {}
+        with self._lock:
+            for mh in multihashes:
+                row = self._conn.execute(
+                    "SELECT uploader FROM upload_provenance WHERE multihash = ?",
+                    (mh,),
+                ).fetchone()
+                if row and row[0]:
+                    out[mh] = str(row[0]).strip().lower()
+        return out
 
     def _collect_owner_scoped_referenced_mhs(
         self,
@@ -1845,13 +2004,26 @@ class GdprErasureReconciler:
     ) -> set[str]:
         """
         Collect canonical multihashes referenced by other non-revoked (status != 2) datasets
-        scoped to the SAME dataset owner (or an earlier dataId). A third-party attacker minting
-        a later dummy dataset referencing a victim's CID can NEVER pin-lock the victim's GDPR erasure.
+        scoped to the SAME dataset owner, an earlier dataId, OR the recorded upload_provenance
+        uploader (protecting legitimate owners from front-runner GDPR erasure attacks while
+        still preventing third-party pin-lock griefing).
         """
         getter = getattr(self.registry_adapter, "get_all_datasets", None)
         if not callable(getter):
             return set()
         datasets = getter() or []
+        all_other_mhs: set[str] = set()
+        for ds in datasets:
+            if not isinstance(ds, dict):
+                continue
+            if int(ds.get("dataId", 0)) == excluding_data_id or int(ds.get("status", -1)) == 2:
+                continue
+            for field in ("rawCid", "summaryCid", "metadataCid"):
+                mh = _try_canonical_multihash(ds.get(field))
+                if mh:
+                    all_other_mhs.add(mh)
+        prov_map = self._get_upload_provenance_map(all_other_mhs)
+
         referenced_mhs: set[str] = set()
         for ds in datasets:
             if not isinstance(ds, dict):
@@ -1862,13 +2034,18 @@ class GdprErasureReconciler:
             if int(ds.get("status", -1)) == 2:
                 continue
             other_owner = str(ds.get("currentOwner") or "").strip().lower()
+            other_creator = _resolve_item_original_creator(self.registry_adapter, ds)
             is_same_owner = other_owner == revoked_owner_lower
             is_earlier_dataset = ds_id > 0 and ds_id < excluding_data_id
-            if not (is_same_owner or is_earlier_dataset):
-                continue
             for field in ("rawCid", "summaryCid", "metadataCid"):
                 mh = _try_canonical_multihash(ds.get(field))
-                if mh:
+                if not mh:
+                    continue
+                prov_uploader = prov_map.get(mh)
+                is_provenance_owner = bool(prov_uploader) and (
+                    other_owner == prov_uploader or (bool(other_creator) and other_creator == prov_uploader)
+                )
+                if is_same_owner or is_earlier_dataset or is_provenance_owner:
                     referenced_mhs.add(mh)
         return referenced_mhs
 
@@ -1905,11 +2082,12 @@ class GdprErasureReconciler:
         done_pending_cids: list[str] = []
         orphan_unpinned: list[str] = []
         removed_pin_cids: list[str] = []
+        removed_orphan_mhs: set[str] = set()
         for cid, mh, uploaded_at in rows:
             cid_s = str(cid)
             mh_s = str(mh) or (_try_canonical_multihash(cid_s) or "")
             if mh_s and mh_s in anchored_mhs:
-                # Anchored on-chain: remove from orphan-GC queue, KEEP in tracked_pins for pinned storage cap!
+                # Anchored on-chain: remove from orphan-GC queue, KEEP in tracked_pins & upload_provenance!
                 done_pending_cids.append(cid_s)
                 continue
             if int(uploaded_at) <= cutoff:
@@ -1923,9 +2101,11 @@ class GdprErasureReconciler:
                         self._gc_pending = True
                     done_pending_cids.append(cid_s)
                     removed_pin_cids.append(cid_s)
+                    if mh_s:
+                        removed_orphan_mhs.add(mh_s)
                 except Exception:
                     continue
-        if done_pending_cids or removed_pin_cids:
+        if done_pending_cids or removed_pin_cids or removed_orphan_mhs:
             with self._lock, _sqlite_write_tx(self._conn):
                 if done_pending_cids:
                     self._conn.executemany(
@@ -1936,6 +2116,11 @@ class GdprErasureReconciler:
                     self._conn.executemany(
                         "DELETE FROM tracked_pins WHERE cid = ?",
                         [(c,) for c in removed_pin_cids],
+                    )
+                if removed_orphan_mhs:
+                    self._conn.executemany(
+                        "DELETE FROM upload_provenance WHERE multihash = ?",
+                        [(m,) for m in removed_orphan_mhs],
                     )
         return orphan_unpinned
 
@@ -1960,12 +2145,19 @@ class GdprErasureReconciler:
             if int(item.get("status", -1)) != 2:
                 continue
             revoked_owner_l = str(item.get("currentOwner") or "").strip().lower()
+            revoked_creator_l = _resolve_item_original_creator(self.registry_adapter, item)
             cids = []
             for field in ("rawCid", "summaryCid", "metadataCid"):
                 c = str(item.get(field) or "").strip()
                 if c and c not in cids:
                     cids.append(c)
             shared_mhs = self._collect_owner_scoped_referenced_mhs(data_id, revoked_owner_l)
+            candidate_mhs: set[str] = set()
+            for c in cids:
+                mh_c = _try_canonical_multihash(c)
+                if mh_c:
+                    candidate_mhs.add(mh_c)
+            prov_map = self._get_upload_provenance_map(candidate_mhs)
             target_mhs: set[str] = set()
             cids_to_unpin: list[str] = []
             for c in cids:
@@ -1975,6 +2167,12 @@ class GdprErasureReconciler:
                 except ValueError:
                     continue
                 if mh in shared_mhs:
+                    skipped_shared.append(c)
+                    continue
+                # L3-M1 front-run erasure defense: a non-uploader front-runner revoking a dummy
+                # dataset can NEVER trigger unpin/repo-gc of another uploader's provenanced ciphertext.
+                prov_uploader = prov_map.get(mh)
+                if prov_uploader and revoked_owner_l != prov_uploader and revoked_creator_l != prov_uploader:
                     skipped_shared.append(c)
                     continue
                 target_mhs.add(mh)
@@ -1998,7 +2196,7 @@ class GdprErasureReconciler:
                     self.unpinned_cids_total += 1
                     self._gc_pending = True
             if cids_to_unpin or target_mhs:
-                self._remove_tracked_pins(cids_to_unpin, target_mhs)
+                self._remove_tracked_pins(cids_to_unpin, target_mhs, purge_provenance=True)
             if valid_unshared_cids > 0:
                 # Guarantee at least one repo/gc pass even if CIDs were already unpinned before a restart/crash
                 self._gc_pending = True
@@ -2671,9 +2869,14 @@ def create_gateway_server(
                 self._send_json(401, {"error": sig_reason})
                 return
 
-            # 2. Enforce on-chain dataset Active status, canonical multihash membership, First-Claimant Ownership, and owner/license BEFORE touching NonceStore
+            # 2. Enforce on-chain dataset Active status, canonical multihash membership, Upload Provenance / First-Claimant Ownership, and owner/license BEFORE touching NonceStore
             allowed, status_code, auth_reason = authorize_cid_access(
-                registry_adapter, data_id, cid, recovered_addr, catalog_index=catalog_index
+                registry_adapter,
+                data_id,
+                cid,
+                recovered_addr,
+                catalog_index=catalog_index,
+                provenance_lookup=upload_limiter.get_upload_provenance,
             )
             if not allowed:
                 with metrics_lock:

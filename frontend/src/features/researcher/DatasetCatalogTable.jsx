@@ -115,7 +115,7 @@ export default function DatasetCatalogTable({ onPurchase }) {
                 <td>
                   <span
                     className={`sig-chip ${
-                      ds.clinicalSignificance === "Pathogenic Risk"
+                      ds.clinicalSignificance === "Functional Variation" || ds.clinicalSignificance === "Pathogenic Risk"
                         ? "sig-pathogenic"
                         : ds.clinicalSignificance === "Pharmacogenomics"
                         ? "sig-pharmaco"

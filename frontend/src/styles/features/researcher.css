@@ -1503,7 +1503,9 @@
   z-index: 2;
 }
 
-.opensea-nft-card:hover .nft-hover-inspect-btn {
+.opensea-nft-card:hover .nft-hover-inspect-btn,
+.opensea-nft-card:focus-within .nft-hover-inspect-btn,
+.nft-hover-inspect-btn:focus-visible {
   opacity: 1;
   transform: scale(1);
 }

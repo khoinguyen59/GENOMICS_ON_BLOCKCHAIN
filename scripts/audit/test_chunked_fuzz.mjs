@@ -6,7 +6,8 @@ import {
 
 async function run() {
   console.log("=== ADVERSARIAL TEST 4: CHUNKED ENCRYPTION BOUNDARY & FUZZ TESTING ===");
-  
+  let failCount = 0;
+
   // Test A: 0-byte file (Empty Genomic Input)
   try {
     const emptyRes = await encryptGenomicDataChunked(new Uint8Array(0));
@@ -15,9 +16,13 @@ async function run() {
     console.log("Decrypted empty size:", decryptedEmpty.length);
     if (decryptedEmpty.length === 0) {
       console.log("  [PASS] 0-byte input handled safely.");
+    } else {
+      failCount++;
+      console.error("  [FAIL] 0-byte input decrypted to non-zero length:", decryptedEmpty.length);
     }
   } catch (e) {
-    console.log("  [FAIL] 0-byte input threw error:", e.message);
+    failCount++;
+    console.error("  [FAIL] 0-byte input threw error:", e.message);
   }
 
   // Test B: Exactly 64KB chunk boundary
@@ -26,7 +31,13 @@ async function run() {
   const boundaryRes = await encryptGenomicDataChunked(boundaryData, { chunkSize: 65536 });
   console.log("64KB boundary chunkCount:", boundaryRes.chunkCount);
   const decryptedBoundary = await decryptGenomicDataChunked(boundaryRes.payload, boundaryRes.keyHex, { asString: false });
-  console.log("  [PASS] 64KB boundary match:", decryptedBoundary.every(b => b === 0x42));
+  const boundaryOk = decryptedBoundary.length === 65536 && decryptedBoundary.every(b => b === 0x42);
+  if (boundaryOk) {
+    console.log("  [PASS] 64KB boundary match: true");
+  } else {
+    failCount++;
+    console.error("  [FAIL] 64KB boundary mismatch!");
+  }
 
   // Test C: Header Tampering - Corrupt the Chunk Count in Header
   console.log("\nTesting Header Tampering: modifying chunkCount from 1 to 9999...");
@@ -38,7 +49,8 @@ async function run() {
 
   try {
     await decryptGenomicDataChunked(tamperedPayload, validEnc.keyHex);
-    console.log("  [FAIL] Header chunkCount tamper was NOT caught!");
+    failCount++;
+    console.error("  [FAIL] Header chunkCount tamper was NOT caught!");
   } catch (e) {
     console.log("  [PASS] Header tamper threw error as expected:", e.message);
   }
@@ -48,10 +60,20 @@ async function run() {
   const truncatedPayload = validEnc.payload.slice(0, validEnc.payload.length - 5);
   try {
     await decryptGenomicDataChunked(truncatedPayload, validEnc.keyHex);
-    console.log("  [FAIL] Truncation was NOT caught!");
+    failCount++;
+    console.error("  [FAIL] Truncation was NOT caught!");
   } catch (e) {
     console.log("  [PASS] Truncation caught:", e.message);
   }
+
+  if (failCount > 0) {
+    console.error(`[FAIL] Chunked fuzz suite finished with ${failCount} failure(s).`);
+    process.exit(1);
+  }
+  console.log("[PASS] All 4 chunked encryption boundary & tamper checks passed.");
 }
 
-run().catch(console.error);
+run().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});

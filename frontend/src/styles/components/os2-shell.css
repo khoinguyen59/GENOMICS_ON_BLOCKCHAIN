@@ -331,6 +331,8 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  min-width: 24px;
+  min-height: 24px;
   padding: 2px;
 }
 
@@ -910,7 +912,9 @@
   transition: opacity 160ms ease, background 160ms ease, transform 160ms ease;
 }
 
-.os2-hero-banner-card:hover .os2-hero-nav-arrow {
+.os2-hero-banner-card:hover .os2-hero-nav-arrow,
+.os2-hero-banner-card:focus-within .os2-hero-nav-arrow,
+.os2-hero-nav-arrow:focus-visible {
   opacity: 1;
 }
 

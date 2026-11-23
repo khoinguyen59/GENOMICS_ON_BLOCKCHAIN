@@ -68,7 +68,17 @@ body {
 button, input, select, textarea {
   font-size: 14.5px;
   font-family: inherit;
-  outline: none;
+}
+
+/* WCAG 2.2 SC 2.4.7 Keyboard Focus Visibility */
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[tabindex]:not([tabindex="-1"]):focus-visible {
+  outline: 2px solid var(--accent-primary, #38bdf8);
+  outline-offset: 2px;
 }
 
 /* Base Application Layout */

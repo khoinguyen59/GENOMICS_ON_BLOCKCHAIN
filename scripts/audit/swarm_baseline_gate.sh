@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Baseline gate for the multi-agent verification harness.
 # Resolves portable Node v22.x (nvm) and project Python .venv cleanly with zero machine-hardcoded paths.
-set -u
+set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$REPO_ROOT" || exit 1
@@ -29,6 +29,8 @@ rm -f "$LOG_DIR/00_baseline_gate.DONE"
 : > "$OUT"
 : > "$LOG_DIR/00_baseline_summary.txt"
 
+FAILED_COUNT=0
+
 run() {
   local label="$1"; shift
   {
@@ -38,8 +40,13 @@ run() {
   } >> "$OUT" 2>&1
   local t0
   t0=$(date +%s)
-  "$@" >> "$OUT" 2>&1
-  local code=$?
+  local code=0
+  if "$@" >> "$OUT" 2>&1; then
+    code=0
+  else
+    code=$?
+    FAILED_COUNT=$((FAILED_COUNT + 1))
+  fi
   local t1
   t1=$(date +%s)
   {
@@ -63,5 +70,9 @@ run "T8-web3-demo"      "$PYTHON_BIN" scripts/demo/web3_demo.py --offline-demo
 run "T9-hygiene"        "$PYTHON_BIN" scripts/audit/academic_hygiene_toolkit.py --selftest
 
 echo "" >> "$OUT"
-echo "########## BASELINE COMPLETE ##########" >> "$OUT"
+echo "########## BASELINE COMPLETE (failed=$FAILED_COUNT) ##########" >> "$OUT"
 touch "$LOG_DIR/00_baseline_gate.DONE"
+if [ "$FAILED_COUNT" -ne 0 ]; then
+  echo "[FAIL] Baseline gate finished with $FAILED_COUNT failing step(s). See $LOG_DIR/00_baseline_summary.txt" >&2
+  exit 1
+fi

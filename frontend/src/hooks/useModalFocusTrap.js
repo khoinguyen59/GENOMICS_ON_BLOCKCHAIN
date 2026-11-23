@@ -54,8 +54,10 @@ export function useModalFocusTrap(isOpen, onClose) {
     if (!isOpen) return undefined;
 
     const trapToken = Symbol("modal-focus-trap");
-    activeTrapStack.push(trapToken);
-    const isTopTrap = () => activeTrapStack[activeTrapStack.length - 1] === trapToken;
+    const trapEntry = { token: trapToken, containerRef };
+    activeTrapStack.push(trapEntry);
+    const isTopTrap = () =>
+      activeTrapStack.length > 0 && activeTrapStack[activeTrapStack.length - 1].token === trapToken;
 
     const previouslyFocused =
       document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -127,12 +129,34 @@ export function useModalFocusTrap(isOpen, onClose) {
     return () => {
       window.cancelAnimationFrame(rafId);
       document.removeEventListener("keydown", handleKeyDown, true);
-      const stackIdx = activeTrapStack.lastIndexOf(trapToken);
+      const stackIdx = activeTrapStack.findIndex((entry) => entry.token === trapToken);
       if (stackIdx !== -1) {
         activeTrapStack.splice(stackIdx, 1);
       }
       const prev = previousFocusRef.current;
       previousFocusRef.current = null;
+      const parentTrap = activeTrapStack.length > 0 ? activeTrapStack[activeTrapStack.length - 1] : null;
+      const parentContainer = parentTrap?.containerRef?.current || null;
+      if (parentContainer && parentContainer.isConnected) {
+        if (prev && prev.isConnected && parentContainer.contains(prev) && typeof prev.focus === "function") {
+          try {
+            prev.focus({ preventScroll: true });
+            return;
+          } catch {
+            // Fall through to parent container focus restoration
+          }
+        }
+        const parentFocusables = getFocusableElements(parentContainer);
+        const fallbackTarget = parentFocusables.length > 0 ? parentFocusables[0] : parentContainer;
+        if (fallbackTarget && typeof fallbackTarget.focus === "function") {
+          try {
+            fallbackTarget.focus({ preventScroll: true });
+          } catch {
+            // Ignore focus errors if parent container became unfocusable
+          }
+        }
+        return;
+      }
       if (prev && prev.isConnected && typeof prev.focus === "function") {
         try {
           prev.focus({ preventScroll: true });

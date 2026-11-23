@@ -157,8 +157,8 @@ async function runRound3AdversarialSuite() {
   );
 
   // 2.3 Legacy Pathology Artifact Check in data/ and README.md
-  const sampleVcfContent = fs.existsSync(path.resolve("data/sample_brca1_patient.vcf"))
-    ? fs.readFileSync(path.resolve("data/sample_brca1_patient.vcf"), "utf-8")
+  const sampleVcfContent = fs.existsSync(path.resolve("data/sample_metabolic_traits.vcf"))
+    ? fs.readFileSync(path.resolve("data/sample_metabolic_traits.vcf"), "utf-8")
     : "";
   const vcfHasCancer = /breast|cancer|carcinoma|brca1|brca2/i.test(sampleVcfContent);
   const readmeContent = fs.readFileSync(path.resolve("README.md"), "utf-8");

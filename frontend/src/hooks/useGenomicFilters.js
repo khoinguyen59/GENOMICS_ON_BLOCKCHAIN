@@ -156,7 +156,7 @@ export function useGenomicFilters({ datasets = [] } = {}) {
       "On-Chain Cohort": "Mẫu Di Truyền On-Chain",
       "Carrier Screening": "Sàng Lọc Người Mang Gen", "Pharmacogenomics": "Dược Lý Di Truyền",
       "Population Genetics": "Di Truyền Quần Thể", "Morphological Traits": "Hình Thái Học",
-      "NGS Sequencing Reads": "Giải Trình Tự NGS", "Pathogenic Risk": "Biến Dị Chức Năng"
+      "NGS Sequencing Reads": "Giải Trình Tự NGS", "Functional Variation": "Biến Dị Chức Năng", "Pathogenic Risk": "Biến Dị Chức Năng"
     };
     const mapEn = {
       "Physiological Traits": "Physiological Traits",
@@ -168,7 +168,7 @@ export function useGenomicFilters({ datasets = [] } = {}) {
       "On-Chain Cohort": "On-Chain Cohort",
       "Carrier Screening": "Carrier Screening", "Pharmacogenomics": "Pharmacogenomics",
       "Population Genetics": "Population Genetics", "Morphological Traits": "Morphological Traits",
-      "NGS Sequencing Reads": "NGS Sequencing Reads", "Pathogenic Risk": "Functional Variation"
+      "NGS Sequencing Reads": "NGS Sequencing Reads", "Functional Variation": "Functional Variation", "Pathogenic Risk": "Functional Variation"
     };
     return activeLang === "en" ? (mapEn[sig] || sig) : (mapVi[sig] || sig);
   }, []);

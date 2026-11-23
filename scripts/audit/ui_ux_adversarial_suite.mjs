@@ -56,24 +56,34 @@ console.log('\n' + '-'.repeat(80));
 console.log('MODULE 1: Accessibility (A11y), WCAG 2.2 AA & ARIA Semantics (axe-core / W3C v.Nu)');
 console.log('-'.repeat(80));
 
-// Test 1: Button Elements have explicit type or accessible labels
-let buttonsWithoutAccessibleRole = 0;
+// Test 1: Accessible button labels, WCAG 2.2 SC 2.4.7 :focus-visible rings & dynamic <html lang> sync
+const baseCssText = fs.readFileSync(path.join(srcDir, 'styles', 'base.css'), 'utf8');
+const langCtxText = fs.readFileSync(path.join(srcDir, 'context', 'LanguageContext.jsx'), 'utf8');
+const allCssPre = cssFiles.map(f => fs.readFileSync(f, 'utf8')).join('\n');
+let iconOnlyButtonsWithoutLabel = 0;
 let totalButtons = 0;
-for (const file of jsxFiles) {
+for (const file of jsxFiles.filter(f => f.endsWith('.jsx'))) {
   const content = fs.readFileSync(file, 'utf8');
-  const buttonMatches = content.match(/<button[^>]*>/g) || [];
-  totalButtons += buttonMatches.length;
-  for (const b of buttonMatches) {
-    if (!b.includes('aria-label') && !b.includes('title') && !b.includes('type=') && !b.includes('className')) {
-      buttonsWithoutAccessibleRole++;
+  for (const m of content.matchAll(/<button\b([^>]*)>([\s\S]*?)<\/button>/g)) {
+    totalButtons++;
+    const attrs = m[1] || '';
+    const inner = (m[2] || '').trim();
+    const hasAccessibleAttr = /\baria-label\s*=/.test(attrs) || /\btitle\s*=/.test(attrs) || /\baria-labelledby\s*=/.test(attrs);
+    const innerNoIcons = inner.replace(/<[A-Z][A-Za-z0-9_]*[^>]*\/>/g, '');
+    const innerText = innerNoIcons.replace(/<[^>]+>/g, '').trim();
+    if (!hasAccessibleAttr && innerText.length === 0) {
+      iconOnlyButtonsWithoutLabel++;
     }
   }
 }
+const hasFocusVisibleRule = /:focus-visible\b[\s\S]*?outline\s*:/m.test(allCssPre);
+const hasBareGlobalOutlineNone = /button\s*,\s*input\s*,\s*select\s*,\s*textarea\s*\{[^}]*outline\s*:\s*none/i.test(baseCssText);
+const hasDynamicHtmlLangSync = /document\.documentElement\.lang\s*=/.test(langCtxText);
 assert(
-  buttonsWithoutAccessibleRole === 0,
+  iconOnlyButtonsWithoutLabel === 0 && totalButtons > 0 && hasFocusVisibleRule && !hasBareGlobalOutlineNone && hasDynamicHtmlLangSync,
   'A11Y-01',
-  'All UI interactive button elements specify explicit attributes and class styling',
-  `Scanned ${totalButtons} buttons across ${jsxFiles.length} components. Unstyled buttons: ${buttonsWithoutAccessibleRole}`
+  'All interactive buttons have accessible names, CSS enforces :focus-visible rings (no bare global outline:none), and <html lang> syncs dynamically',
+  `Buttons=${totalButtons} (unlabelled icon-only=${iconOnlyButtonsWithoutLabel}), focusVisible=${hasFocusVisibleRule}, bareGlobalOutlineNone=${hasBareGlobalOutlineNone}, htmlLangSync=${hasDynamicHtmlLangSync}`
 );
 
 // Test 2: Input fields have accompanying labels or aria-label attributes
@@ -96,18 +106,21 @@ assert(
   `Scanned ${totalInputs} inputs across ${jsxFiles.length} components. Inputs lacking accessibility cues: ${unlabelledInputs}`
 );
 
-// Test 3: Modal dialogs implement ARIA role or backdrop dismissability
-let modalFiles = jsxFiles.filter(f => f.toLowerCase().includes('modal'));
+// Test 3: Modal dialogs implement strict ARIA dialog semantics + LIFO focus trap
+let modalFiles = jsxFiles.filter(f => f.toLowerCase().includes('modal') && f.endsWith('.jsx'));
 let accessibleModals = 0;
 for (const file of modalFiles) {
   const content = fs.readFileSync(file, 'utf8');
-  const hasModalSemantics = content.includes('role="dialog"') || content.includes('modal') || content.includes('aria-modal') || content.includes('backdrop') || content.includes('onClose');
+  const hasModalSemantics =
+    content.includes('role="dialog"') &&
+    content.includes('aria-modal') &&
+    content.includes('useModalFocusTrap');
   if (hasModalSemantics) accessibleModals++;
 }
 assert(
   accessibleModals === modalFiles.length && modalFiles.length > 0,
   'A11Y-03',
-  'Modal components implement semantic dialog roles and backdrop dismissal (WCAG Focus Not Obscured)',
+  'Modal components strictly enforce role="dialog", aria-modal="true", and useModalFocusTrap (WCAG Focus Not Obscured)',
   `Verified ${accessibleModals}/${modalFiles.length} modal dialog components.`
 );
 
@@ -175,7 +188,7 @@ assert(
 let componentsHandlingUserRejection = 0;
 for (const file of jsxFiles) {
   const content = fs.readFileSync(file, 'utf8');
-  if (content.includes('ACTION_REJECTED') || content.includes('user rejected') || content.includes('catch') || content.includes('error')) {
+  if (/\btry\s*\{[\s\S]*?\bcatch\s*(?:\([^)]*\))?\s*\{/.test(content) && (content.includes('ACTION_REJECTED') || content.includes('user rejected') || content.includes('showToast') || content.includes('throw'))) {
     componentsHandlingUserRejection++;
   }
 }
@@ -183,7 +196,7 @@ assert(
   componentsHandlingUserRejection >= 4,
   'W3UX-02',
   'Web3 transaction flows handle user MetaMask rejection and RPC timeout gracefully without crashing',
-  `Found ${componentsHandlingUserRejection} components with explicit try/catch and error reporting.`
+  `Found ${componentsHandlingUserRejection} modules with structured try/catch and user-facing error handling.`
 );
 
 // Test 10: Disconnected Wallet Context Reset (Zero Residual State)
@@ -232,22 +245,25 @@ assert(
     : `Unsafe DOM injection sink detected in: ${unsafeSinkHits.join(', ')}`
 );
 
-// Test 12: Memory Leak Cleanup: useEffect Hook Dependency and Cleanup Symmetry
-let effectsWithCleanupOrEmptyDeps = 0;
-let totalEffects = 0;
+// Test 12: Memory Leak Cleanup: every component registering addEventListener/setInterval implements teardown
+let listenerFiles = 0;
+let listenerFilesWithCleanup = 0;
 for (const file of jsxFiles) {
   const content = fs.readFileSync(file, 'utf8');
-  const effectMatches = content.match(/useEffect\s*\(\s*\(\)\s*=>\s*\{/g) || [];
-  totalEffects += effectMatches.length;
-  if (content.includes('return () =>') || content.includes('removeEventListener') || content.includes('clearInterval')) {
-    effectsWithCleanupOrEmptyDeps++;
+  const registersListener = /\b(?:addEventListener|setInterval)\s*\(/.test(content);
+  if (registersListener) {
+    listenerFiles++;
+    const hasTeardown =
+      content.includes('return () =>') &&
+      (/\bremoveEventListener\s*\(/.test(content) || /\bclearInterval\s*\(/.test(content));
+    if (hasTeardown) listenerFilesWithCleanup++;
   }
 }
 assert(
-  effectsWithCleanupOrEmptyDeps > 0,
+  listenerFiles > 0 && listenerFilesWithCleanup === listenerFiles,
   'MEM-01',
-  'Long-lived event listeners in React components implement unmount cleanup routines',
-  `Verified unmount listeners and cleanup handlers in ${effectsWithCleanupOrEmptyDeps} components.`
+  'Every React component/hook registering addEventListener or setInterval implements unmount cleanup symmetry',
+  `Verified unmount cleanup in ${listenerFilesWithCleanup}/${listenerFiles} listener/timer modules.`
 );
 
 console.log('\n' + '-'.repeat(80));

@@ -19,6 +19,8 @@ _AXE_CANDIDATES = [
 ]
 AXE_PATH = next((p for p in _AXE_CANDIDATES if os.path.exists(p)), _AXE_CANDIDATES[0])
 BASE_URL = os.environ.get("GENO_AUDIT_BASE_URL", "http://127.0.0.1:3000").rstrip("/")
+DEFAULT_REPORT_PATH = Path(__file__).resolve().parents[2] / "docs" / "reports" / "ui_ux_axe_report.json"
+REPORT_OUTPUT_PATH = DEFAULT_REPORT_PATH
 THEME_CHECKS_DIR = Path(__file__).resolve().parents[2] / "docs" / "reports" / "theme_checks"
 
 
@@ -463,9 +465,74 @@ async def run_audit():
                 await items_tab.click()
                 await page.wait_for_timeout(250)
 
-        # Measure Top Bar Diagnostics in Desktop Light + VI
+        # Measure Top Bar Diagnostics & WCAG 2.2 AA Live Keyboard / Search-Clear / <html lang> Parity
         await ensure_theme(page, "light")
         await ensure_lang(page, "vi")
+        await switch_view(page, "researcher")
+
+        # 1a. Verify dynamic <html lang> toggle (WCAG SC 3.1.1)
+        lang_vi = await page.evaluate("() => document.documentElement.lang")
+        await ensure_lang(page, "en")
+        lang_en = await page.evaluate("() => document.documentElement.lang")
+        await ensure_lang(page, "vi")
+        lang_vi_back = await page.evaluate("() => document.documentElement.lang")
+
+        # 1b. Verify .os2-search-clear meets WCAG 2.2 SC 2.5.8 (>= 24x24px) when rendered
+        search_clear_diag = {"rendered": False, "width": 0.0, "height": 0.0, "meets24px": False}
+        search_inp = page.locator(".os2-search-input").first
+        if await search_inp.count() > 0 and await search_inp.is_visible():
+            await search_inp.fill("ALDH2")
+            await page.wait_for_timeout(200)
+            clear_btn = page.locator(".os2-search-clear").first
+            if await clear_btn.count() > 0 and await clear_btn.is_visible():
+                box = await clear_btn.bounding_box()
+                if box:
+                    search_clear_diag = {
+                        "rendered": True,
+                        "width": round(box["width"], 1),
+                        "height": round(box["height"], 1),
+                        "meets24px": box["width"] >= 23.5 and box["height"] >= 23.5,
+                    }
+                await clear_btn.click()
+                await page.wait_for_timeout(150)
+
+        # 1c. Verify :focus-visible outline renders cleanly on keyboard navigation (WCAG SC 2.4.7)
+        await page.keyboard.press("Tab")
+        await page.wait_for_timeout(100)
+        focus_visible_diag = await page.evaluate(
+            """() => {
+                const el = document.activeElement;
+                if (!el || el === document.body) return { focusedTag: null, matchesFocusVisible: false, outlineStyle: 'none', outlineWidth: '0px', passed: false };
+                const st = window.getComputedStyle(el);
+                const matches = typeof el.matches === 'function' ? el.matches(':focus-visible') : false;
+                const ow = parseFloat(st.outlineWidth || '0') || 0;
+                const visibleOutline = st.outlineStyle !== 'none' && ow >= 1;
+                return {
+                    focusedTag: el.tagName,
+                    focusedId: el.id || '',
+                    matchesFocusVisible: matches,
+                    outlineStyle: st.outlineStyle,
+                    outlineWidth: st.outlineWidth,
+                    passed: matches && visibleOutline
+                };
+            }"""
+        )
+
+        wcag_live_checks = {
+            "htmlLangSync": {"vi": lang_vi, "en": lang_en, "viBack": lang_vi_back, "passed": lang_vi == "vi" and lang_en == "en" and lang_vi_back == "vi"},
+            "searchClearTargetSize": search_clear_diag,
+            "keyboardFocusVisible": focus_visible_diag,
+        }
+        if not wcag_live_checks["htmlLangSync"]["passed"]:
+            print(f"    [FAIL LIVE WCAG] Dynamic <html lang> sync failed: {wcag_live_checks['htmlLangSync']}")
+            blocking_failures += 1
+        if search_clear_diag["rendered"] and not search_clear_diag["meets24px"]:
+            print(f"    [FAIL LIVE WCAG] .os2-search-clear < 24x24px: {search_clear_diag}")
+            blocking_failures += 1
+        if not focus_visible_diag.get("passed"):
+            print(f"    [FAIL LIVE WCAG] Keyboard :focus-visible outline check failed: {focus_visible_diag}")
+            blocking_failures += 1
+
         await switch_view(page, "admin")
         navbar_info = await page.evaluate(
             """() => {
@@ -577,14 +644,13 @@ async def run_audit():
         await ctx_mob.close()
         await browser.close()
 
-    base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    reports_dir = os.path.join(base_dir, "docs", "reports")
-    os.makedirs(reports_dir, exist_ok=True)
-    report_path = os.path.join(reports_dir, "ui_ux_axe_report.json")
+    report_path = str(REPORT_OUTPUT_PATH)
+    os.makedirs(os.path.dirname(os.path.abspath(report_path)), exist_ok=True)
     summary_report = {
         "scenarios_count": len(all_scenarios),
         "blocking_violations_total": blocking_failures,
         "overflow_failures_total": overflow_failures,
+        "wcag_live_checks": wcag_live_checks,
         "navbar_diagnostics": navbar_info,
         "scenarios": all_scenarios,
     }
@@ -592,6 +658,8 @@ async def run_audit():
         json.dump(summary_report, rf, indent=2, ensure_ascii=False)
 
     print(f"\n[*] Detailed multi-viewport axe-core report saved to {report_path}")
+    print("[*] Live WCAG 2.2 AA Interactive Checks (lang / search-clear 24px / :focus-visible):")
+    print(json.dumps(wcag_live_checks, indent=2, ensure_ascii=False))
     print("[*] Top Bar Layout & Font Diagnostics:")
     print(json.dumps(navbar_info, indent=2, ensure_ascii=False))
     print(
@@ -603,15 +671,27 @@ async def run_audit():
 
 
 def main():
-    global BASE_URL
+    global BASE_URL, REPORT_OUTPUT_PATH, THEME_CHECKS_DIR
     parser = argparse.ArgumentParser(description="Multi-viewport WCAG 2.2 AA axe-core UI/UX audit")
     parser.add_argument(
         "--base-url",
         default=os.environ.get("GENO_AUDIT_BASE_URL", "http://127.0.0.1:3000"),
         help="Target frontend base URL (default: GENO_AUDIT_BASE_URL or http://127.0.0.1:3000)",
     )
+    parser.add_argument(
+        "--output",
+        default=str(DEFAULT_REPORT_PATH),
+        help="Destination JSON report path (default: docs/reports/ui_ux_axe_report.json)",
+    )
+    parser.add_argument(
+        "--screenshots-dir",
+        default=str(THEME_CHECKS_DIR),
+        help="Destination directory for captured screenshots (default: docs/reports/theme_checks)",
+    )
     args = parser.parse_args()
     BASE_URL = args.base_url.rstrip("/")
+    REPORT_OUTPUT_PATH = Path(args.output).resolve()
+    THEME_CHECKS_DIR = Path(args.screenshots_dir).resolve()
     proc = ensure_server(BASE_URL)
     try:
         asyncio.run(run_audit())

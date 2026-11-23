@@ -4,6 +4,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import {
+  encryptGenomicData,
+  decryptGenomicData,
+  packCiphertextPayload,
   encryptGenomicDataChunked,
   decryptGenomicDataChunked,
   generateAsymmetricKeyPair,
@@ -1632,6 +1635,261 @@ print("GDPR_REFCOUNT_OK")
     const trapSrc = fs.readFileSync(path.resolve("frontend/src/hooks/useModalFocusTrap.js"), "utf8");
     expect(trapSrc).to.include("activeTrapStack");
     expect(trapSrc).to.include("isTopTrap()");
+    expect(trapSrc).to.include("parentContainer");
     expect(trapSrc).to.include("[inert], [hidden], [aria-hidden='true']");
+  });
+
+  // =========================================================================
+  // R18-06h: Private IPFS Gateway Upload-Provenance Front-Running Defense (L3-M1) & 525 MiB Framing Cap
+  // =========================================================================
+  it("R18-06h: upload_provenance blocks mempool front-runner CID hijacking & GDPR erasure DoS against victim uploader", async function () {
+    this.timeout(25000);
+    const pyFrontRun = `
+import hashlib, json, os, sys, tempfile, threading, time, urllib.error, urllib.request
+from eth_account import Account
+from eth_account.messages import encode_defunct
+
+sys.path.insert(0, os.path.abspath("deploy"))
+import ipfs_access_gateway as gw
+
+assert gw.MAX_UPLOAD_BYTES == 525 * 1024 * 1024, f"Expected 525 MiB upload cap, got {gw.MAX_UPLOAD_BYTES}"
+assert gw.MAX_STREAM_BYTES == 525 * 1024 * 1024, f"Expected 525 MiB stream cap, got {gw.MAX_STREAM_BYTES}"
+
+VICTIM = Account.create()
+ATTACKER = Account.create()
+BUYER = Account.create()
+CHAIN_ID = 31337
+REGISTRY = "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0"
+CID_RAW = "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG"
+RAW_BYTES = b"GNC2_ENCRYPTED_VICTIM_GENOMIC_CIPHERTEXT_PAYLOAD_BYTES"
+
+class FrontRunRegistry:
+    def __init__(self):
+        self.datasets = []
+        self.events = []
+        self.licenses = {}
+    def is_connected(self): return True
+    def get_block_number(self): return 20
+    def get_all_datasets(self): return list(self.datasets)
+    def get_genomic_data(self, d):
+        for ds in self.datasets:
+            if ds["dataId"] == int(d): return ds
+        raise KeyError("DataNotFound")
+    def has_active_access(self, d, buyer):
+        return (int(d), str(buyer).lower()) in self.licenses
+    def get_status_updated_events(self, a, b): return list(self.events)
+
+class FrontRunKubo:
+    def __init__(self):
+        self.blobs = {}
+        self.pins = {}
+        self.unpinned = []
+        self.gc_runs = 0
+    def health_check(self): return True
+    def add_stream(self, stream, filename, content_length, cid_version=1):
+        data = stream.read(content_length)
+        self.blobs[CID_RAW] = data
+        self.pins[CID_RAW] = len(data)
+        return {"cid": CID_RAW, "size": len(data)}
+    def cat_cid(self, cid):
+        if cid not in self.blobs:
+            raise FileNotFoundError(cid)
+        return self.blobs[cid]
+    def unpin_cid(self, cid):
+        self.unpinned.append(cid)
+        removed = self.pins.pop(cid, None) is not None
+        if removed:
+            self.blobs.pop(cid, None)
+        return removed
+    def run_gc(self):
+        self.gc_runs += 1
+        return True
+
+def sign_upload(acct, payload_bytes, ts, nonce):
+    sha = hashlib.sha256(payload_bytes).hexdigest()
+    msg = gw.build_siwe_upload_message(CHAIN_ID, REGISTRY, sha, acct.address, ts, nonce)
+    sig = acct.sign_message(encode_defunct(text=msg)).signature.hex()
+    return {
+        "Content-Type": "application/octet-stream",
+        "X-GenoChain-Address": acct.address,
+        "X-GenoChain-Timestamp": str(ts),
+        "X-GenoChain-Nonce": nonce,
+        "X-GenoChain-Signature": sig if sig.startswith("0x") else "0x" + sig,
+        "X-GenoChain-Content-Sha256": sha,
+        "X-GenoChain-Filename": "victim_raw.enc",
+    }
+
+def sign_download(acct, data_id, cid, ts, nonce):
+    msg = gw.build_siwe_auth_message(CHAIN_ID, REGISTRY, data_id, cid, acct.address, ts, nonce)
+    sig = acct.sign_message(encode_defunct(text=msg)).signature.hex()
+    return {
+        "X-GenoChain-Data-Id": str(data_id),
+        "X-GenoChain-Address": acct.address,
+        "X-GenoChain-Timestamp": str(ts),
+        "X-GenoChain-Nonce": nonce,
+        "X-GenoChain-Signature": sig if sig.startswith("0x") else "0x" + sig,
+    }
+
+with tempfile.TemporaryDirectory() as td:
+    db_path = os.path.join(td, "frontrun_gateway.sqlite")
+    reg = FrontRunRegistry()
+    kubo = FrontRunKubo()
+    now_ts = int(time.time())
+    srv = gw.create_gateway_server(
+        host="127.0.0.1",
+        port=0,
+        chain_id=CHAIN_ID,
+        registry_address=REGISTRY,
+        registry_adapter=reg,
+        kubo_adapter=kubo,
+        state_db_path=db_path,
+        upload_policy="open-dev",
+        now_fn=lambda: now_ts,
+    )
+    port = srv.server_address[1]
+    t = threading.Thread(target=srv.serve_forever, daemon=True)
+    t.start()
+    try:
+        # 1. Victim uploads ciphertext via SIWE POST /api/v0/upload -> records upload_provenance(mh -> VICTIM)
+        up_req = urllib.request.Request(
+            f"http://127.0.0.1:{port}/api/v0/upload",
+            data=RAW_BYTES,
+            headers=sign_upload(VICTIM, RAW_BYTES, now_ts, "upload-nonce-victim-0001"),
+            method="POST",
+        )
+        with urllib.request.urlopen(up_req, timeout=5) as resp:
+            assert resp.status == 200
+            up_body = json.loads(resp.read().decode("utf-8"))
+            assert up_body["cid"] == CID_RAW
+
+        # 2. Front-runner registers dummy dataset #1 referencing VICTIM's CID BEFORE VICTIM's dataset #2 lands
+        reg.datasets = [
+            {"dataId": 1, "tokenId": 1, "currentOwner": ATTACKER.address, "originalCreator": ATTACKER.address, "rawCid": CID_RAW, "summaryCid": "", "metadataCid": "", "status": 0},
+            {"dataId": 2, "tokenId": 2, "currentOwner": VICTIM.address, "originalCreator": VICTIM.address, "rawCid": CID_RAW, "summaryCid": "", "metadataCid": "", "status": 0},
+        ]
+        reg.licenses[(2, BUYER.address.lower())] = True
+        srv.gateway_catalog_index.invalidate()
+
+        # 3. Front-runner trying to download via front-run dataset #1 MUST be denied (403)
+        att_req = urllib.request.Request(
+            f"http://127.0.0.1:{port}/ipfs/{CID_RAW}",
+            headers=sign_download(ATTACKER, 1, CID_RAW, now_ts, "dl-nonce-attacker-0001"),
+        )
+        att_status = None
+        try:
+            urllib.request.urlopen(att_req, timeout=5)
+        except urllib.error.HTTPError as e:
+            att_status = e.code
+        assert att_status == 403, f"Front-runner MUST be denied 403, got {att_status}"
+
+        # 4. Victim (dataset #2) and Victim's licensed buyer MUST both succeed (200) despite earlier dataId #1
+        for who, n in [(VICTIM, "dl-nonce-victim-0002"), (BUYER, "dl-nonce-buyer-0003")]:
+            ok_req = urllib.request.Request(
+                f"http://127.0.0.1:{port}/ipfs/{CID_RAW}",
+                headers=sign_download(who, 2, CID_RAW, now_ts, n),
+            )
+            with urllib.request.urlopen(ok_req, timeout=5) as resp:
+                assert resp.status == 200
+                assert resp.read() == RAW_BYTES
+
+        # 5. Front-runner revokes dataset #1 trying to trigger GDPR unpin/repo-gc -> VICTIM's pin MUST survive!
+        reg.datasets[0]["status"] = 2
+        reg.events.append({"dataId": 1, "newStatus": 2, "blockNumber": 18})
+        rec = gw.GdprErasureReconciler(reg, kubo, start_block=1, db_path=db_path)
+        try:
+            r1 = rec.reconcile_once()
+            assert CID_RAW in kubo.pins and CID_RAW in r1["skippedSharedCids"], f"Front-runner wiped victim pin: {r1}"
+            assert srv.gateway_upload_limiter.get_upload_provenance(gw.extract_canonical_multihash(CID_RAW)) == VICTIM.address.lower()
+
+            # 6. Once VICTIM legitimately revokes dataset #2 -> pin IS physically erased & upload_provenance purged!
+            reg.datasets[1]["status"] = 2
+            reg.events.append({"dataId": 2, "newStatus": 2, "blockNumber": 19})
+            r2 = rec.reconcile_once()
+            assert CID_RAW not in kubo.pins and CID_RAW in r2["unpinnedCids"], f"Victim legitimate GDPR erasure failed: {r2}"
+            assert kubo.gc_runs >= 1
+            assert srv.gateway_upload_limiter.get_upload_provenance(gw.extract_canonical_multihash(CID_RAW)) is None
+        finally:
+            rec.close()
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+print("FRONTRUN_PROVENANCE_DEFENSE_OK")
+`;
+    const out = execFileSync(resolvePythonBin(), ["-c", pyFrontRun], { encoding: "utf8" });
+    expect(out).to.include("FRONTRUN_PROVENANCE_DEFENSE_OK");
+  });
+
+  // =========================================================================
+  // R18-06i: Strict IV/UTF-8 Validation, Hybrid KMS+Local Dispatcher Key Load & INV-11 Phenopacket Clamp
+  // =========================================================================
+  it("R18-06i: enforces strict 12B IV & fatal UTF-8 decoding in WebCrypto, INV-11 non-pathological phenopacket clamp, and hybrid KMS+local summary vault loading", async function () {
+    // 1. packCiphertextPayload rejects non-12-byte Uint8Array IVs
+    expect(() => packCiphertextPayload(new Uint8Array(8), new Uint8Array(32))).to.throw(/12-byte/);
+    expect(() => packCiphertextPayload(new Uint8Array(16), new Uint8Array(32))).to.throw(/12-byte/);
+
+    // 2. Invalid UTF-8 bytes decrypted with asString=true reject cleanly under fatal TextDecoder (both monolithic & GNC2)
+    const invalidUtf8 = new Uint8Array([0xff, 0xfe, 0x80, 0xc0]);
+    const monoEnc = await encryptGenomicData(invalidUtf8);
+    await expect(decryptGenomicData(monoEnc.ciphertext, monoEnc.iv, monoEnc.keyHex, true)).to.be.rejected;
+    const monoRaw = await decryptGenomicData(monoEnc.ciphertext, monoEnc.iv, monoEnc.keyHex, false);
+    expect(Array.from(monoRaw)).to.deep.equal(Array.from(invalidUtf8));
+
+    const chunkEnc = await encryptGenomicDataChunked(invalidUtf8);
+    await expect(decryptGenomicDataChunked(chunkEnc.payload, chunkEnc.keyHex, { asString: true })).to.be.rejected;
+    const chunkRaw = await decryptGenomicDataChunked(chunkEnc.payload, chunkEnc.keyHex, { asString: false });
+    expect(Array.from(chunkRaw)).to.deep.equal(Array.from(invalidUtf8));
+
+    // 3. INV-11: buildPhenopacket NEVER emits PATHOGENIC, LIKELY_PATHOGENIC, CAUSATIVE, or undeclared NCIT:C16355
+    const pp = buildPhenopacket({
+      subjectId: "ANON_INV11_CLAMP_01",
+      disease: "Functional Polymorphism Cohort",
+      clinicalSignificance: "PATHOGENIC",
+      bloodGroup: "O+",
+      variants: [{ gene: "ALDH2", rsId: "rs671", pathogenicity: "PATHOGENIC", interpretationStatus: "CAUSATIVE" }],
+    });
+    const ppJson = JSON.stringify(pp);
+    expect(ppJson).to.not.match(/"(PATHOGENIC|LIKELY_PATHOGENIC|CAUSATIVE)"/);
+    expect(ppJson).to.not.include("NCIT:C16355");
+    expect(validatePhenopacketSchema(pp).valid).to.equal(true);
+
+    // 4. Hybrid KMS raw key + local AES-GCM summary key loads cleanly in capsule_dispatcher.py using LOCAL_VAULT_DIR
+    const pyHybrid = `
+import os, sys, json, tempfile
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+sys.path.insert(0, os.path.abspath("scripts/demo"))
+import capsule_dispatcher as cd
+
+with tempfile.TemporaryDirectory() as td:
+    vk = os.urandom(32)
+    with open(os.path.join(td, "dispatcher_vault.key"), "w", encoding="utf-8") as f:
+        f.write(vk.hex())
+    sum_key = os.urandom(32)
+    nonce = os.urandom(12)
+    sum_env = (nonce + AESGCM(vk).encrypt(nonce, sum_key, None)).hex()
+    vault_path = os.path.join(td, "dispatcher_seed_vault.json")
+    raw_key = os.urandom(32).hex()
+    orig_kms_dec = cd.kms_decrypt_seed_key
+    cd.kms_decrypt_seed_key = lambda env: raw_key
+    try:
+        with open(vault_path, "w", encoding="utf-8") as f:
+            json.dump({
+                "vaultVersion": 2,
+                "vaultKdf": {"mode": "keyfile", "algorithm": "raw-256"},
+                "seeds": [{
+                    "dataId": 1,
+                    "kmsKeyEnvelope": {"mode": "aws-kms-envelope-v1"},
+                    "encryptedSummaryKeyEnvelopeHex": sum_env
+                }]
+            }, f)
+        sk, ssk = cd.load_vault_keys(vault_path, os.getcwd())
+        assert sk[1] == raw_key and ssk[1] == sum_key.hex()
+    finally:
+        cd.kms_decrypt_seed_key = orig_kms_dec
+print("HYBRID_VAULT_OK")
+`;
+    const pyOut = execFileSync(resolvePythonBin(), ["-c", pyHybrid], { encoding: "utf8" });
+    expect(pyOut).to.include("HYBRID_VAULT_OK");
   });
 });

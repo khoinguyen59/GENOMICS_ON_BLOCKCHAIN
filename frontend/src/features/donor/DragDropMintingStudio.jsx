@@ -763,7 +763,7 @@ export default function DragDropMintingStudio({ onPublishSuccess }) {
                   <option value="Pharmacogenomics">{t("sigPharmaco")}</option>
                   <option value="Carrier Screening">{t("sigCarrier")}</option>
                   <option value="Reference Benchmark">{t("sigBenchmark")}</option>
-                  <option value="Pathogenic Risk">{t("sigPathogenic")}</option>
+                  <option value="Functional Variation">{t("sigFunctional")}</option>
                   <option value="Physical Traits & Performance">{t("catTraits")}</option>
                   <option value="Sensory & Metabolism">{t("catSensory")}</option>
                   <option value="Population Genetics">{t("cat1000G")}</option>

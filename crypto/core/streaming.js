@@ -300,7 +300,7 @@ export async function decryptGenomicDataChunked(payloadBytes, key, options = {})
   }
 
   if (asString) {
-    return new TextDecoder().decode(resultBytes);
+    return new TextDecoder("utf-8", { fatal: true }).decode(resultBytes);
   }
   return resultBytes;
 }

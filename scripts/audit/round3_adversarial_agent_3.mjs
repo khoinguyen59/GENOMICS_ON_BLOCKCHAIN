@@ -345,7 +345,7 @@ async function main() {
   try {
     const phenoPath = path.resolve("data/sample_phenopacket.json");
     const reportPath = path.resolve("data/sample_summary_report.txt");
-    const vcfPath = path.resolve("data/sample_brca1_patient.vcf");
+    const vcfPath = path.resolve("data/sample_metabolic_traits.vcf");
 
     let leaksFound = [];
 
@@ -364,7 +364,7 @@ async function main() {
     if (fs.existsSync(vcfPath)) {
       const vcfText = fs.readFileSync(vcfPath, "utf-8");
       if (vcfText.includes("PATIENT_VN_9042") && vcfText.includes("BRCA1")) {
-        leaksFound.push("data/sample_brca1_patient.vcf: Contains clinical BRCA1 patient callset");
+        leaksFound.push("data/sample_metabolic_traits.vcf: Contains clinical BRCA1 patient callset");
       }
     }
 

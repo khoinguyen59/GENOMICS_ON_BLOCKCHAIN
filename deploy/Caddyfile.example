@@ -16,10 +16,10 @@
 		-Server
 	}
 
-	# Block public access to Prometheus /metrics (only allow loopback / internal RFC1918 scrapers)
+	# Block public access to Prometheus /metrics (loopback only by default; optionally set METRICS_SCRAPER_CIDR to an explicit scraper IP/CIDR)
 	@public_metrics {
 		path /metrics
-		not remote_ip 127.0.0.1 ::1 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16
+		not remote_ip 127.0.0.1/32 ::1/128 {$METRICS_SCRAPER_CIDR:127.0.0.1/32}
 	}
 	handle /metrics {
 		# Inside handle /metrics, respond executes before reverse_proxy per Caddy directive order
@@ -34,10 +34,10 @@
 		reverse_proxy ipfs-access-gateway:8090
 	}
 
-	# SIWE-Authenticated Donor Ciphertext & Metadata Upload Proxy (up to 500 MiB = 524,288,000 B + margin)
+	# SIWE-Authenticated Donor Ciphertext & Metadata Upload Proxy (525 MiB matching MAX_UPLOAD_BYTES + GNC2 framing overhead)
 	handle /api/v0/upload {
 		request_body {
-			max_size 525MB
+			max_size 525MiB
 		}
 		reverse_proxy ipfs-access-gateway:8090 {
 			flush_interval -1

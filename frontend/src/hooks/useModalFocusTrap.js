@@ -138,6 +138,9 @@ export function useModalFocusTrap(isOpen, onClose) {
       const parentTrap = activeTrapStack.length > 0 ? activeTrapStack[activeTrapStack.length - 1] : null;
       const parentContainer = parentTrap?.containerRef?.current || null;
       if (parentContainer && parentContainer.isConnected) {
+        if (parentContainer.contains(document.activeElement)) {
+          return;
+        }
         if (prev && prev.isConnected && parentContainer.contains(prev) && typeof prev.focus === "function") {
           try {
             prev.focus({ preventScroll: true });

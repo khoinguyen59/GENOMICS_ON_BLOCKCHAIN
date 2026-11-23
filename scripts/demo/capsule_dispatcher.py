@@ -1103,10 +1103,13 @@ def main():
     addresses_file = os.path.join(contracts_dir, "contractAddresses.json")
     registry_abi_file = os.path.join(contracts_dir, "GenomicsRegistryABI.json")
     nft_abi_file = os.path.join(contracts_dir, "GenomicNFTABI.json")
+    default_vault_dir = os.path.abspath(
+        str(os.environ.get("LOCAL_VAULT_DIR") or "").strip() or os.path.join(base_dir, ".local")
+    )
     seed_vault_file = (
         os.path.abspath(args.vault_file)
         if args.vault_file
-        else os.path.join(base_dir, ".local", "dispatcher_seed_vault.json")
+        else os.path.join(default_vault_dir, "dispatcher_seed_vault.json")
     )
 
     if not os.path.exists(addresses_file) or not os.path.exists(registry_abi_file):
@@ -1221,7 +1224,7 @@ def main():
     checkpoint_file = (
         os.path.abspath(args.checkpoint)
         if args.checkpoint
-        else os.path.join(base_dir, ".local", "dispatcher_checkpoint.json")
+        else os.path.join(default_vault_dir, "dispatcher_checkpoint.json")
     )
     chunk_size = max(1, int(args.chunk_size))
     max_cycles = args.max_cycles if args.max_cycles is not None else (0 if args.watch else 1)

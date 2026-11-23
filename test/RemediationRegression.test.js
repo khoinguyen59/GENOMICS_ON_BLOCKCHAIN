@@ -1642,7 +1642,7 @@ print("GDPR_REFCOUNT_OK")
   // =========================================================================
   // R18-06h: Private IPFS Gateway Upload-Provenance Front-Running Defense (L3-M1) & 525 MiB Framing Cap
   // =========================================================================
-  it("R18-06h: upload_provenance blocks mempool front-runner CID hijacking & GDPR erasure DoS against victim uploader", async function () {
+  it("R18-06h: upload_provenance blocks mempool front-runner CID hijacking, metadataCid SIWE bypass, & GDPR pin-lock/erasure DoS across CIDv0/CIDv1 aliases and ERC-721 transfers", async function () {
     this.timeout(25000);
     const pyFrontRun = `
 import hashlib, json, os, sys, tempfile, threading, time, urllib.error, urllib.request
@@ -1656,11 +1656,14 @@ assert gw.MAX_UPLOAD_BYTES == 525 * 1024 * 1024, f"Expected 525 MiB upload cap, 
 assert gw.MAX_STREAM_BYTES == 525 * 1024 * 1024, f"Expected 525 MiB stream cap, got {gw.MAX_STREAM_BYTES}"
 
 VICTIM = Account.create()
+NEW_OWNER = Account.create()
 ATTACKER = Account.create()
 BUYER = Account.create()
 CHAIN_ID = 31337
 REGISTRY = "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0"
-CID_RAW = "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG"
+CID_V0 = "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG"
+CID_V1 = "bafybeie5nqv6kd3qnfjupgvz34woh3oksc3iau6abmyajn7qvtf6d2ho34"
+assert gw.extract_canonical_multihash(CID_V0) == gw.extract_canonical_multihash(CID_V1)
 RAW_BYTES = b"GNC2_ENCRYPTED_VICTIM_GENOMIC_CIPHERTEXT_PAYLOAD_BYTES"
 
 class FrontRunRegistry:
@@ -1669,7 +1672,7 @@ class FrontRunRegistry:
         self.events = []
         self.licenses = {}
     def is_connected(self): return True
-    def get_block_number(self): return 20
+    def get_block_number(self): return 25
     def get_all_datasets(self): return list(self.datasets)
     def get_genomic_data(self, d):
         for ds in self.datasets:
@@ -1688,9 +1691,13 @@ class FrontRunKubo:
     def health_check(self): return True
     def add_stream(self, stream, filename, content_length, cid_version=1):
         data = stream.read(content_length)
-        self.blobs[CID_RAW] = data
-        self.pins[CID_RAW] = len(data)
-        return {"cid": CID_RAW, "size": len(data)}
+        cid_ret = CID_V1 if cid_version == 1 else CID_V0
+        self.blobs[CID_V1] = data
+        self.blobs[CID_V0] = data
+        self.pins[cid_ret] = len(data)
+        return {"cid": cid_ret, "size": len(data)}
+    def list_recursive_pins(self):
+        return list(self.pins.keys())
     def cat_cid(self, cid):
         if cid not in self.blobs:
             raise FileNotFoundError(cid)
@@ -1750,7 +1757,7 @@ with tempfile.TemporaryDirectory() as td:
     t = threading.Thread(target=srv.serve_forever, daemon=True)
     t.start()
     try:
-        # 1. Victim uploads ciphertext via SIWE POST /api/v0/upload -> records upload_provenance(mh -> VICTIM)
+        # 1. Victim uploads ciphertext via SIWE POST /api/v0/upload -> Kubo returns CIDv1, records upload_provenance(mh -> VICTIM)
         up_req = urllib.request.Request(
             f"http://127.0.0.1:{port}/api/v0/upload",
             data=RAW_BYTES,
@@ -1760,20 +1767,34 @@ with tempfile.TemporaryDirectory() as td:
         with urllib.request.urlopen(up_req, timeout=5) as resp:
             assert resp.status == 200
             up_body = json.loads(resp.read().decode("utf-8"))
-            assert up_body["cid"] == CID_RAW
+            assert up_body["cid"] == CID_V1
 
-        # 2. Front-runner registers dummy dataset #1 referencing VICTIM's CID BEFORE VICTIM's dataset #2 lands
+        # 2. Front-runner attempts SIWE bypass by setting metadataCid = VICTIM's CIDv0/CIDv1 BEFORE Victim confirms
         reg.datasets = [
-            {"dataId": 1, "tokenId": 1, "currentOwner": ATTACKER.address, "originalCreator": ATTACKER.address, "rawCid": CID_RAW, "summaryCid": "", "metadataCid": "", "status": 0},
-            {"dataId": 2, "tokenId": 2, "currentOwner": VICTIM.address, "originalCreator": VICTIM.address, "rawCid": CID_RAW, "summaryCid": "", "metadataCid": "", "status": 0},
+            {"dataId": 1, "tokenId": 1, "currentOwner": ATTACKER.address, "originalCreator": ATTACKER.address, "rawCid": "", "summaryCid": "", "metadataCid": CID_V0, "status": 0},
+        ]
+        srv.gateway_catalog_index.invalidate()
+        for probe_cid in (CID_V0, CID_V1):
+            unauth_status = None
+            try:
+                urllib.request.urlopen(f"http://127.0.0.1:{port}/ipfs/{probe_cid}", timeout=5)
+            except urllib.error.HTTPError as e:
+                unauth_status = e.code
+            assert unauth_status == 401, f"Front-run metadataCid bypass MUST fail 401 for {probe_cid}, got {unauth_status}"
+
+        # 3. Front-runner registers dummy dataset #1 referencing VICTIM's CIDv0 BEFORE VICTIM's dataset #2 lands (also CIDv0)
+        reg.datasets = [
+            {"dataId": 1, "tokenId": 1, "currentOwner": ATTACKER.address, "originalCreator": ATTACKER.address, "rawCid": CID_V0, "summaryCid": "", "metadataCid": "", "status": 0},
+            {"dataId": 2, "tokenId": 2, "currentOwner": VICTIM.address, "originalCreator": VICTIM.address, "rawCid": CID_V0, "summaryCid": "", "metadataCid": "", "status": 0},
+            {"dataId": 3, "tokenId": 3, "currentOwner": ATTACKER.address, "originalCreator": ATTACKER.address, "rawCid": CID_V1, "summaryCid": "", "metadataCid": "", "status": 0},
         ]
         reg.licenses[(2, BUYER.address.lower())] = True
         srv.gateway_catalog_index.invalidate()
 
-        # 3. Front-runner trying to download via front-run dataset #1 MUST be denied (403)
+        # 4. Front-runner trying to download via front-run dataset #1 MUST be denied (403)
         att_req = urllib.request.Request(
-            f"http://127.0.0.1:{port}/ipfs/{CID_RAW}",
-            headers=sign_download(ATTACKER, 1, CID_RAW, now_ts, "dl-nonce-attacker-0001"),
+            f"http://127.0.0.1:{port}/ipfs/{CID_V0}",
+            headers=sign_download(ATTACKER, 1, CID_V0, now_ts, "dl-nonce-attacker-0001"),
         )
         att_status = None
         try:
@@ -1782,32 +1803,45 @@ with tempfile.TemporaryDirectory() as td:
             att_status = e.code
         assert att_status == 403, f"Front-runner MUST be denied 403, got {att_status}"
 
-        # 4. Victim (dataset #2) and Victim's licensed buyer MUST both succeed (200) despite earlier dataId #1
+        # 5. Victim (dataset #2, CIDv0 alias of uploaded CIDv1) and Victim's licensed buyer MUST both succeed (200)
         for who, n in [(VICTIM, "dl-nonce-victim-0002"), (BUYER, "dl-nonce-buyer-0003")]:
             ok_req = urllib.request.Request(
-                f"http://127.0.0.1:{port}/ipfs/{CID_RAW}",
-                headers=sign_download(who, 2, CID_RAW, now_ts, n),
+                f"http://127.0.0.1:{port}/ipfs/{CID_V0}",
+                headers=sign_download(who, 2, CID_V0, now_ts, n),
             )
             with urllib.request.urlopen(ok_req, timeout=5) as resp:
                 assert resp.status == 200
                 assert resp.read() == RAW_BYTES
 
-        # 5. Front-runner revokes dataset #1 trying to trigger GDPR unpin/repo-gc -> VICTIM's pin MUST survive!
-        reg.datasets[0]["status"] = 2
-        reg.events.append({"dataId": 1, "newStatus": 2, "blockNumber": 18})
+        # 6. ERC-721 Transfer (VICTIM -> NEW_OWNER): NEW_OWNER & BUYER still get 200 via originalCreator provenance!
+        reg.datasets[1]["currentOwner"] = NEW_OWNER.address
+        srv.gateway_catalog_index.invalidate()
+        for who, n in [(NEW_OWNER, "dl-nonce-newowner-0004"), (BUYER, "dl-nonce-buyer-0005")]:
+            ok_req = urllib.request.Request(
+                f"http://127.0.0.1:{port}/ipfs/{CID_V0}",
+                headers=sign_download(who, 2, CID_V0, now_ts, n),
+            )
+            with urllib.request.urlopen(ok_req, timeout=5) as resp:
+                assert resp.status == 200
+                assert resp.read() == RAW_BYTES
+
+        # 7. Front-runner revokes dummy dataset #3 trying to trigger GDPR unpin/repo-gc -> VICTIM's CIDv1 pin MUST survive!
+        reg.datasets[2]["status"] = 2
+        reg.events.append({"dataId": 3, "newStatus": 2, "blockNumber": 18})
         rec = gw.GdprErasureReconciler(reg, kubo, start_block=1, db_path=db_path)
         try:
             r1 = rec.reconcile_once()
-            assert CID_RAW in kubo.pins and CID_RAW in r1["skippedSharedCids"], f"Front-runner wiped victim pin: {r1}"
-            assert srv.gateway_upload_limiter.get_upload_provenance(gw.extract_canonical_multihash(CID_RAW)) == VICTIM.address.lower()
+            assert CID_V1 in kubo.pins and CID_V1 in r1["skippedSharedCids"], f"Front-runner wiped victim pin: {r1}"
+            assert srv.gateway_upload_limiter.get_upload_provenance(gw.extract_canonical_multihash(CID_V0)) == VICTIM.address.lower()
 
-            # 6. Once VICTIM legitimately revokes dataset #2 -> pin IS physically erased & upload_provenance purged!
+            # 8. Legitimate owner (NEW_OWNER) revokes dataset #2 WHILE front-runner's earlier dataset #1 stays ACTIVE (status=0)!
+            # Front-runner dataId=1 MUST NOT pin-lock GDPR Art. 17 erasure, and CIDv1 alias MUST be physically unpinned & GC'd!
             reg.datasets[1]["status"] = 2
             reg.events.append({"dataId": 2, "newStatus": 2, "blockNumber": 19})
             r2 = rec.reconcile_once()
-            assert CID_RAW not in kubo.pins and CID_RAW in r2["unpinnedCids"], f"Victim legitimate GDPR erasure failed: {r2}"
+            assert CID_V1 not in kubo.pins and CID_V1 in r2["unpinnedCids"], f"GDPR erasure pin-locked by active front-runner: {r2}"
             assert kubo.gc_runs >= 1
-            assert srv.gateway_upload_limiter.get_upload_provenance(gw.extract_canonical_multihash(CID_RAW)) is None
+            assert srv.gateway_upload_limiter.get_upload_provenance(gw.extract_canonical_multihash(CID_V0)) is None
         finally:
             rec.close()
     finally:
@@ -1824,13 +1858,16 @@ print("FRONTRUN_PROVENANCE_DEFENSE_OK")
   // R18-06i: Strict IV/UTF-8 Validation, Hybrid KMS+Local Dispatcher Key Load & INV-11 Phenopacket Clamp
   // =========================================================================
   it("R18-06i: enforces strict 12B IV & fatal UTF-8 decoding in WebCrypto, INV-11 non-pathological phenopacket clamp, and hybrid KMS+local summary vault loading", async function () {
-    // 1. packCiphertextPayload rejects non-12-byte Uint8Array IVs
+    // 1. packCiphertextPayload rejects non-12-byte Uint8Array IVs & null/undefined ciphertext; decryptGenomicData rejects non-12-byte IVs
     expect(() => packCiphertextPayload(new Uint8Array(8), new Uint8Array(32))).to.throw(/12-byte/);
     expect(() => packCiphertextPayload(new Uint8Array(16), new Uint8Array(32))).to.throw(/12-byte/);
+    expect(() => packCiphertextPayload(new Uint8Array(12), null)).to.throw(/Invalid ciphertext/);
+    expect(() => packCiphertextPayload(new Uint8Array(12), undefined)).to.throw(/Invalid ciphertext/);
 
     // 2. Invalid UTF-8 bytes decrypted with asString=true reject cleanly under fatal TextDecoder (both monolithic & GNC2)
     const invalidUtf8 = new Uint8Array([0xff, 0xfe, 0x80, 0xc0]);
     const monoEnc = await encryptGenomicData(invalidUtf8);
+    await expect(decryptGenomicData(monoEnc.ciphertext, new Uint8Array(16), monoEnc.keyHex, false)).to.be.rejectedWith(/12-byte/);
     await expect(decryptGenomicData(monoEnc.ciphertext, monoEnc.iv, monoEnc.keyHex, true)).to.be.rejected;
     const monoRaw = await decryptGenomicData(monoEnc.ciphertext, monoEnc.iv, monoEnc.keyHex, false);
     expect(Array.from(monoRaw)).to.deep.equal(Array.from(invalidUtf8));

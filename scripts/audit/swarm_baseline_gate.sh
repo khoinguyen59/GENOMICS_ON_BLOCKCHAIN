@@ -63,9 +63,9 @@ run "T4-audit-root"     npm audit --omit=dev
 run "T4-audit-frontend" npm --prefix frontend audit --omit=dev
 run "T5-solhint"        npm run lint:sol
 run "T6-eip170"         "$PYTHON_BIN" scripts/audit/check_eip170.py
-run "T7-gitgrep"        bash -c "git grep -i 'QmGeno' -- frontend/ crypto/ ipfs/ || echo NO_QMGENO_HIT"
-run "T7-gitgrep2"       bash -c "git grep -nE 'rawContent|capsuleKey' -- frontend/src/ || echo NO_PLAINTEXT_HIT"
-run "T7-gitgrep3"       bash -c "git grep -nE 'datasets\.length[[:space:]]*\+[[:space:]]*1' -- frontend/src/ || echo NO_STATE_FAKE_HIT"
+run "T7-gitgrep"        bash -c "if git grep -i 'QmGeno' -- frontend/ crypto/ ipfs/; then echo 'FAIL: QmGeno mockup detected' >&2; exit 1; else echo NO_QMGENO_HIT; fi"
+run "T7-gitgrep2"       bash -c "if git grep -nE 'rawContent|capsuleKey' -- frontend/src/; then echo 'FAIL: plaintext key leak detected' >&2; exit 1; else echo NO_PLAINTEXT_HIT; fi"
+run "T7-gitgrep3"       bash -c "if git grep -nE 'datasets\.length[[:space:]]*\+[[:space:]]*1' -- frontend/src/; then echo 'FAIL: fake sequential dataset ID detected' >&2; exit 1; else echo NO_STATE_FAKE_HIT; fi"
 run "T8-web3-demo"      "$PYTHON_BIN" scripts/demo/web3_demo.py --offline-demo
 run "T9-hygiene"        "$PYTHON_BIN" scripts/audit/academic_hygiene_toolkit.py --selftest
 

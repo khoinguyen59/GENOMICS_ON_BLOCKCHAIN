@@ -61,10 +61,13 @@
 }
 
 .terminal-search-input:focus {
-  outline: none;
   border-color: rgba(56, 189, 248, 0.6);
   background: var(--bg-input);
   box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.15), var(--shadow-sm);
+}
+
+.terminal-search-input:focus:not(:focus-visible) {
+  outline: none;
 }
 
 .search-shortcut-badge {

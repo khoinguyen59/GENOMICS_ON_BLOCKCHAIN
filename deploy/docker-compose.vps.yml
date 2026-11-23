@@ -24,6 +24,9 @@ services:
     image: ipfs/kubo:v0.32.1
     container_name: genochain-kubo
     restart: unless-stopped
+    # Run directly as Kubo's pre-provisioned non-root ipfs:users (1000:100) so start_ipfs
+    # skips root chown/su-exec and operates cleanly under cap_drop: [ALL].
+    user: "1000:100"
     environment:
       - IPFS_PROFILE=server
       - LIBP2P_FORCE_PNET=1
@@ -196,6 +199,7 @@ services:
     environment:
       - GATEWAY_DOMAIN=${GATEWAY_DOMAIN:-ipfs.genochain.example.com}
       - ACME_EMAIL=${ACME_EMAIL:-ops@genochain.example.com}
+      - METRICS_SCRAPER_CIDR=${METRICS_SCRAPER_CIDR:-127.0.0.1/32}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data

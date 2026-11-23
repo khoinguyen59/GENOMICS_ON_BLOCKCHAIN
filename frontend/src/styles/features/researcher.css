@@ -801,6 +801,9 @@
   border-color: var(--accent-cyan);
   background: var(--bg-input-focus);
   box-shadow: 0 0 16px rgba(56, 189, 248, 0.2);
+}
+
+.opensea-search-field-toolbar:focus:not(:focus-visible) {
   outline: none;
 }
 
@@ -861,6 +864,10 @@
 
 .opensea-sort-select:focus {
   border-color: var(--accent-cyan);
+  box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.2);
+}
+
+.opensea-sort-select:focus:not(:focus-visible) {
   outline: none;
 }
 
@@ -1113,6 +1120,10 @@
 
 .price-num-input:focus {
   border-color: var(--accent-amber);
+  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.2);
+}
+
+.price-num-input:focus:not(:focus-visible) {
   outline: none;
 }
 

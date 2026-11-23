@@ -526,8 +526,8 @@ async def run_audit():
         if not wcag_live_checks["htmlLangSync"]["passed"]:
             print(f"    [FAIL LIVE WCAG] Dynamic <html lang> sync failed: {wcag_live_checks['htmlLangSync']}")
             blocking_failures += 1
-        if search_clear_diag["rendered"] and not search_clear_diag["meets24px"]:
-            print(f"    [FAIL LIVE WCAG] .os2-search-clear < 24x24px: {search_clear_diag}")
+        if not (search_clear_diag["rendered"] and search_clear_diag["meets24px"]):
+            print(f"    [FAIL LIVE WCAG] .os2-search-clear missing or < 24x24px: {search_clear_diag}")
             blocking_failures += 1
         if not focus_visible_diag.get("passed"):
             print(f"    [FAIL LIVE WCAG] Keyboard :focus-visible outline check failed: {focus_visible_diag}")

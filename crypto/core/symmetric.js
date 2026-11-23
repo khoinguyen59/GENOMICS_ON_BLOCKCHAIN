@@ -88,7 +88,15 @@ export function packCiphertextPayload(iv, ciphertext) {
   if (!(ivBytes instanceof Uint8Array) || ivBytes.length !== 12) {
     throw new Error("Invalid AES-GCM IV: expected a 12-byte Uint8Array or 24-character hex string.");
   }
-  const ctBytes = ciphertext instanceof Uint8Array ? ciphertext : new Uint8Array(ciphertext);
+  if (!(ciphertext instanceof Uint8Array || ciphertext instanceof ArrayBuffer || ArrayBuffer.isView(ciphertext))) {
+    throw new Error("Invalid ciphertext: expected a Uint8Array, ArrayBuffer, or TypedArray.");
+  }
+  const ctBytes =
+    ciphertext instanceof Uint8Array
+      ? ciphertext
+      : ciphertext instanceof ArrayBuffer
+      ? new Uint8Array(ciphertext)
+      : new Uint8Array(ciphertext.buffer, ciphertext.byteOffset, ciphertext.byteLength);
   const payload = new Uint8Array(ivBytes.length + ctBytes.length);
   payload.set(ivBytes, 0);
   payload.set(ctBytes, ivBytes.length);
@@ -272,6 +280,9 @@ export async function decryptGenomicData(ciphertext, iv, key, asString = true) {
   let activeIv = iv;
   if (typeof iv === "string") {
     activeIv = parseIvHex(iv);
+  }
+  if (!(activeIv instanceof Uint8Array) || activeIv.length !== 12) {
+    throw new Error("Invalid AES-GCM IV: expected a 12-byte Uint8Array or 24-character hex string.");
   }
 
   const decryptedBuffer = await cryptoObj.subtle.decrypt(

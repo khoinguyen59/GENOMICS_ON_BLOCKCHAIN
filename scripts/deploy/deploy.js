@@ -1087,7 +1087,9 @@ async function main() {
   console.log("==================================================");
 }
 
-main().catch((error) => {
+try {
+  await main();
+} catch (error) {
   console.error("Deployment failed:", error);
   process.exit(1);
-});
+}

@@ -1286,10 +1286,12 @@ class PublicMetadataCatalogIndex:
         registry_adapter,
         refresh_ttl_sec: float = 10.0,
         min_forced_refresh_sec: float = 2.0,
+        provenance_lookup=None,
     ):
         self._registry = registry_adapter
         self._refresh_ttl = max(1.0, float(refresh_ttl_sec))
         self._min_forced_refresh = max(0.25, float(min_forced_refresh_sec))
+        self._provenance_lookup = provenance_lookup
         self._lock = threading.Lock()
         self._public_metadata_mhs: set[str] = set()
         self._private_mhs: set[str] = set()
@@ -1352,11 +1354,54 @@ class PublicMetadataCatalogIndex:
             wait_ev.wait(timeout=15.0)
             return
 
-        # Execute RPC scan strictly OUTSIDE self._lock so cached readers & workers are never blocked
-        datasets = None
+        # Execute RPC scan & provenance checks strictly OUTSIDE self._lock so cached readers & workers are never blocked
+        computed_snapshot = None
         rpc_ok = False
         try:
             datasets = getter() or []
+            sorted_ds = sorted(
+                [ds for ds in datasets if isinstance(ds, dict)],
+                key=lambda d: int(d.get("dataId", 0)),
+            )
+            private_mhs: set[str] = set()
+            active_meta_mhs: set[str] = set()
+            first_reg: dict[str, tuple[int, str]] = {}
+            known_owners: set[str] = set()
+            for ds in sorted_ds:
+                d_id = int(ds.get("dataId", 0))
+                owner_l = str(ds.get("currentOwner") or "").strip().lower()
+                if owner_l:
+                    known_owners.add(owner_l)
+                raw_mh = _try_canonical_multihash(ds.get("rawCid"))
+                sum_mh = _try_canonical_multihash(ds.get("summaryCid"))
+                meta_mh = _try_canonical_multihash(ds.get("metadataCid"))
+                if raw_mh:
+                    private_mhs.add(raw_mh)
+                    if raw_mh not in first_reg:
+                        first_reg[raw_mh] = (d_id, owner_l)
+                if sum_mh:
+                    private_mhs.add(sum_mh)
+                    if sum_mh not in first_reg:
+                        first_reg[sum_mh] = (d_id, owner_l)
+                if meta_mh:
+                    if meta_mh not in first_reg:
+                        first_reg[meta_mh] = (d_id, owner_l)
+                    if int(ds.get("status", -1)) == 0:
+                        allow_public_meta = True
+                        if callable(self._provenance_lookup):
+                            try:
+                                prov_up = self._provenance_lookup(meta_mh)
+                            except Exception:
+                                prov_up = None
+                            if prov_up:
+                                prov_l = str(prov_up).strip().lower()
+                                if owner_l != prov_l:
+                                    orig_creator = _resolve_item_original_creator(self._registry, ds)
+                                    if not orig_creator or orig_creator != prov_l:
+                                        allow_public_meta = False
+                        if allow_public_meta:
+                            active_meta_mhs.add(meta_mh)
+            computed_snapshot = (private_mhs, active_meta_mhs - private_mhs, first_reg, known_owners)
             rpc_ok = True
         except Exception:
             rpc_ok = False
@@ -1364,40 +1409,13 @@ class PublicMetadataCatalogIndex:
             finish_mono = time.monotonic()
             with self._lock:
                 self.rpc_refresh_count += 1
-                if rpc_ok and datasets is not None:
-                    sorted_ds = sorted(
-                        [ds for ds in datasets if isinstance(ds, dict)],
-                        key=lambda d: int(d.get("dataId", 0)),
-                    )
-                    private_mhs: set[str] = set()
-                    active_meta_mhs: set[str] = set()
-                    first_reg: dict[str, tuple[int, str]] = {}
-                    known_owners: set[str] = set()
-                    for ds in sorted_ds:
-                        d_id = int(ds.get("dataId", 0))
-                        owner_l = str(ds.get("currentOwner") or "").strip().lower()
-                        if owner_l:
-                            known_owners.add(owner_l)
-                        raw_mh = _try_canonical_multihash(ds.get("rawCid"))
-                        sum_mh = _try_canonical_multihash(ds.get("summaryCid"))
-                        meta_mh = _try_canonical_multihash(ds.get("metadataCid"))
-                        if raw_mh:
-                            private_mhs.add(raw_mh)
-                            if raw_mh not in first_reg:
-                                first_reg[raw_mh] = (d_id, owner_l)
-                        if sum_mh:
-                            private_mhs.add(sum_mh)
-                            if sum_mh not in first_reg:
-                                first_reg[sum_mh] = (d_id, owner_l)
-                        if meta_mh:
-                            if meta_mh not in first_reg:
-                                first_reg[meta_mh] = (d_id, owner_l)
-                            if int(ds.get("status", -1)) == 0:
-                                active_meta_mhs.add(meta_mh)
-                    self._private_mhs = private_mhs
-                    self._public_metadata_mhs = active_meta_mhs - private_mhs
-                    self._first_registrant_by_mh = first_reg
-                    self._known_owners = known_owners
+                if rpc_ok and computed_snapshot is not None:
+                    (
+                        self._private_mhs,
+                        self._public_metadata_mhs,
+                        self._first_registrant_by_mh,
+                        self._known_owners,
+                    ) = computed_snapshot
                     self._last_refresh_mono = finish_mono
                     self._last_failed_refresh_mono = 0.0
                 else:
@@ -2042,10 +2060,16 @@ class GdprErasureReconciler:
                 if not mh:
                     continue
                 prov_uploader = prov_map.get(mh)
-                is_provenance_owner = bool(prov_uploader) and (
-                    other_owner == prov_uploader or (bool(other_creator) and other_creator == prov_uploader)
-                )
-                if is_same_owner or is_earlier_dataset or is_provenance_owner:
+                if prov_uploader:
+                    # Provenance-authoritative refcount: only active datasets owned or originally
+                    # created by the authenticated uploader keep `mh` referenced. An earlier
+                    # front-runner dataset (ds_id < excluding_data_id) can NEVER pin-lock GDPR erasure.
+                    is_provenance_owner = (
+                        other_owner == prov_uploader or (bool(other_creator) and other_creator == prov_uploader)
+                    )
+                    if is_provenance_owner:
+                        referenced_mhs.add(mh)
+                elif is_same_owner or is_earlier_dataset:
                     referenced_mhs.add(mh)
         return referenced_mhs
 
@@ -2363,11 +2387,6 @@ def create_gateway_server(
     nonces = nonce_store or NonceStore(db_path=effective_db)
     clock = now_fn or time.time
     allowed_cors_origins = [o.strip() for o in str(cors_origin or "").split(",") if o.strip()]
-    catalog_index = PublicMetadataCatalogIndex(
-        registry_adapter,
-        refresh_ttl_sec=catalog_refresh_sec,
-        min_forced_refresh_sec=min_forced_refresh_sec,
-    )
     upload_limiter = UploadRateLimiter(
         max_uploads_per_hour=max_uploads_per_hour,
         max_bytes_per_hour=max_upload_bytes_per_hour,
@@ -2375,6 +2394,12 @@ def create_gateway_server(
         max_total_pinned_bytes=max_total_pinned_bytes,
         db_path=effective_db,
         kubo_adapter=kubo_adapter,
+    )
+    catalog_index = PublicMetadataCatalogIndex(
+        registry_adapter,
+        refresh_ttl_sec=catalog_refresh_sec,
+        min_forced_refresh_sec=min_forced_refresh_sec,
+        provenance_lookup=upload_limiter.get_upload_provenance,
     )
     metrics_lock = threading.Lock()
     metrics = {

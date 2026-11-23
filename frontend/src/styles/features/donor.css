@@ -191,10 +191,15 @@
 .field-input:focus,
 .field-select:focus,
 .terminal-input:focus {
-  outline: none;
   border-color: var(--accent-cyan);
   background: var(--bg-input-focus);
   box-shadow: 0 0 0 3px var(--accent-cyan-glow);
+}
+
+.field-input:focus:not(:focus-visible),
+.field-select:focus:not(:focus-visible),
+.terminal-input:focus:not(:focus-visible) {
+  outline: none;
 }
 
 [data-theme="light"] .field-input,
@@ -237,10 +242,13 @@ input.terminal-input[id*="salt"] {
 }
 
 .field-textarea:focus {
-  outline: none;
   border-color: rgba(56, 189, 248, 0.6);
   background: var(--bg-input-focus);
   box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.15);
+}
+
+.field-textarea:focus:not(:focus-visible) {
+  outline: none;
 }
 
 /* ─── Mint Action Master Button ─── */

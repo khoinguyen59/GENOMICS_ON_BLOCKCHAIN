@@ -56,6 +56,59 @@ console.log('\n' + '-'.repeat(80));
 console.log('MODULE 1: Accessibility (A11y), WCAG 2.2 AA & ARIA Semantics (axe-core / W3C v.Nu)');
 console.log('-'.repeat(80));
 
+// Brace- and quote-aware JSX tag scanner (prevents naive [^>]* regex from breaking on arrow functions `=>` in props)
+function scanJsxTags(content, tagName) {
+  const results = [];
+  const prefix = `<${tagName}`;
+  let idx = 0;
+  while ((idx = content.indexOf(prefix, idx)) !== -1) {
+    const nextCh = content[idx + prefix.length];
+    if (nextCh && /[A-Za-z0-9_-]/.test(nextCh)) {
+      idx += prefix.length;
+      continue;
+    }
+    let i = idx + prefix.length;
+    let braceDepth = 0;
+    let quote = null;
+    while (i < content.length) {
+      const ch = content[i];
+      if (quote) {
+        if (ch === '\\') {
+          i += 2;
+          continue;
+        }
+        if (ch === quote) quote = null;
+      } else {
+        if (ch === '"' || ch === "'" || ch === '`') {
+          quote = ch;
+        } else if (ch === '{') {
+          braceDepth++;
+        } else if (ch === '}') {
+          braceDepth = Math.max(0, braceDepth - 1);
+        } else if (ch === '>' && braceDepth === 0) {
+          break;
+        }
+      }
+      i++;
+    }
+    if (i >= content.length) break;
+    const rawOpen = content.slice(idx, i + 1);
+    const selfClosing = /\/\s*>$/.test(rawOpen);
+    const attrs = content.slice(idx + prefix.length, selfClosing ? i - 1 : i);
+    let inner = '';
+    if (!selfClosing) {
+      const closeTag = `</${tagName}>`;
+      const closeIdx = content.indexOf(closeTag, i + 1);
+      if (closeIdx !== -1) {
+        inner = content.slice(i + 1, closeIdx);
+      }
+    }
+    results.push({ rawOpen, attrs, inner, selfClosing });
+    idx = i + 1;
+  }
+  return results;
+}
+
 // Test 1: Accessible button labels, WCAG 2.2 SC 2.4.7 :focus-visible rings & dynamic <html lang> sync
 const baseCssText = fs.readFileSync(path.join(srcDir, 'styles', 'base.css'), 'utf8');
 const langCtxText = fs.readFileSync(path.join(srcDir, 'context', 'LanguageContext.jsx'), 'utf8');
@@ -64,12 +117,13 @@ let iconOnlyButtonsWithoutLabel = 0;
 let totalButtons = 0;
 for (const file of jsxFiles.filter(f => f.endsWith('.jsx'))) {
   const content = fs.readFileSync(file, 'utf8');
-  for (const m of content.matchAll(/<button\b([^>]*)>([\s\S]*?)<\/button>/g)) {
+  for (const btn of scanJsxTags(content, 'button')) {
     totalButtons++;
-    const attrs = m[1] || '';
-    const inner = (m[2] || '').trim();
-    const hasAccessibleAttr = /\baria-label\s*=/.test(attrs) || /\btitle\s*=/.test(attrs) || /\baria-labelledby\s*=/.test(attrs);
-    const innerNoIcons = inner.replace(/<[A-Z][A-Za-z0-9_]*[^>]*\/>/g, '');
+    const hasAccessibleAttr =
+      /\baria-label\s*=/.test(btn.attrs) ||
+      /\btitle\s*=/.test(btn.attrs) ||
+      /\baria-labelledby\s*=/.test(btn.attrs);
+    const innerNoIcons = btn.inner.replace(/<[A-Z][A-Za-z0-9_]*[^>]*\/>/g, '');
     const innerText = innerNoIcons.replace(/<[^>]+>/g, '').trim();
     if (!hasAccessibleAttr && innerText.length === 0) {
       iconOnlyButtonsWithoutLabel++;
@@ -89,13 +143,16 @@ assert(
 // Test 2: Input fields have accompanying labels or aria-label attributes
 let unlabelledInputs = 0;
 let totalInputs = 0;
-for (const file of jsxFiles) {
+for (const file of jsxFiles.filter(f => f.endsWith('.jsx'))) {
   const content = fs.readFileSync(file, 'utf8');
-  // Match complete input tags across lines
-  const inputMatches = content.match(/<input\b[^>]*>/gs) || [];
-  totalInputs += inputMatches.length;
-  for (const inp of inputMatches) {
-    const hasLabel = inp.includes('aria-label') || inp.includes('placeholder') || inp.includes('id=') || inp.includes('title');
+  for (const inp of scanJsxTags(content, 'input')) {
+    totalInputs++;
+    const hasLabel =
+      /\baria-label\s*=/.test(inp.attrs) ||
+      /\baria-labelledby\s*=/.test(inp.attrs) ||
+      /\bplaceholder\s*=/.test(inp.attrs) ||
+      /\bid\s*=/.test(inp.attrs) ||
+      /\btitle\s*=/.test(inp.attrs);
     if (!hasLabel) unlabelledInputs++;
   }
 }
@@ -245,18 +302,20 @@ assert(
     : `Unsafe DOM injection sink detected in: ${unsafeSinkHits.join(', ')}`
 );
 
-// Test 12: Memory Leak Cleanup: every component registering addEventListener/setInterval implements teardown
+// Test 12: Memory Leak Cleanup: every component registering addEventListener/setInterval implements symmetric teardown
 let listenerFiles = 0;
 let listenerFilesWithCleanup = 0;
 for (const file of jsxFiles) {
   const content = fs.readFileSync(file, 'utf8');
-  const registersListener = /\b(?:addEventListener|setInterval)\s*\(/.test(content);
-  if (registersListener) {
+  const registersListener = /\baddEventListener\s*\(/.test(content);
+  const registersInterval = /\bsetInterval\s*\(/.test(content);
+  if (registersListener || registersInterval) {
     listenerFiles++;
-    const hasTeardown =
-      content.includes('return () =>') &&
-      (/\bremoveEventListener\s*\(/.test(content) || /\bclearInterval\s*\(/.test(content));
-    if (hasTeardown) listenerFilesWithCleanup++;
+    const hasListenerTeardown = !registersListener || /\bremoveEventListener\s*\(/.test(content);
+    const hasIntervalTeardown = !registersInterval || /\bclearInterval\s*\(/.test(content);
+    if (content.includes('return () =>') && hasListenerTeardown && hasIntervalTeardown) {
+      listenerFilesWithCleanup++;
+    }
   }
 }
 assert(

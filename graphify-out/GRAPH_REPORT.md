@@ -1,12 +1,12 @@
 # Graph Report - BLOCKCHAIN (Synchronized 2026-11-24)
 
 ## Graph Freshness
-- **Built from code/docs commit:** `5805a41` (`5805a41e7ece45fb4e3d5a76ed6850659bdebd1b`) — committed in `HEAD` immediately following `5805a41` (`git rev-parse --short HEAD~1` == `5805a41`).
+- **Built from code/docs commit:** `3f6af62` (`3f6af62311a8da329ac07dceec66e7d04f8f0992`) — committed in `HEAD` immediately following `3f6af62` (`git rev-parse --short HEAD~1` == `3f6af62`).
 - **Generation method:** Deterministic live source-tree AST/corpus synchronization on git-tracked files (the `graphify` CLI binary is not installed in this local environment; `graph.json` was not regenerated via graphify CLI).
 
 ## Corpus Check
-- **Tracked repository files:** 322 total (270 text/code/config/docs/genomic files, ~576,766 words, including canonical `docs/` and `graphify-out/GRAPH_REPORT.md`)
-- **Extracted top-level code symbols (Solidity contracts/interfaces/libraries, exported JS/JSX declarations, module-level Python classes/defs):** 412
+- **Tracked repository files:** 322 total (276 text/code/config/docs/genomic files, ~578,266 words, including canonical `docs/` and `graphify-out/GRAPH_REPORT.md`)
+- **Extracted top-level code symbols (Solidity contracts/interfaces/libraries, exported JS/JSX declarations, module-level Python classes/defs):** 421
 - **Solidity source files:** 16 (7 production contracts + 4 interfaces + 2 storage bases + 3 test mocks; `contracts/` untouched in Phase 5)
 - **Automated Mocha test suites:** 33 files (494 passing, 0 failing)
 - **Frontend JS/JSX modules:** 43 files (`frontend/src/`)
@@ -34,21 +34,21 @@
 - `ipfs/multihash.js` (byte-exact Kubo 0.32.1 CIDv0 & CIDv1), `ipfs/kubo_client.js` (URL-parsed local Kubo guards + compile-time `__GENOCHAIN_NON_LOCAL_CHAIN__` stripping), `ipfs/pinata_client.js`, `ipfs/pinata_uploader.js`, `ipfs/phenopacket_builder.js` (GA4GH Phenopackets v2, strict INV-11 benign clamp)
 
 ### 4. Private IPFS VPS, SIWE Gateway & Dispatcher (`deploy/`, `scripts/demo/`)
-- `deploy/ipfs_access_gateway.py` (SIWE EIP-191 auth, persistent SQLite WAL `NonceStore`, `UploadRateLimiter` with 256 KiB epoch-batched chunked quota checks, post-anchor on-chain `first_registrant` provenance backfill & `403` cross-owner re-upload rejection (`REV-01`), provenance/ownership-gated `private_mhs` anti-censorship (`REV-02`), owner-scoped non-revoked orphan-pin GC with TOCTOU timestamp guards (`REV-03`/`L3-L2`), durable `_gc_pending` & post-GC `pending_provenance_purges` (`L3-L1`/`L3-02`), `525 MiB` `GNC2`-framed / `500 MiB` plaintext streaming cap, `secrets.token_hex(16)` multipart boundaries, `/healthz`, `/metrics`)
+- `deploy/ipfs_access_gateway.py` (SIWE EIP-191 auth, persistent SQLite WAL `NonceStore`, `UploadRateLimiter` with 256 KiB epoch-batched chunked quota checks & fail-closed RPC provenance lookup, two-phase `add(pin=False) -> verify -> pin_cid` upload staging eliminating untracked Kubo pins on `502`/`403`, post-anchor on-chain `first_registrant` provenance backfill & `403` cross-owner re-upload rejection (`REV-01`), provenance/ownership-gated `private_mhs` anti-censorship (`REV-02`), owner-scoped non-revoked orphan-pin GC with pre/post-unpin TOCTOU concurrent re-upload recovery (`REV-03`/`L3-L2`), durable `_gc_pending` & post-GC `pending_provenance_purges` preserving legitimate re-uploads (`L3-L1`/`L3-02`), `525 MiB` `GNC2`-framed / `500 MiB` plaintext streaming cap, `secrets.token_hex(16)` multipart boundaries, `/healthz`, `/metrics`)
 - `scripts/demo/capsule_dispatcher.py` (watch-mode RSA-OAEP capsule delivery, full `LOCAL_VAULT_DIR` defaults & hybrid KMS+local summary envelope support, `/healthz`, `/metrics`)
 - `deploy/kubo-private-init.sh`, `deploy/generate_swarm_key.py`, `deploy/docker-compose.vps.yml` (`4/4` services `cap_drop: [ALL]` + `no-new-privileges:true`, `kubo` non-root `user: "1000:100"`, `caddy` `METRICS_SCRAPER_CIDR` passthrough), `deploy/Caddyfile.example` (loopback `/metrics` guard, `525MiB` body cap), `deploy/Dockerfile.gateway`, `deploy/Dockerfile.dispatcher`, `deploy/DEPLOYMENT_RUNBOOK.md`
 
 ### 5. React 18 + Vite 8 Multi-Role Web3 Frontend (`frontend/src/`)
-- **Context & Hooks:** `Web3Context.jsx`, `DatasetContext.jsx`, `LanguageContext.jsx` (dynamic `<html lang>` sync), `useGenomicCatalog.js`, `useGenomicFilters.js`, `useDatasetDecryption.js` (pure React state updater with ref-tracked RAM zero-fill `decryptedPdfBytes.fill(0)` on clear), `useModalFocusTrap.js` (LIFO stacked-modal + parent-trap focus restoration)
+- **Context & Hooks:** `Web3Context.jsx`, `DatasetContext.jsx`, `LanguageContext.jsx` (dynamic `<html lang>` sync), `useGenomicCatalog.js`, `useGenomicFilters.js`, `useDatasetDecryption.js` (pure React state updater with ref-tracked RAM zero-fill `Uint8Array.fill(0)` on clear, tamper error, and unmount), `useModalFocusTrap.js` (LIFO stacked-modal + parent-trap focus restoration)
 - **Synced ABIs (5/5):** `GenomicTokenABI.json`, `GenomicNFTABI.json`, `GenomicsRegistryABI.json`, `GenomicZkVerifierABI.json`, `GenomicTimelockABI.json`
 - **Bilingual i18n & Modular Icons:** `en.js` / `vi.js` (702/702 leaf keys, 0 missing static `t()` keys, all 17 interactive `aria-label`/`title` attributes localized), 70 modular SVG icons (`bio=22, crypto=14, market=34`)
 - **WCAG 2.2 AA & CSP:** 29/29 offline & 34/34 online `axe-core` scenarios (`docs/reports/ui_ux_axe_report.json`) with 0 blocking violations, 0px overflow, `--focus-ring-color` (`#005fcc` light / `#38bdf8` dark) `:focus-visible` rings, `/` modal-overlay hotkey guard, dynamic `<html lang>`, live `brandFontSize: "19px"`, and `.os2-search-clear >= 24x24px`; Sepolia production build (`VITE_CHAIN_ID=11155111`) strips 100% of loopback origins from `index.html` and all first-party `assets/*.js` chunks (`231` Vite modules).
 
 ### 6. CI, Deployment & Adversarial Audit Tooling (`.github/workflows/`, `scripts/`)
 - `scripts/deploy/deploy.js` (`parseEnvFlag("ENABLE_TIMELOCK")`, resolved output path logging) & `scripts/deploy/timelock_accept_ownership.js` (`delay = max(handoffDelay, minDelay)`)
-- Hardened 13 legacy `scripts/audit/*.mjs` adversarial scripts (strict non-zero exits, zero fake assertions), `swarm_baseline_gate.sh` (`13/13` PASS), `ui_ux_adversarial_suite.mjs` (`15/15` PASS incl. `new Function` & explicit label checks), `parse_slither.py` (POSIX path normalization), `audit_ui_ux_axe.py` (`.os2-brand-wordmark`), `.github/workflows/{ci,security_ci}.yml`.
+- Hardened and live-verified all `13/13` legacy `scripts/audit/*.mjs` adversarial scripts (strict non-zero exits, zero fake assertions, aligned with stronger protocol invariants), `swarm_baseline_gate.sh` (`13/13` PASS), `ui_ux_adversarial_suite.mjs` (`15/15` PASS incl. `new Function` & explicit label checks), `parse_slither.py` (POSIX path normalization), `audit_ui_ux_axe.py` (`.os2-brand-wordmark`), `.github/workflows/{ci,security_ci}.yml`.
 
-## Verification Status Snapshot (Code Commit `5805a41`)
+## Verification Status Snapshot (Code Commit `3f6af62`)
 - **18/18 Empirical Verification Gates:** PASS
 - **Hardhat Mocha Suite:** 494 passing / 0 failing (33 files, incl. 22 tests in `RemediationRegression.test.js` covering `R18-01..06k` & `FIX-70c..f`)
 - **Independent Stress, Diverse Datasets & Chunked Fuzz:** 24/24 PASS, 14/14 PASS & 4/4 PASS

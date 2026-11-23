@@ -311,23 +311,27 @@ export function buildPhenopacket({
       },
     },
     ...(measurements.length > 0 ? { measurements } : {}),
-    phenotypicFeatures: [
-      ...phenotypes.map((p) => ({
+    phenotypicFeatures: (() => {
+      const ancestryCurie = resolveHancestroCurie(ancestry);
+      const features = phenotypes.map((p) => ({
         type: {
           id: p.id,
           label: p.label,
         },
         excluded: false,
-      })),
-      // Ancestry modeled as a standard population descriptor feature
-      {
-        type: {
-          id: resolveHancestroCurie(ancestry),
-          label: ancestry,
-        },
-        excluded: false,
-      },
-    ],
+      }));
+      if (!features.some((f) => f.type?.id === ancestryCurie)) {
+        // Ancestry modeled as a standard population descriptor feature
+        features.push({
+          type: {
+            id: ancestryCurie,
+            label: ancestry,
+          },
+          excluded: false,
+        });
+      }
+      return features;
+    })(),
     diseases: [
       {
         term: {

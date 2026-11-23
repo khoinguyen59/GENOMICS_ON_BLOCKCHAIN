@@ -25,7 +25,19 @@ import {
   uploadEncryptedSummaryReport,
 } from "../ipfs/pinata_uploader.js";
 import { buildPhenopacket, validatePhenopacketSchema } from "../ipfs/phenopacket_builder.js";
-import { sanitizeGenomicMetadata, sanitizeMetadataTree } from "../frontend/src/utils/asyncResilience.js";
+import {
+  computeIpfsCidV0,
+  computeIpfsCidV1,
+  MULTIHASH_SHA2_256,
+  MULTIHASH_SHA2_512,
+  MULTIHASH_BLAKE2B_256,
+} from "../ipfs/multihash.js";
+import {
+  sanitizeGenomicMetadata,
+  sanitizeMetadataTree,
+  formatConfiguredChainText,
+} from "../frontend/src/utils/asyncResilience.js";
+import { en as enLocale, vi as viLocale } from "../frontend/src/i18n/translations.js";
 import {
   runLocalGroth16Ceremony,
   generateAuthenticGroth16Proof,
@@ -1204,5 +1216,422 @@ print("FIX70F_REVIEW_PY_OK")
     expect(adminSrc).to.include("trimmedZk === ethers.ZeroAddress");
     const dispSrc = fs.readFileSync(path.resolve("scripts/demo/capsule_dispatcher.py"), "utf8");
     expect(dispSrc).to.include('"chainId": live_chain_id');
+  });
+
+  // =========================================================================
+  // R18-06a: Multi-Agent Randomized Escrow State-Machine Invariant Fuzzer (60 ops)
+  // =========================================================================
+  it("R18-06a: 60-step multi-agent escrow invariant fuzzer enforces exact $GENO conservation, zero dust loss, and zero trapped funds", async function () {
+    this.timeout(90000);
+    const totalSupply = await token.totalSupply();
+    const actors = [owner, seller, buyer, buyer2, lab1, lab2, worker, stranger];
+    // Register 3 datasets owned by seller
+    for (let d = 1; d <= 3; d++) {
+      const h = ethers.keccak256(ethers.toUtf8Bytes(`fuzz-ds-${d}`));
+      const royalty = BigInt(d * 1000); // 10%, 20%, 30%
+      await (await registry.connect(seller).registerGenomicData(h, CID_A, CID_B, CID_C, URI_A, PRICE, DURATION, royalty)).wait();
+    }
+    // Transfer dataset #2 NFT to lab1 so secondary royalty split is exercised too
+    await (await nft.connect(seller).transferFrom(seller.address, lab1.address, 2n)).wait();
+    await (await token.connect(owner).transfer(stranger.address, ethers.parseEther("5000"))).wait();
+    await (await token.connect(stranger).approve(registry.target, ethers.MaxUint256)).wait();
+
+    const buyers = [buyer, buyer2, stranger];
+    const ownerFor = (d) => (d === 2 ? lab1 : seller);
+    const capCache = new Map();
+    for (const b of buyers) {
+      const { capsule } = await makeRealCapsule(b, seller.address);
+      capCache.set(b.address, capsule);
+    }
+
+    async function assertSupplyConservation() {
+      let sum = await token.balanceOf(registry.target);
+      sum += await token.balanceOf(zkVerifier.target);
+      for (const a of actors) {
+        sum += await token.balanceOf(a.address);
+      }
+      expect(sum, "$GENO conservation violated!").to.equal(totalSupply);
+    }
+
+    // Deterministic PRNG (LCG) for reproducible 60-step multi-agent fuzzing
+    let seed = 0x5eed1234n;
+    const nextRand = (mod) => {
+      seed = (seed * 1664525n + 1013904223n) & 0xffffffffn;
+      return Number(seed % BigInt(mod));
+    };
+
+    const activePairs = new Set();
+    let executedOps = 0;
+
+    for (let step = 0; step < 60; step++) {
+      const dId = nextRand(3) + 1;
+      const b = buyers[nextRand(buyers.length)];
+      const dsOwner = ownerFor(dId);
+      const key = `${dId}:${b.address}`;
+      const op = nextRand(9);
+
+      try {
+        if (op === 0) {
+          await (await registry.connect(b).grantAccessWithEscrow(BigInt(dId), DISPUTE_WINDOW)).wait();
+          activePairs.add(key);
+        } else if (op === 1) {
+          await (await registry.connect(dsOwner).storeTransformedCapsule(BigInt(dId), b.address, capCache.get(b.address))).wait();
+        } else if (op === 2) {
+          await (await registry.connect(b).setManualEscrowRelease(BigInt(dId), nextRand(2) === 0)).wait();
+        } else if (op === 3) {
+          await (await registry.connect(dsOwner).updateDataStatus(BigInt(dId), nextRand(2))).wait(); // Active/Paused
+        } else if (op === 4) {
+          await (await registry.connect(b).confirmCapsuleAndReleaseEscrow(BigInt(dId))).wait();
+        } else if (op === 5) {
+          await (await registry.connect(b).disputeCapsule(BigInt(dId))).wait();
+        } else if (op === 6) {
+          await (await registry.connect(owner).resolveEscrowDispute(BigInt(dId), b.address, nextRand(2) === 0)).wait();
+        } else if (op === 7) {
+          await (await registry.connect(b).claimEscrowRefund(BigInt(dId))).wait();
+        } else {
+          await advanceTime(3600 * (nextRand(12) + 1));
+        }
+        executedOps++;
+      } catch {
+        // Expected reverts on invalid state transitions; state MUST remain consistent
+      }
+      await assertSupplyConservation();
+    }
+    expect(executedOps).to.be.gte(15);
+
+    // Ensure every open escrow can cleanly settle to zero locked balance (no trapped funds)
+    for (let d = 1; d <= 3; d++) {
+      const ds = await registry.getGenomicData(BigInt(d));
+      if (Number(ds.status) === 1) {
+        await (await registry.connect(ownerFor(d)).updateDataStatus(BigInt(d), 0)).wait();
+      }
+    }
+    await advanceTime(35 * 24 * 3600);
+    for (const pair of activePairs) {
+      const [dStr, bAddr] = pair.split(":");
+      const dId = BigInt(dStr);
+      const bSigner = buyers.find((x) => x.address === bAddr);
+      const dep = await registry.escrowDeposits(dId, bAddr);
+      if (dep.amount > 0n && !dep.released && !dep.refunded) {
+        const isDisp = await registry.escrowDisputed(dId, bAddr);
+        if (isDisp) {
+          await (await registry.connect(bSigner).claimDisputeTimeoutRefund(dId)).wait();
+        } else if (dep.capsuleDelivered) {
+          await (await registry.connect(ownerFor(Number(dId))).releaseEscrow(dId, bAddr)).wait();
+        } else {
+          await (await registry.connect(bSigner).claimEscrowRefund(dId)).wait();
+        }
+      }
+    }
+    expect(await token.balanceOf(registry.target), "Trapped funds remained in registry escrow!").to.equal(0n);
+    await assertSupplyConservation();
+  });
+
+  // =========================================================================
+  // R18-06b: Pause-Pulsing Anti-Griefing & Post-Release Multi-Device RSA Key Rotation
+  // =========================================================================
+  it("R18-06b: enforces 15m anti-pause-pulsing cutoff, permits fair settlement while Paused/Revoked, and preserves expiresAt on post-release RSA capsule rotation", async function () {
+    const hash = ethers.keccak256(ethers.toUtf8Bytes("r18-06b-pause-rotation"));
+    await (await registry.connect(seller).registerGenomicData(hash, CID_A, CID_B, CID_C, URI_A, PRICE, DURATION, 1000)).wait();
+    await (await registry.connect(buyer).grantAccessWithEscrow(1n, DISPUTE_WINDOW)).wait();
+
+    const { capsule: cap1 } = await makeRealCapsule(buyer, seller.address, "11".repeat(32));
+    await (await registry.connect(seller).storeTransformedCapsule(1n, buyer.address, cap1)).wait();
+
+    // Pause for 5 minutes (< 15m grace) and unpause 3 times rapidly; verify buyer still cannot abuse refund mid-window
+    for (let i = 0; i < 3; i++) {
+      await (await registry.connect(seller).updateDataStatus(1n, 1)).wait();
+      await advanceTime(300);
+      await expect(registry.connect(buyer).claimEscrowRefund(1n)).to.be.revertedWithCustomError(
+        registry,
+        "CapsuleAlreadyDelivered"
+      );
+      await (await registry.connect(seller).updateDataStatus(1n, 0)).wait();
+    }
+
+    // Even if seller pauses right after delivery, buyer can still honestly confirm & release escrow
+    await (await registry.connect(seller).updateDataStatus(1n, 1)).wait();
+    const balBefore = await token.balanceOf(seller.address);
+    await (await registry.connect(buyer).confirmCapsuleAndReleaseEscrow(1n)).wait();
+    expect(await token.balanceOf(seller.address)).to.equal(balBefore + PRICE);
+
+    // Unpause dataset & verify post-release RSA key rotation:
+    // (a) Without rotating buyer's on-chain public key, re-delivery reverts CapsuleAlreadyDelivered;
+    // (b) After buyer registers a new RSA public key, re-delivery succeeds WITHOUT resetting expiresAt!
+    await (await registry.connect(seller).updateDataStatus(1n, 0)).wait();
+    const grantBefore = await registry.accessGrants(1n, buyer.address);
+    await advanceTime(3600);
+    const { pubJwk: pubJwk2, capsule: cap2 } = await makeRealCapsule(buyer, seller.address, "22".repeat(32));
+    await expect(
+      registry.connect(seller).storeTransformedCapsule(1n, buyer.address, cap2)
+    ).to.be.revertedWithCustomError(registry, "CapsuleAlreadyDelivered");
+    await (await registry.connect(buyer).registerResearcherPublicKey(JSON.stringify(pubJwk2))).wait();
+    await (await registry.connect(seller).storeTransformedCapsule(1n, buyer.address, cap2)).wait();
+    const grantAfter = await registry.accessGrants(1n, buyer.address);
+    expect(grantAfter.expiresAt).to.equal(grantBefore.expiresAt);
+    expect(await registry.connect(buyer).getTransformedCapsule(1n)).to.equal(cap2);
+  });
+
+  // =========================================================================
+  // R18-06c: SWAR 32-Byte validateCapsule Edge Cases & Full CIDv0/CIDv1 Matrix
+  // =========================================================================
+  it("R18-06c: SWAR validateCapsule rejects escapes/duplicates/oversize/trailing garbage while accepting 8KB capsules, and validateCid verifies CIDv0 + CIDv1 (raw/dag-pb/dag-cbor x SHA2-256/BLAKE2b-256/SHA2-512)", async function () {
+    const validHex512 = "ab".repeat(256);
+    const validCap = JSON.stringify({ version: "GENO-ASYM-RSA-OAEP-v2", keyCipher: validHex512 });
+    expect(await nft.validateCapsule(validCap)).to.equal(true);
+
+    // Reject unicode escape, duplicate keyCipher, trailing garbage, odd-length hex, all-zero hex, >8KB
+    expect(await nft.validateCapsule(`{"key\\u0043ipher":"${validHex512}"}`)).to.equal(false);
+    expect(await nft.validateCapsule(`{"keyCipher":"${validHex512}","keyCipher":"${validHex512}"}`)).to.equal(false);
+    expect(await nft.validateCapsule(`${validCap} trailing`)).to.equal(false);
+    expect(await nft.validateCapsule(`{"keyCipher":"${"a".repeat(513)}"}`)).to.equal(false);
+    expect(await nft.validateCapsule(`{"keyCipher":"${"0".repeat(512)}"}`)).to.equal(false);
+    expect(await nft.validateCapsule(`{"keyCipher":"${"ab".repeat(256)}","pad":"${"x".repeat(8200)}"}`)).to.equal(false);
+
+    // Valid ~7.8 KB capsule MUST pass SWAR validation within reasonable gas
+    const largeCap = JSON.stringify({ version: "GENO-ASYM-RSA-OAEP-v2", pad: "z".repeat(7100), keyCipher: validHex512 });
+    expect(largeCap.length).to.be.gt(7500);
+    expect(largeCap.length).to.be.lte(8192);
+    expect(await nft.validateCapsule(largeCap)).to.equal(true);
+    const largeGas = await nft.validateCapsule.estimateGas(largeCap);
+    expect(largeGas).to.be.lt(500000n);
+
+    // Full CIDv0 & CIDv1 multihash parity matrix against GenomicNFT.validateCid
+    const sampleBytes = new TextEncoder().encode("GENOCHAIN_CID_MATRIX_PAYLOAD_V2");
+    const cidV0 = await computeIpfsCidV0(sampleBytes);
+    expect(await nft.validateCid(cidV0)).to.equal(true);
+
+    const codecs = [0x55, 0x70, 0x71]; // raw, dag-pb, dag-cbor
+    const mhCodes = [MULTIHASH_SHA2_256, MULTIHASH_BLAKE2B_256, MULTIHASH_SHA2_512];
+    for (const codec of codecs) {
+      for (const mhCode of mhCodes) {
+        const cidV1 = await computeIpfsCidV1(sampleBytes, { codec, mhCode });
+        expect(await nft.validateCid(cidV1), `validateCid rejected valid CIDv1 codec=0x${codec.toString(16)} mh=0x${mhCode.toString(16)}: ${cidV1}`).to.equal(true);
+      }
+    }
+    // Reject invalid CIDv1 (unsupported codec 0x99, invalid base32 char '0', truncated)
+    expect(await nft.validateCid("bafkrei0000000000000000000000000000000000000000000000000000")).to.equal(false);
+    expect(await nft.validateCid("bafkreishort")).to.equal(false);
+  });
+
+  // =========================================================================
+  // R18-06d: Commit-Reveal Same-Block Guard, Sender Isolation & Bundle Registration
+  // =========================================================================
+  it("R18-06d: commitGenomicData enforces CommitmentTooNew, cross-sender salt isolation, and atomic revealAndRegisterGenomicDataBundle", async function () {
+    await (await registry.connect(owner).setCommitRevealRequired(true)).wait();
+    const rawHash = ethers.keccak256(ethers.toUtf8Bytes("r18-06d-raw"));
+    const sumHash = ethers.keccak256(ethers.toUtf8Bytes("r18-06d-sum"));
+    const metaHash = ethers.keccak256(ethers.toUtf8Bytes("r18-06d-meta"));
+    const salt = ethers.keccak256(ethers.toUtf8Bytes("r18-06d-salt"));
+    const tag1 = ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(["string", "string", "string", "bytes32"], ["GENOCHAIN_BLIND_TAG_V1", "gene", "ALDH2", salt]));
+
+    // Direct registration blocked when commit-reveal is required
+    await expect(
+      registry.connect(seller).registerGenomicData(rawHash, CID_A, CID_B, CID_C, URI_A, PRICE, DURATION, 1000)
+    ).to.be.revertedWithCustomError(registry, "CommitmentNotFound");
+
+    const commitment = ethers.solidityPackedKeccak256(["bytes32", "bytes32", "address"], [rawHash, salt, seller.address]);
+    await (await registry.connect(seller).commitGenomicData(commitment)).wait();
+
+    // Front-runner (stranger) trying to reveal seller's commitment MUST fail CommitmentNotFound
+    await expect(
+      registry
+        .connect(stranger)
+        .revealAndRegisterGenomicDataBundle([rawHash, sumHash, metaHash], salt, [CID_A, CID_B, CID_C, URI_A], PRICE, DURATION, 1000, [tag1])
+    ).to.be.revertedWithCustomError(registry, "CommitmentNotFound");
+
+    // Next-block reveal succeeds atomically with 3-artifact hashes & blind tags
+    await (
+      await registry
+        .connect(seller)
+        .revealAndRegisterGenomicDataBundle([rawHash, sumHash, metaHash], salt, [CID_A, CID_B, CID_C, URI_A], PRICE, DURATION, 1000, [tag1])
+    ).wait();
+    expect(await registry.dataCount()).to.equal(1n);
+    const anchored = await registry.getArtifactHashes(1n);
+    expect(anchored.rawDataHash).to.equal(rawHash);
+    expect(anchored.summaryDataHash).to.equal(sumHash);
+    expect(anchored.metadataHash).to.equal(metaHash);
+    expect(await registry.matchesBlindTag(1n, tag1)).to.equal(true);
+  });
+
+  // =========================================================================
+  // R18-06e: Groth16 VK Epoch Rotation (1 -> 2), Fail-Closed Missing vkPath & Clean Phenopacket Deduplication
+  // =========================================================================
+  it("R18-06e: rotates Groth16 vkEpoch cleanly (1 -> 2), fails closed on explicit missing vkPath, and deduplicates HANCESTRO in buildPhenopacket", async function () {
+    const crs1 = await runLocalGroth16Ceremony(zkVerifier, owner);
+    expect(crs1.vkEpoch).to.equal(1);
+    const crs2 = await runLocalGroth16Ceremony(zkVerifier, owner);
+    expect(crs2.vkEpoch).to.equal(2);
+
+    const chainId = Number((await ethers.provider.getNetwork()).chainId);
+    const traitId = ethers.id("ACTN3_rs1815739");
+    const secret = "DONOR_EPOCH2_WITNESS_SECRET";
+    const commitment = computeDonorWitnessCommitment(seller.address, traitId, secret);
+
+    // Explicit non-existent vkPath MUST fail closed (never silently skip verification!)
+    await expect(
+      generateAuthenticGroth16Proof({
+        donorAddress: seller.address,
+        targetTraitId: traitId,
+        variantCommitment: commitment,
+        witnessSecret: secret,
+        bountyId: 1,
+        verifierAddress: zkVerifier.target,
+        chainId,
+        vkEpoch: 2,
+        vkPath: path.resolve("frontend/public/zk/nonexistent_vk_file.json"),
+      })
+    ).to.be.rejectedWith(/Missing Groth16 verification key/);
+
+    // Epoch-2 proof verifies cleanly on-chain while epoch-1 proof is rejected
+    await (await token.connect(buyer).approve(zkVerifier.target, ethers.parseEther("200"))).wait();
+    await (await zkVerifier.connect(buyer).createZkBounty(traitId, "Epoch2 Cohort", ethers.parseEther("50"), 2, 86400)).wait();
+
+    const proofEp1 = await generateAuthenticGroth16Proof({
+      donorAddress: seller.address,
+      targetTraitId: traitId,
+      variantCommitment: commitment,
+      witnessSecret: secret,
+      bountyId: 1,
+      verifierAddress: zkVerifier.target,
+      chainId,
+      vkEpoch: 1,
+    });
+    await expect(
+      zkVerifier.connect(seller).claimZkBounty(1n, proofEp1.proof, commitment)
+    ).to.be.revertedWithCustomError(zkVerifier, "InvalidZkProof");
+
+    const proofEp2 = await generateAuthenticGroth16Proof({
+      donorAddress: seller.address,
+      targetTraitId: traitId,
+      variantCommitment: commitment,
+      witnessSecret: secret,
+      bountyId: 1,
+      verifierAddress: zkVerifier.target,
+      chainId,
+      vkEpoch: 2,
+    });
+    await (await zkVerifier.connect(seller).claimZkBounty(1n, proofEp2.proof, commitment)).wait();
+    expect(await zkVerifier.hasVerifiedTraitVariant(traitId, commitment, seller.address)).to.equal(true);
+
+    // buildPhenopacket deduplicates HANCESTRO when caller also passes it in phenotypes[]
+    const pp = buildPhenopacket({
+      subjectId: "ANON_DEDUP_TEST_01",
+      disease: "Benign ALDH2 Polymorphism",
+      ancestry: "Vietnamese Kinh (KHV)",
+      phenotypes: [
+        { id: "SO:0001583", label: "missense_variant" },
+        { id: "HANCESTRO:0021", label: "Vietnamese Kinh (KHV)" },
+      ],
+      variants: [{ gene: "ALDH2", rsId: "rs671", chrom: "chr12", pos: 111803962, zygosity: "0/1 Heterozygous" }],
+    });
+    const hancestroCount = pp.phenotypicFeatures.filter((f) => f.type?.id === "HANCESTRO:0021").length;
+    expect(hancestroCount).to.equal(1);
+    expect(validatePhenopacketSchema(pp).valid).to.equal(true);
+  });
+
+  // =========================================================================
+  // R18-06f: Private IPFS Gateway Owner-Scoped Shared-CID GDPR Art. 17 Erasure & Anti-Squatting
+  // =========================================================================
+  it("R18-06f: Private IPFS Gateway preserves same-owner shared CIDs until all owner datasets are Revoked, while blocking third-party CID squatters from vetoing GDPR erasure", async function () {
+    this.timeout(25000);
+    const pyGdprRef = `
+import os, sys, tempfile
+sys.path.insert(0, os.path.abspath("deploy"))
+import ipfs_access_gateway as gw
+
+CID_SHARED = "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG"
+CID_SQUATTED = "QmW2WQi7j6c7UgJTarActp7tDNikE4B2qXtFCfLPdsgaTQ"
+CID_META_1 = "QmZ4tDuvesekSs4qM5ZBKpXiZGun7S2CYtEZRB3DYXkjGx"
+CID_META_2 = "QmPZ9qBzzyAtRaQQQUZr6xHS6wVfETRR249s63UME18znJ"
+OWNER_A = "0x1111111111111111111111111111111111111111"
+SQUATTER = "0x2222222222222222222222222222222222222222"
+
+class RefReg:
+    def __init__(self):
+        self.datasets = [
+            # Same-owner shared rawCid across datasets #1 and #2
+            {"dataId": 1, "currentOwner": OWNER_A, "rawCid": CID_SHARED, "summaryCid": "", "metadataCid": CID_META_1, "status": 2},
+            {"dataId": 2, "currentOwner": OWNER_A, "rawCid": CID_SHARED, "summaryCid": "", "metadataCid": CID_META_2, "status": 0},
+            # Victim dataset #3 revoked while third-party SQUATTER dataset #4 squats on CID_SQUATTED
+            {"dataId": 3, "currentOwner": OWNER_A, "rawCid": CID_SQUATTED, "summaryCid": "", "metadataCid": "", "status": 2},
+            {"dataId": 4, "currentOwner": SQUATTER, "rawCid": CID_SQUATTED, "summaryCid": "", "metadataCid": "", "status": 0},
+        ]
+        self.events = [
+            {"dataId": 1, "newStatus": 2, "blockNumber": 10},
+            {"dataId": 3, "newStatus": 2, "blockNumber": 11},
+        ]
+    def is_connected(self): return True
+    def get_block_number(self): return 12
+    def get_all_datasets(self): return list(self.datasets)
+    def get_genomic_data(self, d):
+        for ds in self.datasets:
+            if ds["dataId"] == int(d): return ds
+        raise ValueError("DataNotFound")
+    def get_status_updated_events(self, a, b): return list(self.events)
+
+class RefKubo:
+    def __init__(self):
+        self.pins = {CID_SHARED: 100, CID_SQUATTED: 100, CID_META_1: 50, CID_META_2: 50}
+        self.unpinned = []
+        self.gc_runs = 0
+    def health_check(self): return True
+    def unpin_cid(self, cid):
+        self.unpinned.append(cid)
+        return self.pins.pop(cid, None) is not None
+    def run_gc(self):
+        self.gc_runs += 1
+        return True
+
+with tempfile.TemporaryDirectory() as td:
+    db = os.path.join(td, "refcount.sqlite")
+    reg = RefReg()
+    kubo = RefKubo()
+    rec = gw.GdprErasureReconciler(reg, kubo, start_block=5, db_path=db)
+    try:
+        r1 = rec.reconcile_once()
+        # 1. Same owner still has active dataset #2 -> CID_SHARED MUST stay pinned (skippedSharedCids)!
+        assert CID_SHARED in kubo.pins and CID_SHARED in r1["skippedSharedCids"], f"Same-owner shared CID prematurely unpinned: {r1}"
+        assert CID_META_1 not in kubo.pins, f"Unshared metadata CID_META_1 should be unpinned: {r1}"
+        # 2. Third-party squatter (#4) CANNOT block victim OWNER_A's GDPR Art. 17 erasure of CID_SQUATTED!
+        assert CID_SQUATTED not in kubo.pins, f"Third-party squatter blocked GDPR Art. 17 erasure: {r1}"
+
+        # 3. Once OWNER_A also revokes dataset #2 -> CID_SHARED & CID_META_2 MUST be unpinned + repo/gc executed!
+        reg.datasets[1]["status"] = 2
+        reg.events.append({"dataId": 2, "newStatus": 2, "blockNumber": 12})
+        r2 = rec.reconcile_once()
+        assert CID_SHARED not in kubo.pins and CID_META_2 not in kubo.pins, f"Expected full erasure after both owner datasets revoked: {r2}"
+        assert kubo.gc_runs >= 1
+    finally:
+        rec.close()
+print("GDPR_REFCOUNT_OK")
+`;
+    const out = execFileSync(resolvePythonBin(), ["-c", pyGdprRef], { encoding: "utf8" });
+    expect(out).to.include("GDPR_REFCOUNT_OK");
+  });
+
+  // =========================================================================
+  // R18-06g: Non-31337 i18n Chain-Text Parity (Zero Hardhat/31337 Leaks), EIP-191/8-char Copy & Modal Trap LIFO Guard
+  // =========================================================================
+  it("R18-06g: formatConfiguredChainText strips 100% Hardhat/31337 strings across EN & VI locales, faucet/vault copy matches contract & UI rules, and useModalFocusTrap enforces LIFO stack isolation", async function () {
+    for (const [lang, dict] of [["en", enLocale], ["vi", viLocale]]) {
+      for (const [k, v] of Object.entries(dict)) {
+        if (typeof v !== "string") continue;
+        const formatted = formatConfiguredChainText(v, 11155111, "Sepolia");
+        expect(formatted, `${lang}.${k} leaked 'Hardhat' on Sepolia: ${formatted}`).to.not.match(/\bHardhat\b/i);
+        expect(formatted, `${lang}.${k} leaked '31337' on Sepolia: ${formatted}`).to.not.match(/\b31337\b/);
+      }
+      // Verify EIP-191 faucet voucher copy (matches GenomicToken.sol:222) and >= 8 char passphrase copy (matches PatientSovereignVault.jsx:414)
+      expect(dict.faucetVoucherModalDesc).to.include("EIP-191");
+      expect(dict.faucetVoucherModalDesc).to.not.include("EIP-712");
+      expect(dict.adminFaucetVoucherLabel).to.include("EIP-191");
+      expect(dict.vaultPassphraseTooShort).to.include("8");
+    }
+
+    // Verify LIFO stacked-modal guard & inert/hidden ancestor exclusion in useModalFocusTrap.js
+    const trapSrc = fs.readFileSync(path.resolve("frontend/src/hooks/useModalFocusTrap.js"), "utf8");
+    expect(trapSrc).to.include("activeTrapStack");
+    expect(trapSrc).to.include("isTopTrap()");
+    expect(trapSrc).to.include("[inert], [hidden], [aria-hidden='true']");
   });
 });

@@ -14,10 +14,12 @@ async function main() {
   const [signer] = await ethers.getSigners();
   const fastForwardLocal = parseEnvFlag("TIMELOCK_LOCAL_FAST_FORWARD");
 
-  const handoffPath = path.resolve(".local/timelock_handoff.json");
-  const addrPath = path.resolve("frontend/src/contracts/contractAddresses.json");
+  const localVaultDir = path.resolve(process.env.LOCAL_VAULT_DIR || ".local");
+  const contractsDir = path.resolve(process.env.OUTPUT_CONTRACTS_DIR || "frontend/src/contracts");
+  const handoffPath = path.join(localVaultDir, "timelock_handoff.json");
+  const addrPath = path.join(contractsDir, "contractAddresses.json");
   if (!fs.existsSync(addrPath)) {
-    throw new Error("Missing frontend/src/contracts/contractAddresses.json. Deploy contracts first.");
+    throw new Error(`Missing ${addrPath}. Deploy contracts first.`);
   }
   const addresses = JSON.parse(fs.readFileSync(addrPath, "utf8"));
   const handoff = fs.existsSync(handoffPath) ? JSON.parse(fs.readFileSync(handoffPath, "utf8")) : null;

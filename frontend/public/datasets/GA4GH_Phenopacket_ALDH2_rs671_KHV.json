@@ -41,13 +41,6 @@
         "label": "Vietnamese Kinh (KHV) / Southeast Asian"
       },
       "excluded": false
-    },
-    {
-      "type": {
-        "id": "HANCESTRO:0021",
-        "label": "Vietnamese Kinh (KHV) / Southeast Asian"
-      },
-      "excluded": false
     }
   ],
   "diseases": [

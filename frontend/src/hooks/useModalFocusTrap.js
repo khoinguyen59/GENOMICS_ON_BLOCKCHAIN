@@ -1,5 +1,7 @@
 import { useEffect, useRef } from "react";
 
+const activeTrapStack = [];
+
 const FOCUSABLE_SELECTOR = [
   "a[href]",
   "area[href]",
@@ -18,20 +20,22 @@ function getFocusableElements(container) {
   if (!container) return [];
   const nodes = Array.from(container.querySelectorAll(FOCUSABLE_SELECTOR));
   return nodes.filter((el) => {
-    if (el.hasAttribute("disabled") || el.getAttribute("aria-hidden") === "true") {
+    if (el.hasAttribute("disabled") || el.closest("[inert], [hidden], [aria-hidden='true']")) {
       return false;
     }
     const style = window.getComputedStyle(el);
-    if (style.display === "none" || style.visibility === "hidden") {
+    if (style.display === "none" || style.visibility === "hidden" || style.visibility === "collapse") {
       return false;
     }
-    return el.offsetParent !== null || style.position === "fixed";
+    return el.getClientRects().length > 0;
   });
 }
 
 /**
- * WCAG 2.2 AA modal focus trap with Escape dismissal and focus restoration.
- * Uses a ref for `onClose` so inline arrow callbacks never re-trigger focus jumps.
+ * WCAG 2.2 AA modal focus trap with LIFO stacked-modal isolation, Escape dismissal,
+ * and focus restoration. Uses a ref for `onClose` so inline arrow callbacks never
+ * re-trigger focus jumps, and a module-level active trap stack so an underlying modal
+ * never hijacks Tab or Escape from a newer modal opened on top of it.
  *
  * @param {boolean} isOpen - Whether the modal dialog is currently open.
  * @param {Function} [onClose] - Callback invoked when the user presses Escape.
@@ -49,11 +53,16 @@ export function useModalFocusTrap(isOpen, onClose) {
   useEffect(() => {
     if (!isOpen) return undefined;
 
+    const trapToken = Symbol("modal-focus-trap");
+    activeTrapStack.push(trapToken);
+    const isTopTrap = () => activeTrapStack[activeTrapStack.length - 1] === trapToken;
+
     const previouslyFocused =
       document.activeElement instanceof HTMLElement ? document.activeElement : null;
     previousFocusRef.current = previouslyFocused;
 
     const focusInitialElement = () => {
+      if (!isTopTrap()) return;
       const container = containerRef.current;
       if (!container) return;
       if (container.contains(document.activeElement)) return;
@@ -68,6 +77,7 @@ export function useModalFocusTrap(isOpen, onClose) {
     const rafId = window.requestAnimationFrame(focusInitialElement);
 
     const handleKeyDown = (event) => {
+      if (!isTopTrap()) return;
       const container = containerRef.current;
       if (!container) return;
 
@@ -117,6 +127,10 @@ export function useModalFocusTrap(isOpen, onClose) {
     return () => {
       window.cancelAnimationFrame(rafId);
       document.removeEventListener("keydown", handleKeyDown, true);
+      const stackIdx = activeTrapStack.lastIndexOf(trapToken);
+      if (stackIdx !== -1) {
+        activeTrapStack.splice(stackIdx, 1);
+      }
       const prev = previousFocusRef.current;
       previousFocusRef.current = null;
       if (prev && prev.isConnected && typeof prev.focus === "function") {

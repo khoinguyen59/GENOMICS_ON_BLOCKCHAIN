@@ -7,6 +7,7 @@
  */
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import * as snarkjs from "snarkjs";
 import {
   computeDonorWitnessCommitment,
@@ -15,8 +16,9 @@ import {
   terminateGroth16Prover,
 } from "../../crypto/zk/groth16_prover.js";
 
-export const DEFAULT_ZKEY_PATH = path.resolve("frontend/public/zk/genomic_variant.zkey");
-export const DEFAULT_VK_PATH = path.resolve("frontend/public/zk/verification_key.json");
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+export const DEFAULT_ZKEY_PATH = path.join(REPO_ROOT, "frontend/public/zk/genomic_variant.zkey");
+export const DEFAULT_VK_PATH = path.join(REPO_ROOT, "frontend/public/zk/verification_key.json");
 
 export { computeDonorWitnessCommitment, formatVerificationKeyForSolidity, terminateGroth16Prover };
 
@@ -47,18 +49,17 @@ export async function runLocalGroth16Ceremony(zkVerifier, deployer, options = {}
   const vk = loadVerificationKey(vkPath);
   const formatted = formatVerificationKeyForSolidity(vk);
 
-  const tx = await zkVerifier
-    .connect(deployer)
-    .setupVerificationKeyV2(
-      formatted.alpha,
-      formatted.beta,
-      formatted.gamma,
-      formatted.delta,
-      formatted.ic0,
-      formatted.ic1,
-      formatted.ic2,
-      formatted.ic3
-    );
+  const contract = deployer ? zkVerifier.connect(deployer) : zkVerifier;
+  const tx = await contract.setupVerificationKeyV2(
+    formatted.alpha,
+    formatted.beta,
+    formatted.gamma,
+    formatted.delta,
+    formatted.ic0,
+    formatted.ic1,
+    formatted.ic2,
+    formatted.ic3
+  );
   await tx.wait();
 
   const vkEpoch = Number(await zkVerifier.vkEpoch());
@@ -110,14 +111,12 @@ export async function generateAuthenticGroth16Proof({
       vkEpoch,
     });
 
-    if (vkPath) {
+    if (vkPath !== null && vkPath !== false) {
       const absVkPath = path.resolve(vkPath);
-      if (fs.existsSync(absVkPath)) {
-        const vk = loadVerificationKey(absVkPath);
-        const verified = await snarkjs.groth16.verify(vk, result.publicSignals, result.snarkjsProof);
-        if (!verified) {
-          throw new Error("Locally generated Groth16 proof failed verification against verification_key.json.");
-        }
+      const vk = loadVerificationKey(absVkPath);
+      const verified = await snarkjs.groth16.verify(vk, result.publicSignals, result.snarkjsProof);
+      if (!verified) {
+        throw new Error("Locally generated Groth16 proof failed verification against verification_key.json.");
       }
     }
 

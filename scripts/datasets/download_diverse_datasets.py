@@ -3,7 +3,7 @@ import ssl
 import json
 import os
 
-ctx = ssl._create_unverified_context()
+ctx = ssl.create_default_context()
 
 base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 DATA_DIR = os.path.join(base_dir, "data", "diverse_real_datasets")
@@ -11,40 +11,11 @@ FRONTEND_DIR = os.path.join(base_dir, "frontend", "public", "datasets")
 os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(FRONTEND_DIR, exist_ok=True)
 
-# 1. Inspect Phenopackets in monarch-initiative
-def get_phenopacket_url(gene):
-    api_url = f"https://api.github.com/repos/monarch-initiative/phenopacket-store/contents/notebooks/{gene}/phenopackets"
-    req = urllib.request.Request(api_url, headers={"User-Agent": "GenoChain-Researcher/1.0"})
-    try:
-        with urllib.request.urlopen(req, context=ctx, timeout=8) as resp:
-            data = json.loads(resp.read().decode())
-            if isinstance(data, list) and len(data) > 0:
-                return data[0]["download_url"], data[0]["name"]
-    except Exception as e:
-        print(f"Error fetching phenopacket for {gene}: {e}")
-    return None, None
-
-pheno_genes = ["ABCA4", "ADA", "FBN1", "CFTR", "TP53"]
+# INV-11 (Non-Pathological Payload Policy):
+# Clinical/pathological Phenopackets (ABCA4, ADA, FBN1, CFTR, TP53) are intentionally
+# excluded. Benign GA4GH Phenopacket v2 molecular trait fixtures (ALDH2, ACTN3, TAS2R38)
+# are maintained locally under data/diverse_real_datasets/ and frontend/public/datasets/.
 pheno_targets = []
-print("Discovering authentic Phenopackets from monarch-initiative/phenopacket-store...")
-for g in pheno_genes:
-    durl, fname = get_phenopacket_url(g)
-    if durl and fname:
-        pheno_targets.append({
-            "name": f"GA4GH_Phenopacket_{g}_{fname}",
-            "url": durl,
-            "category": "GA4GH Phenopacket v2 (Clinical Case)",
-            "gene": g
-        })
-        print(f"  Found {g} -> {fname}")
-
-# 2. Add GA4GH official schema biosample
-pheno_targets.append({
-    "name": "GA4GH_Schema_SAMN05324082.json",
-    "url": "https://raw.githubusercontent.com/phenopackets/phenopacket-schema/main/src/test/resources/biosamples-SAMN05324082.json",
-    "category": "GA4GH Phenopacket Biosample Specimen",
-    "gene": "Biosample Cohort"
-})
 
 # 3. Add SAMtools / BCFtools authentic VCFs
 vcf_targets = [
@@ -177,10 +148,8 @@ for s in old_samples:
             "url": f"/datasets/{s}"
         })
 
-# Write catalog JSON to both data/ and frontend/src/services/
+# Write catalog JSON to data/diverse_real_datasets/ only (frontend reads presetCatalog.js + /datasets/*)
 with open(os.path.join(DATA_DIR, "datasets_catalog.json"), "w", encoding="utf-8") as f:
-    json.dump(catalog, f, indent=2)
-with open(os.path.join("frontend", "src", "services", "datasets_catalog.json"), "w", encoding="utf-8") as f:
     json.dump(catalog, f, indent=2)
 
 print("\n" + "=" * 75)

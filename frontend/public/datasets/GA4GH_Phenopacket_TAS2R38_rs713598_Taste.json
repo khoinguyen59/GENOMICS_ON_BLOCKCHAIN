@@ -41,13 +41,6 @@
         "label": "East Asian Reference Panel"
       },
       "excluded": false
-    },
-    {
-      "type": {
-        "id": "HANCESTRO:0009",
-        "label": "East Asian Reference Panel"
-      },
-      "excluded": false
     }
   ],
   "diseases": [

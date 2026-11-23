@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import {
   decryptDatasetPayload,
   decryptSummaryReport,
@@ -21,6 +21,18 @@ export function useDatasetDecryption({
   activeAccountRef.current = hookAccount;
   const decryptSeqRef = useRef(0);
   const decryptedBuffersRef = useRef(new Map());
+
+  // Zero-fill all tracked decrypted plaintext/PDF RAM buffers on unmount
+  useEffect(() => {
+    const bufMap = decryptedBuffersRef.current;
+    return () => {
+      for (const entry of bufMap.values()) {
+        if (entry.raw instanceof Uint8Array) entry.raw.fill(0);
+        if (entry.pdf instanceof Uint8Array) entry.pdf.fill(0);
+      }
+      bufMap.clear();
+    };
+  }, []);
 
   const handleDecryptData = useCallback(
     async (dataId, options = {}) => {
@@ -90,6 +102,8 @@ export function useDatasetDecryption({
               return;
             }
             if (/tamper|integrity|anchor|mismatch/i.test(e?.message || "")) {
+              if (decryptedPlaintext instanceof Uint8Array) decryptedPlaintext.fill(0);
+              if (decryptedPdfBytes instanceof Uint8Array) decryptedPdfBytes.fill(0);
               throw e;
             }
             console.warn("PDF summary report decryption warning:", e);
@@ -126,6 +140,8 @@ export function useDatasetDecryption({
               return;
             }
             if (/tamper|integrity|anchor|mismatch/i.test(e?.message || "")) {
+              if (decryptedPlaintext instanceof Uint8Array) decryptedPlaintext.fill(0);
+              if (decryptedPdfBytes instanceof Uint8Array) decryptedPdfBytes.fill(0);
               throw e;
             }
             console.warn("Phenopacket metadata fetch warning:", e);

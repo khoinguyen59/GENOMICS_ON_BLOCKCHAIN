@@ -232,7 +232,7 @@ async function main() {
       "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG",
       "QmZ4tDuvesekSs4qM5ZBKpXiZGun7S2CYtEZRB3DYXkjGx",
       "QmPZ9qBzzyAtRaQQQUZr6xHS6wVfETRR249s63UME18znJ",
-      "ipfs://QmTokenUriMeta2",
+      "ipfs://QmPZ9qBzzyAtRaQQQUZr6xHS6wVfETRR249s63UME18znJ",
       price,
       duration,
       1000
@@ -248,10 +248,12 @@ async function main() {
     // PatientOwner transfers/sells NFT to ThirdParty BEFORE delivering capsule
     await nft.connect(patientOwner).transferFrom(patientOwner.address, thirdParty.address, tokenId);
 
+    const validCapsule = JSON.stringify({ version: "GENO-ASYM-RSA-OAEP-v2", keyCipher: "ab".repeat(256) });
+
     // PatientOwner tries to deliver capsule to release escrowed funds
     let patientDeliverFailed = false;
     try {
-      await registry.connect(patientOwner).storeTransformedCapsule(dataId, researcherBuyer.address, "VALID_CAPSULE");
+      await registry.connect(patientOwner).storeTransformedCapsule(dataId, researcherBuyer.address, validCapsule);
     } catch (err) {
       if (err.message.includes("NotDataOwner")) {
         patientDeliverFailed = true;
@@ -259,20 +261,37 @@ async function main() {
     }
 
     if (patientDeliverFailed) {
-      // Now the new NFT owner (thirdParty) delivers the capsule!
+      // Now the new NFT owner (thirdParty) delivers the capsule and buyer confirms fair-exchange release!
       const thirdPartyBalBefore = await token.balanceOf(thirdParty.address);
       const creatorBalBefore = await token.balanceOf(patientOwner.address);
 
-      await registry.connect(thirdParty).storeTransformedCapsule(dataId, researcherBuyer.address, "VALID_CAPSULE_FROM_NEW_OWNER");
+      await registry.connect(thirdParty).storeTransformedCapsule(dataId, researcherBuyer.address, validCapsule);
+      await registry.connect(researcherBuyer).confirmCapsuleAndReleaseEscrow(dataId);
 
       const thirdPartyBalAfter = await token.balanceOf(thirdParty.address);
       const creatorBalAfter = await token.balanceOf(patientOwner.address);
 
-      expect(thirdPartyBalAfter - thirdPartyBalBefore).to.equal(ethers.parseUnits("90", 18));
-      expect(creatorBalAfter - creatorBalBefore).to.equal(ethers.parseUnits("10", 18));
+      // DEF2-1-02 snapshot invariant: pre-transfer escrow settles 100% to snapshotted seller (patientOwner);
+      // post-transfer secondary purchase splits 90% to new owner (thirdParty) + 10% EIP-2981 royalty to originalCreator (patientOwner).
+      expect(creatorBalAfter - creatorBalBefore).to.equal(price);
+      expect(thirdPartyBalAfter - thirdPartyBalBefore).to.equal(0n);
+
+      const allSigners = await ethers.getSigners();
+      const secondaryBuyer = allSigners.find(
+        (s) => s.address !== patientOwner.address && s.address !== thirdParty.address && s.address !== researcherBuyer.address && s.address !== deployer.address
+      );
+      await token.connect(deployer).transfer(secondaryBuyer.address, price);
+      await token.connect(secondaryBuyer).approve(registry.target, price);
+      const tpBefore2 = await token.balanceOf(thirdParty.address);
+      const crBefore2 = await token.balanceOf(patientOwner.address);
+      await registry.connect(secondaryBuyer).grantAccessWithEscrow(dataId, 86400);
+      await registry.connect(thirdParty).storeTransformedCapsule(dataId, secondaryBuyer.address, validCapsule);
+      await registry.connect(secondaryBuyer).confirmCapsuleAndReleaseEscrow(dataId);
+      expect((await token.balanceOf(thirdParty.address)) - tpBefore2).to.equal(ethers.parseUnits("90", 18));
+      expect((await token.balanceOf(patientOwner.address)) - crBefore2).to.equal(ethers.parseUnits("10", 18));
 
       passCount++;
-      console.log("  [PASS #4] Secondary NFT Sale Resolved: New NFT owner successfully delivers capsule and receives 90 GENO proceeds (10 GENO royalty to creator).");
+      console.log("  [PASS #4] Secondary NFT Sale Resolved: Pre-transfer escrow settled to original seller; post-transfer sale split 90 GENO to new owner + 10 GENO EIP-2981 royalty to creator.");
     } else {
       defectCount++;
       console.log("  [FAIL #4] Expected original seller delivery to revert with NotDataOwner.");

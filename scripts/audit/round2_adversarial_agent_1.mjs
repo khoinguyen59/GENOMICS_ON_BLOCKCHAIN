@@ -80,6 +80,11 @@ async function runRound2AdversarialSuite() {
   // ---------------------------------------------------------------------------
   // 2. Register Dataset 1 by Alice
   // ---------------------------------------------------------------------------
+  const VALID_RAW_CID = "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG";
+  const VALID_PDF_CID = "QmZ4tDuvesekSs4qM5ZBKpXiZGun7S2CYtEZRB3DYXkjGx";
+  const VALID_META_CID = "QmPZ9qBzzyAtRaQQQUZr6xHS6wVfETRR249s63UME18znJ";
+  const VALID_CAPSULE = JSON.stringify({ version: "GENO-ASYM-RSA-OAEP-v2", keyCipher: "ab".repeat(256) });
+
   const rawHash1 = ethers.keccak256(ethers.toUtf8Bytes("GENOME_ALICE_CHR12_RAW"));
   const price1 = ethers.parseUnits("100", 18);
   const duration1 = 30 * 86400; // 30 days
@@ -87,10 +92,10 @@ async function runRound2AdversarialSuite() {
 
   await registry.connect(sellerAlice).registerGenomicData(
     rawHash1,
-    "QmTestRawCidAlice111111111111111111111111111111",
-    "QmTestPdfCidAlice111111111111111111111111111111",
-    "QmTestMetaCidAlice11111111111111111111111111111",
-    "ipfs://QmTokenUriAlice1",
+    VALID_RAW_CID,
+    VALID_PDF_CID,
+    VALID_META_CID,
+    `ipfs://${VALID_META_CID}`,
     price1,
     duration1,
     royalty1
@@ -142,7 +147,7 @@ async function runRound2AdversarialSuite() {
   // ADVERSARIAL CHECK: Does storeTransformedCapsule succeed even though status is Revoked?
   let storeCapsuleSucceeded = false;
   try {
-    await registry.connect(sellerAlice).storeTransformedCapsule(dataId1, buyerBob.address, "CAPSULE_PAYLOAD_TEST_DEF2_1_01");
+    await registry.connect(sellerAlice).storeTransformedCapsule(dataId1, buyerBob.address, VALID_CAPSULE);
     storeCapsuleSucceeded = true;
   } catch (err) {
     storeCapsuleSucceeded = false;
@@ -169,10 +174,10 @@ async function runRound2AdversarialSuite() {
   const rawHash2 = ethers.keccak256(ethers.toUtf8Bytes("GENOME_ALICE_CHR19_RAW"));
   await registry.connect(sellerAlice).registerGenomicData(
     rawHash2,
-    "QmTestRawCidAlice222222222222222222222222222222",
-    "QmTestPdfCidAlice222222222222222222222222222222",
-    "QmTestMetaCidAlice22222222222222222222222222222",
-    "ipfs://QmTokenUriAlice2",
+    VALID_RAW_CID,
+    VALID_PDF_CID,
+    VALID_META_CID,
+    `ipfs://${VALID_META_CID}`,
     price1,
     duration1,
     royalty1
@@ -194,9 +199,9 @@ async function runRound2AdversarialSuite() {
     `New NFT owner: ${delegateDave.address}`
   );
 
-  // Now, capsule is delivered for Charlie
-  // Because Dave is now owner, Dave can deliver capsule
-  await registry.connect(delegateDave).storeTransformedCapsule(dataId2, buyerCharlie.address, "CAPSULE_FOR_CHARLIE");
+  // Now, capsule is delivered for Charlie and Charlie confirms decryption to settle fair-exchange escrow
+  await registry.connect(delegateDave).storeTransformedCapsule(dataId2, buyerCharlie.address, VALID_CAPSULE);
+  await registry.connect(buyerCharlie).confirmCapsuleAndReleaseEscrow(dataId2);
 
   const aliceBalAfter = await paymentToken.balanceOf(sellerAlice.address);
   const daveBalAfter = await paymentToken.balanceOf(delegateDave.address);
@@ -205,11 +210,10 @@ async function runRound2AdversarialSuite() {
   const daveDiff = daveBalAfter - daveBalBeforeTransfer;
 
   assertTest(
-    "EMPIRICAL PROOF DEF2-1-02: Escrow settlement conserves exact EIP-2981 royalty + seller proceeds",
-    aliceDiff + daveDiff === price1 && aliceDiff === (price1 * BigInt(royalty1)) / 10000n,
-    `Alice received: ${ethers.formatUnits(aliceDiff, 18)} GENO (Royalty: 10%), Dave received: ${ethers.formatUnits(daveDiff, 18)} GENO (Seller Proceeds: 90%)`
+    "REGRESSION PROOF DEF2-1-02: Escrow snapshot preserves original seller proceeds (100%) on pre-delivery NFT transfer",
+    aliceDiff + daveDiff === price1 && aliceDiff === price1 && daveDiff === 0n,
+    `Alice (escrow seller & creator) received: ${ethers.formatUnits(aliceDiff, 18)} GENO, Dave (post-deposit NFT transferee) received: ${ethers.formatUnits(daveDiff, 18)} GENO`
   );
-  console.log(`         ↳ Finding: Dave (the buyer of the NFT) captured the pending escrow sales proceeds of ${ethers.formatUnits(daveDiff, 18)} GENO!`);
 
   // ---------------------------------------------------------------------------
   // 5. DEF2-1-05 Empirical Test:
@@ -221,10 +225,10 @@ async function runRound2AdversarialSuite() {
   const rawHash3 = ethers.keccak256(ethers.toUtf8Bytes("GENOME_ALICE_CHR21_RAW"));
   await registry.connect(sellerAlice).registerGenomicData(
     rawHash3,
-    "QmTestRawCidAlice333333333333333333333333333333",
-    "QmTestPdfCidAlice333333333333333333333333333333",
-    "QmTestMetaCidAlice33333333333333333333333333333",
-    "ipfs://QmTokenUriAlice3",
+    VALID_RAW_CID,
+    VALID_PDF_CID,
+    VALID_META_CID,
+    `ipfs://${VALID_META_CID}`,
     price1,
     duration1,
     royalty1
@@ -345,10 +349,10 @@ async function runRound2AdversarialSuite() {
   const rawHash4 = ethers.keccak256(ethers.toUtf8Bytes("GENOME_ALICE_CHR22_RAW"));
   await registry.connect(sellerAlice).registerGenomicData(
     rawHash4,
-    "QmTestRawCidAlice444444444444444444444444444444",
-    "QmTestPdfCidAlice444444444444444444444444444444",
-    "QmTestMetaCidAlice44444444444444444444444444444",
-    "ipfs://QmTokenUriAlice4",
+    VALID_RAW_CID,
+    VALID_PDF_CID,
+    VALID_META_CID,
+    `ipfs://${VALID_META_CID}`,
     price1,
     duration1,
     royalty1
@@ -358,13 +362,19 @@ async function runRound2AdversarialSuite() {
   // Charlie deposits into escrow for Dataset 4
   await registry.connect(buyerCharlie).grantAccessWithEscrow(dataId4, disputeWindow1);
 
-  // Alice delivers capsule via gas-optimized emitTransformedCapsule
-  await registry.connect(sellerAlice).emitTransformedCapsule(dataId4, buyerCharlie.address, "EVENT_CAPSULE_PAYLOAD");
+  // Alice delivers capsule via emitTransformedCapsule (fair-exchange: holds escrow until buyer confirmation or window expiry)
+  await registry.connect(sellerAlice).emitTransformedCapsule(dataId4, buyerCharlie.address, VALID_CAPSULE);
+  const deposit4BeforeConfirm = await registry.escrowDeposits(dataId4, buyerCharlie.address);
+  assertTest(
+    "REGRESSION PROOF DEF2-1-04a: emitTransformedCapsule marks capsuleDelivered while fair-exchange escrow holds funds until buyer confirmation",
+    deposit4BeforeConfirm.capsuleDelivered === true && deposit4BeforeConfirm.released === false,
+    `Capsule delivered: ${deposit4BeforeConfirm.capsuleDelivered}, Escrow held: ${!deposit4BeforeConfirm.released}`
+  );
+  await registry.connect(buyerCharlie).confirmCapsuleAndReleaseEscrow(dataId4);
 
-  // Now, check that deposit has capsuleDelivered == true AND released == true
   const deposit4 = await registry.escrowDeposits(dataId4, buyerCharlie.address);
   assertTest(
-    "REGRESSION PROOF DEF2-1-04: emitTransformedCapsule automatically delivers capsule and releases escrow",
+    "REGRESSION PROOF DEF2-1-04b: confirmDecryptionAndRelease settles escrow cleanly after emitTransformedCapsule",
     deposit4.capsuleDelivered === true && deposit4.released === true,
     `Capsule delivered: ${deposit4.capsuleDelivered}, Escrow released: ${deposit4.released}`
   );
@@ -408,10 +418,11 @@ async function runRound2AdversarialSuite() {
   console.log(`Total Successfully Proven / Passed  : ${passedTests}`);
   console.log(`Defect Reproduction Verification   : 100% EMPIRICAL CONFIRMATION`);
   console.log("================================================================================\n");
+  return { totalTests, passedTests };
 }
 
 runRound2AdversarialSuite()
-  .then(() => process.exit(0))
+  .then((res) => process.exit(res.passedTests === res.totalTests ? 0 : 1))
   .catch((err) => {
     console.error("Adversarial Suite Execution Aborted:", err);
     process.exit(1);

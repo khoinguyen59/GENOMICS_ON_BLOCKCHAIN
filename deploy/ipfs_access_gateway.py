@@ -410,6 +410,14 @@ class UploadRateLimiter:
                 )
                 """
             )
+            self._conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS pending_provenance_purges (
+                    multihash TEXT PRIMARY KEY,
+                    queued_at REAL NOT NULL
+                )
+                """
+            )
 
     def _prune_locked(self, cutoff: int) -> None:
         self._conn.execute("DELETE FROM upload_quota_events WHERE ts < ?", (int(cutoff),))
@@ -488,10 +496,21 @@ class UploadRateLimiter:
         try:
             first_reg = lookup(mh, allow_authoritative_refresh=True)
         except TypeError:
-            first_reg = lookup(mh)
+            try:
+                first_reg = lookup(mh)
+            except Exception:
+                return False, None, set()
         except Exception:
-            first_reg = None
+            return False, None, set()
         if not first_reg:
+            owner_obj = getattr(lookup, "__self__", None)
+            last_ok_fn = getattr(owner_obj, "last_refresh_succeeded", None)
+            if callable(last_ok_fn):
+                try:
+                    if not last_ok_fn():
+                        return False, None, set()
+                except Exception:
+                    return False, None, set()
             return True, None, set()
         if len(first_reg) >= 3:
             _, earliest_owner, earliest_creator = first_reg[0], str(first_reg[1] or "").strip().lower(), str(first_reg[2] or "").strip().lower()
@@ -681,10 +700,17 @@ class UploadRateLimiter:
                         if mh and addr_key and addr_key != "unknown":
                             self._conn.execute(
                                 """
-                                INSERT OR IGNORE INTO upload_provenance(multihash, uploader, created_at)
+                                INSERT INTO upload_provenance(multihash, uploader, created_at)
                                 VALUES(?, ?, ?)
+                                ON CONFLICT(multihash) DO UPDATE SET
+                                    created_at = MAX(upload_provenance.created_at, excluded.created_at)
                                 """,
                                 (mh, addr_key, float(now)),
+                            )
+                        if mh:
+                            self._conn.execute(
+                                "DELETE FROM pending_provenance_purges WHERE multihash = ?",
+                                (mh,),
                             )
             self._inflight.pop(token, None)
             self._quota_epoch += 1
@@ -784,10 +810,17 @@ class UploadRateLimiter:
             if mh and up_l:
                 self._conn.execute(
                     """
-                    INSERT OR IGNORE INTO upload_provenance(multihash, uploader, created_at)
+                    INSERT INTO upload_provenance(multihash, uploader, created_at)
                     VALUES(?, ?, ?)
+                    ON CONFLICT(multihash) DO UPDATE SET
+                        created_at = MAX(upload_provenance.created_at, excluded.created_at)
                     """,
                     (mh, up_l, float(ts)),
+                )
+            if mh:
+                self._conn.execute(
+                    "DELETE FROM pending_provenance_purges WHERE multihash = ?",
+                    (mh,),
                 )
             self._quota_epoch += 1
         return True
@@ -1892,10 +1925,11 @@ class KuboHttpAdapter:
         content_length: int,
         *,
         cid_version: int = 1,
+        pin: bool = True,
         timeout_sec: float = 300.0,
     ) -> dict:
         """
-        Stream-upload a bounded file object to private Kubo /api/v0/add?pin=true&cid-version=1
+        Stream-upload a bounded file object to private Kubo /api/v0/add?pin=<bool>&cid-version=1
         in 64 KiB chunks (never buffering the entire file in RAM).
         """
         safe_name = sanitize_upload_filename(filename)
@@ -1915,7 +1949,7 @@ class KuboHttpAdapter:
         total_body_len = len(prefix) + int(content_length) + len(suffix)
 
         base_path = parsed.path.rstrip("/")
-        q = urllib.parse.urlencode({"pin": "true", "cid-version": str(int(cid_version))})
+        q = urllib.parse.urlencode({"pin": "true" if pin else "false", "cid-version": str(int(cid_version))})
         target_path = f"{base_path}/api/v0/add?{q}"
 
         conn_cls = http.client.HTTPSConnection if parsed.scheme == "https" else http.client.HTTPConnection
@@ -1950,6 +1984,13 @@ class KuboHttpAdapter:
                 conn.close()
             except Exception:
                 pass
+
+    def pin_cid(self, cid: str) -> bool:
+        """Recursively pin an already-added CID in private Kubo strictly after provenance authorization."""
+        clean = validate_cid(cid)
+        q = urllib.parse.urlencode({"arg": clean, "recursive": "true"})
+        self._post(f"/api/v0/pin/add?{q}")
+        return True
 
     def unpin_cid(self, cid: str) -> bool:
         clean = validate_cid(cid)
@@ -2276,8 +2317,10 @@ class GdprErasureReconciler:
         with self._lock, _sqlite_write_tx(self._conn):
             if cids:
                 self._conn.executemany("DELETE FROM tracked_pins WHERE cid = ?", [(c,) for c in cids])
+                self._conn.executemany("DELETE FROM pending_uploads WHERE cid = ?", [(c,) for c in cids])
             if multihashes:
                 self._conn.executemany("DELETE FROM tracked_pins WHERE multihash = ?", [(m,) for m in multihashes])
+                self._conn.executemany("DELETE FROM pending_uploads WHERE multihash = ?", [(m,) for m in multihashes])
                 if purge_provenance:
                     self._conn.executemany(
                         "DELETE FROM upload_provenance WHERE multihash = ?",
@@ -2394,7 +2437,26 @@ class GdprErasureReconciler:
                 )
 
     def _flush_pending_provenance_purges(self) -> int:
-        """Delete queued upload_provenance rows ONLY AFTER Kubo repo/gc physically purged blocks."""
+        """
+        Delete queued upload_provenance rows ONLY AFTER Kubo repo/gc physically purged blocks,
+        while preserving provenance for any multihash concurrently re-pinned, pending, or
+        referenced by an active non-revoked on-chain dataset owned/created by that uploader.
+        """
+        with self._lock:
+            pending_rows = self._conn.execute(
+                "SELECT multihash, queued_at FROM pending_provenance_purges"
+            ).fetchall()
+        if not pending_rows:
+            return 0
+        anchored_owners_by_mh: dict[str, set[str]] = {}
+        if callable(getattr(self.registry_adapter, "get_all_datasets", None)):
+            try:
+                anchored_owners_by_mh = self._collect_anchored_owners_by_mh()
+            except Exception:
+                # Fail closed on RPC outage: retain provenance & pending queue until verified
+                return 0
+
+        flushed = 0
         with self._lock, _sqlite_write_tx(self._conn):
             rows = self._conn.execute(
                 "SELECT multihash, queued_at FROM pending_provenance_purges"
@@ -2402,15 +2464,35 @@ class GdprErasureReconciler:
             if not rows:
                 return 0
             for mh, queued_at in rows:
-                self._conn.execute(
-                    "DELETE FROM upload_provenance WHERE multihash = ? AND created_at <= ?",
-                    (str(mh), float(queued_at)),
+                mh_s = str(mh)
+                q_ts = float(queued_at)
+                still_pinned = self._conn.execute(
+                    "SELECT 1 FROM tracked_pins WHERE multihash = ? LIMIT 1",
+                    (mh_s,),
+                ).fetchone()
+                still_pending = self._conn.execute(
+                    "SELECT 1 FROM pending_uploads WHERE multihash = ? LIMIT 1",
+                    (mh_s,),
+                ).fetchone()
+                prov_row = self._conn.execute(
+                    "SELECT uploader FROM upload_provenance WHERE multihash = ?",
+                    (mh_s,),
+                ).fetchone()
+                prov_up = str(prov_row[0]).strip().lower() if prov_row and prov_row[0] else ""
+                has_authorized_active_anchor = bool(
+                    prov_up and prov_up in anchored_owners_by_mh.get(mh_s, set())
                 )
-            self._conn.executemany(
-                "DELETE FROM pending_provenance_purges WHERE multihash = ? AND queued_at <= ?",
-                [(str(mh), float(q)) for mh, q in rows],
-            )
-            return len(rows)
+                if still_pinned is None and still_pending is None and not has_authorized_active_anchor:
+                    self._conn.execute(
+                        "DELETE FROM upload_provenance WHERE multihash = ? AND created_at <= ?",
+                        (mh_s, q_ts),
+                    )
+                    flushed += 1
+                self._conn.execute(
+                    "DELETE FROM pending_provenance_purges WHERE multihash = ? AND queued_at <= ?",
+                    (mh_s, q_ts),
+                )
+            return flushed
 
     def _collect_anchored_owners_by_mh(self) -> dict[str, set[str]]:
         """
@@ -2500,10 +2582,37 @@ class GdprErasureReconciler:
                         for p_cid in recursive_pins_cache:
                             if p_cid not in cids_to_unpin and _try_canonical_multihash(p_cid) == mh_s:
                                 cids_to_unpin.append(p_cid)
+                    unpinned_here: list[str] = []
                     for target_c in cids_to_unpin:
                         if self.kubo_adapter.unpin_cid(target_c):
-                            orphan_unpinned.append(target_c)
-                            self.orphan_unpinned_total += 1
+                            unpinned_here.append(target_c)
+                    # L3-L2 post-unpin TOCTOU recovery: if an identical-CID re-upload raced during the
+                    # Kubo unpin HTTP call and refreshed pending_uploads/tracked_pins (> cutoff), restore
+                    # the pin immediately and skip SQLite deletion / provenance purge!
+                    with self._lock:
+                        post_pending = self._conn.execute(
+                            "SELECT uploaded_at FROM pending_uploads WHERE cid = ?",
+                            (cid_s,),
+                        ).fetchone()
+                        post_tracked = self._conn.execute(
+                            "SELECT pinned_at FROM tracked_pins WHERE cid = ?",
+                            (cid_s,),
+                        ).fetchone()
+                    concurrently_refreshed = (
+                        (post_pending is not None and int(post_pending[0]) > cutoff)
+                        or (post_tracked is not None and int(post_tracked[0]) > cutoff)
+                    )
+                    if concurrently_refreshed:
+                        pin_fn = getattr(self.kubo_adapter, "pin_cid", None)
+                        if callable(pin_fn):
+                            try:
+                                pin_fn(cid_s)
+                            except Exception:
+                                pass
+                        continue
+                    for target_c in unpinned_here:
+                        orphan_unpinned.append(target_c)
+                        self.orphan_unpinned_total += 1
                     self._gc_pending = True
                     done_orphan_rows.append((cid_s, cutoff))
                     for target_c in cids_to_unpin:
@@ -3182,11 +3291,21 @@ def create_gateway_server(
 
                 spool.seek(0)
                 add_fn = getattr(kubo_adapter, "add_stream", None)
+                pin_fn = getattr(kubo_adapter, "pin_cid", None)
                 if not callable(add_fn):
                     self._send_json(501, {"error": "Configured Kubo adapter does not support streaming uploads."})
                     return
+                staged_unpinned = False
                 try:
-                    pin_res = add_fn(spool, filename, content_length, cid_version=1)
+                    if callable(pin_fn):
+                        try:
+                            pin_res = add_fn(spool, filename, content_length, cid_version=1, pin=False)
+                            staged_unpinned = True
+                        except TypeError:
+                            spool.seek(0)
+                            pin_res = add_fn(spool, filename, content_length, cid_version=1)
+                    else:
+                        pin_res = add_fn(spool, filename, content_length, cid_version=1)
                 except Exception as exc:
                     self._send_json(502, {"error": f"Private Kubo upload failed: {exc}"})
                     return
@@ -3248,6 +3367,17 @@ def create_gateway_server(
                             },
                         )
                         return
+
+                if staged_unpinned and callable(pin_fn):
+                    try:
+                        pin_fn(pin_res["cid"])
+                    except Exception:
+                        try:
+                            spool.seek(0)
+                            pin_res = add_fn(spool, filename, content_length, cid_version=1, pin=True)
+                        except Exception as exc:
+                            self._send_json(502, {"error": f"Private Kubo pin failed: {exc}"})
+                            return
 
                 upload_limiter.commit(
                     res_token,

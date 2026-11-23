@@ -74,10 +74,10 @@ async function runAdversarialAudit() {
   const rawHash = ethers.keccak256(ethers.toUtf8Bytes("GENOME_SEQ_SAMPLE_1"));
   await registry.connect(seller).registerGenomicData(
     rawHash,
-    "QmSampleRawCid1111111111111111111111111111111",
-    "QmSampleSumCid1111111111111111111111111111111",
-    "QmSampleMetaCid111111111111111111111111111111",
-    "ipfs://token/1",
+    "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG",
+    "QmZ4tDuvesekSs4qM5ZBKpXiZGun7S2CYtEZRB3DYXkjGx",
+    "QmPZ9qBzzyAtRaQQQUZr6xHS6wVfETRR249s63UME18znJ",
+    "ipfs://QmPZ9qBzzyAtRaQQQUZr6xHS6wVfETRR249s63UME18znJ",
     ethers.parseUnits("100", 18),
     86400,
     1000
@@ -95,7 +95,10 @@ async function runAdversarialAudit() {
     registryContractSource.indexOf("function grantAccessWithEscrow")
   );
 
-  const hasExplicitUpperCheck = grantAccessImpl.includes("dataId == 0 || dataId > dataCount");
+  const hasExplicitUpperCheck =
+    grantAccessImpl.includes("dataId == 0 || dataId > dataCount") ||
+    (grantAccessImpl.includes("_requireValidDataId(dataId)") &&
+      registryContractSource.includes("dataId == 0 || dataId > dataCount"));
   if (!hasExplicitUpperCheck) {
     recordDefect(
       "DEF2-3-01",
@@ -181,7 +184,7 @@ async function runAdversarialAudit() {
     path.join(rootDir, "frontend/src/features/researcher/OpenSeaSpotlightShowcase.jsx"),
     "utf-8"
   );
-  const spotlightHasDisabledGuard = /disabled\s*=\s*\{\s*featured\.status\s*!==\s*["']Active["']\s*\}/.test(spotlightFile);
+  const spotlightHasDisabledGuard = /disabled\s*=\s*\{\s*featured\.status\s*!==\s*["']Active["'](?:\s*\|\|[^}]*)?\s*\}/.test(spotlightFile);
 
   if (!spotlightHasDisabledGuard) {
     recordDefect(

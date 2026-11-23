@@ -196,7 +196,12 @@ export async function loadOwnerCapsulePersistent(rawCid, account = null) {
   if (account !== null && account !== undefined && (typeof account !== "string" || account.trim().length === 0)) {
     return null;
   }
-  const scopedKey = makeScopedCidKey(rawCid, account);
+  // Read path must NEVER mutate module-global activeVaultAccount
+  const targetAccount =
+    typeof account === "string" && account.trim().length > 0
+      ? account.trim().toLowerCase()
+      : (activeVaultAccount || "global");
+  const scopedKey = `${targetAccount}:${rawCid}`;
   try {
     const idb = await withStore("vault_capsules", "readonly", (s) => s.get(scopedKey));
     if (typeof idb === "string" && idb.length > 0) return idb;

@@ -112,8 +112,8 @@ async function runAdversarialAgent4Suite() {
   // Buyer Bob purchases access with Escrow
   await registry.connect(buyerBob).grantAccessWithEscrow(1, 86400);
 
-  // Data Owner Alice stores Bob's capsule
-  const sampleCapsule = "ENC_CAPSULE_RSA_OAEP_AES_SESSION_KEY_01";
+  // Data Owner Alice stores Bob's RFC 8259 RSA-OAEP capsule
+  const sampleCapsule = JSON.stringify({ version: "GENO-ASYM-RSA-OAEP-v2", keyCipher: "ab".repeat(256) });
   await registry.connect(sellerAlice).storeTransformedCapsule(1, buyerBob.address, sampleCapsule);
 
   // Verify Bob can read capsule while active
@@ -155,16 +155,26 @@ async function runAdversarialAgent4Suite() {
     recordPass("buyerCapsules strictly conforms to time-based access expiration (reverts AccessExpired)");
   }
 
-  // Test DEF2-4-01 Boundary: buyerCapsules on invalid dataId
-  const outOfBoundsCapsule = await registry.buyerCapsules(999, buyerBob.address);
-  const zeroIdCapsule = await registry.buyerCapsules(0, buyerBob.address);
-  if (outOfBoundsCapsule === "" && zeroIdCapsule === "") {
-    recordPass("buyerCapsules safely returns empty string on out-of-bounds dataId (conforms to test suite contract)");
+  // Test DEF2-4-01 Boundary: buyerCapsules on invalid dataId reverts DataNotFound (INV-16 symmetry)
+  let oobReverted = false;
+  let zeroReverted = false;
+  try {
+    await registry.buyerCapsules(999, buyerBob.address);
+  } catch (err) {
+    oobReverted = err.message.includes("DataNotFound");
+  }
+  try {
+    await registry.buyerCapsules(0, buyerBob.address);
+  } catch (err) {
+    zeroReverted = err.message.includes("DataNotFound");
+  }
+  if (oobReverted && zeroReverted) {
+    recordPass("buyerCapsules reverts DataNotFound symmetrically on dataId=0 and out-of-bounds (INV-16)");
   } else {
     recordFinding(
       "DEF2-4-01b",
-      "Unexpected Non-Empty Return on Invalid dataId",
-      "buyerCapsules returned non-empty data for non-existent dataId."
+      "Missing DataNotFound Revert on Invalid dataId in buyerCapsules",
+      `oobReverted=${oobReverted}, zeroReverted=${zeroReverted}`
     );
   }
 

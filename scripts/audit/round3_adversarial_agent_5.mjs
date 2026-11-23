@@ -175,22 +175,31 @@ async function runRound3Audit() {
   console.log("--------------------------------------------------------------------------------");
 
   const registrySolPath = path.join(ROOT_DIR, "contracts", "GenomicsRegistry.sol");
+  const escrowEngineSolPath = path.join(ROOT_DIR, "contracts", "registry", "GenomicsEscrowEngine.sol");
   const registryCode = fs.readFileSync(registrySolPath, "utf-8");
+  const escrowEngineCode = fs.existsSync(escrowEngineSolPath) ? fs.readFileSync(escrowEngineSolPath, "utf-8") : "";
 
   // 2.1 INVARIANT-16 check on buyerCapsules: Does buyerCapsules revert DataNotFound on out-of-bounds dataId?
-  // INVARIANT-16 specifies: "Khi truy vấn mapping ngoài phạm vi (dataId == 0 || dataId > dataCount), hàm bắt buộc phải revert rõ ràng (revert DataNotFound()), cấm dựa dẫm vào giá trị mặc định của EVM."
-  const buyerCapsulesMatch = registryCode.match(/function buyerCapsules\([^)]*\)[^{]*\{([^}]+(?:\{[^}]*\}[^}]+)*)\}/);
+  const bcStart = registryCode.indexOf("function buyerCapsules(");
+  const bcEnd = bcStart !== -1 ? registryCode.indexOf("function hasActiveAccess(", bcStart) : -1;
+  const buyerCapsulesBody = bcStart !== -1 && bcEnd !== -1 ? registryCode.slice(bcStart, bcEnd) : "";
   let buyerCapsulesRevertsOnOob = false;
-  let buyerCapsulesIgnoresIsGranted = false;
+  let buyerCapsulesIgnoresIsGranted = true;
 
-  if (buyerCapsulesMatch) {
-    const body = buyerCapsulesMatch[1];
-    if (body.includes("revert DataNotFound()")) {
+  if (buyerCapsulesBody) {
+    if (
+      buyerCapsulesBody.includes("revert DataNotFound()") ||
+      (buyerCapsulesBody.includes("_requireValidDataId(dataId)") && registryCode.includes("revert DataNotFound()"))
+    ) {
       buyerCapsulesRevertsOnOob = true;
     }
-    // Check if body requires grant.isGranted or only checks block.timestamp >= grant.expiresAt
-    if (!body.includes("grant.isGranted") && body.includes("msg.sender == researcher")) {
-      buyerCapsulesIgnoresIsGranted = true;
+    if (
+      buyerCapsulesBody.includes("grant.isGranted") ||
+      (buyerCapsulesBody.includes("getBuyerCapsuleByMode") &&
+        escrowEngineCode.includes("_requireActiveGrant(dataId, user)") &&
+        /![\w.]+\.isGranted/.test(escrowEngineCode))
+    ) {
+      buyerCapsulesIgnoresIsGranted = false;
     }
   }
 
@@ -227,7 +236,11 @@ async function runRound3Audit() {
   );
 
   // 2.2 Verify updateDataStatus permanently blocks reactivation of Revoked datasets
-  const updateDataStatusBlocksRevoked = registryCode.includes("data.status == DataStatus.Revoked) revert ConsentPermanentlyRevoked()");
+  const updateDataStatusBlocksRevoked =
+    registryCode.includes("data.status == DataStatus.Revoked) revert ConsentPermanentlyRevoked()") ||
+    (registryCode.includes("function updateDataStatus") &&
+      registryCode.includes("onlyMutableDataOwner(dataId)") &&
+      registryCode.includes("revert ConsentPermanentlyRevoked()"));
   assertTest(
     updateDataStatusBlocksRevoked,
     "GDPR & Protocol Invariant: updateDataStatus() reverts ConsentPermanentlyRevoked() when dataset is Revoked",
@@ -330,7 +343,9 @@ async function runRound3Audit() {
   const datasetServicePath = path.join(ROOT_DIR, "frontend", "src", "services", "datasetService.js");
   const datasetServiceCode = fs.readFileSync(datasetServicePath, "utf-8");
   const checksSummaryDataHash = datasetServiceCode.includes("dataset.summaryDataHash") && datasetServiceCode.includes("computedHash.toLowerCase() !== expectedHash");
-  const checksSummaryCid = datasetServiceCode.includes("computeIpfsCidV0(downloadedBlob)") && datasetServiceCode.includes("computedCid !== dataset.summaryCid");
+  const checksSummaryCid =
+    (datasetServiceCode.includes("computeIpfsCidV0(downloadedBlob)") && datasetServiceCode.includes("computedCid !== dataset.summaryCid")) ||
+    datasetServiceCode.includes("verifySummaryCidIntegrity(dataset.summaryCid, downloadedBlob, computedHash)");
 
   assertTest(
     checksSummaryDataHash && checksSummaryCid,
@@ -418,7 +433,9 @@ async function runRound3Audit() {
 
   const web3DemoPath = path.join(ROOT_DIR, "scripts", "demo", "web3_demo.py");
   const web3DemoCode = fs.readFileSync(web3DemoPath, "utf-8");
-  const usesWeb3ToHex = web3DemoCode.includes("w3.to_hex(receipt.transactionHash)") && web3DemoCode.includes("w3.to_hex(rec2.transactionHash)");
+  const toHexCalls = web3DemoCode.match(/w3\.to_hex\([^)]*transactionHash\)/g) || [];
+  const bareHexTxCalls = web3DemoCode.match(/transactionHash\.hex\(\)/g) || [];
+  const usesWeb3ToHex = toHexCalls.length >= 2 && bareHexTxCalls.length === 0;
 
   assertTest(
     usesWeb3ToHex,

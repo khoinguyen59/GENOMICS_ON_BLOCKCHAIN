@@ -341,7 +341,7 @@ async function runAgent2AdversarialSuite() {
       `Input size: ${testBufferSize}B, Chunks: ${encChunked.chunkCount}, Progress updates: ${progressReports.length}`
     );
 
-    // Verify Header Structure: Magic GNC1 (0x47, 0x4E, 0x43, 0x31)
+    // Verify Header Structure: Magic GNC2 (0x47, 0x4E, 0x43, 0x32 — INV-04 AAD-bound streaming)
     const headerMagic = String.fromCharCode(
       encChunked.payload[0],
       encChunked.payload[1],
@@ -349,8 +349,8 @@ async function runAgent2AdversarialSuite() {
       encChunked.payload[3]
     );
     recordTest(
-      "Crypt4GH Magic Header: Authentic 'GNC1' binary specification header validated",
-      headerMagic === "GNC1",
+      "Crypt4GH Magic Header: Authentic 'GNC2' binary specification header validated",
+      headerMagic === "GNC2",
       `Header magic bytes: 0x${Buffer.from(encChunked.payload.slice(0, 4)).toString("hex")} ("${headerMagic}")`
     );
 
@@ -445,11 +445,11 @@ async function runAgent2AdversarialSuite() {
 
     recordTest(
       "GA4GH Phenopacket v2 Compliance: Schema conforms to strict standard (Individual, Features, Diseases)",
-      phenopacket.schemaVersion === "2.0.0" &&
+      phenopacket.metaData?.phenopacketSchemaVersion === "2.0.0" &&
         phenopacket.subject.id === "ANON_KHV_8821" &&
         phenopacket.files.length > 0 &&
         phenopacket.files[0].fileAttributes.rawDataHash === encVcf.rawDataHash,
-      `Schema version: ${phenopacket.schemaVersion}, Subject: ${phenopacket.subject.id}`
+      `Schema version: ${phenopacket.metaData?.phenopacketSchemaVersion}, Subject: ${phenopacket.subject.id}`
     );
   }
 

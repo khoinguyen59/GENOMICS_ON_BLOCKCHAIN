@@ -162,12 +162,13 @@ async function runRound2AdversarialSuite() {
   const escrowTx = await registry.connect(buyer).grantAccessWithEscrow(1, 86400); // 24h dispute window
   await escrowTx.wait();
 
-  // Verify buyer has active access initially
+  // Under fair-exchange escrow (INV-07), access stays inactive until capsule delivery while funds lock in escrow
   const hasAccessBefore = await registry.hasActiveAccess(1, buyer.address);
+  const escrowDeposit = await registry.escrowDeposits(1, buyer.address);
   assertTest(
-    "Escrow Initialization: Buyer has active access grant upon escrow deposit",
-    hasAccessBefore === true,
-    `Buyer access granted for Dataset #1, 100 $GENO locked in escrow contract`
+    "Escrow Initialization (INV-07): Funds locked in escrow and access withheld until capsule delivery",
+    hasAccessBefore === false && escrowDeposit.amount === ethers.parseEther("100") && !escrowDeposit.released,
+    `Escrow locked 100 $GENO; hasActiveAccess=${hasAccessBefore} prior to capsule delivery`
   );
 
   // Data Owner PAUSES or REVOKES the dataset

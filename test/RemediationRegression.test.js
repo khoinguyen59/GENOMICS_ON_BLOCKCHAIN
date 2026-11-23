@@ -1969,12 +1969,18 @@ assert gw.extract_canonical_multihash(CID_RAW_V1) == mh_raw
 
 CID_ORPHAN = "b" + base64.b32encode(bytes([0x01, 0x55, 0x12, 0x20]) + hashlib.sha256(b"rev03_orphan_payload").digest()).decode("ascii").rstrip("=").lower()
 CID_PREGC = "b" + base64.b32encode(bytes([0x01, 0x55, 0x12, 0x20]) + hashlib.sha256(b"l3l1_pregc_payload").digest()).decode("ascii").rstrip("=").lower()
+CID_REUP = "b" + base64.b32encode(bytes([0x01, 0x55, 0x12, 0x20]) + hashlib.sha256(b"l3l1_reupload_payload").digest()).decode("ascii").rstrip("=").lower()
+CID_OUTAGE = "b" + base64.b32encode(bytes([0x01, 0x55, 0x12, 0x20]) + hashlib.sha256(b"rpc_outage_502_payload").digest()).decode("ascii").rstrip("=").lower()
+CID_RACE = "b" + base64.b32encode(bytes([0x01, 0x55, 0x12, 0x20]) + hashlib.sha256(b"l3l2_unpin_race_payload").digest()).decode("ascii").rstrip("=").lower()
 CID_TINY = "b" + base64.b32encode(bytes([0x01, 0x55, 0x12, 0x20]) + hashlib.sha256(b"l301_tiny_chunks").digest()).decode("ascii").rstrip("=").lower()
 
 META_BYTES = b'{"id":"ANON_VICTIM_01","phenopacket":true}'
 RAW_BYTES = b"GNC2_ENCRYPTED_VICTIM_RAW_SEQ_BYTES"
 ORPHAN_BYTES = b"ABANDONED_VICTIM_UPLOAD_BYTES"
 PREGC_BYTES = b"PRE_GC_PROTECTED_CIPHERTEXT_BYTES"
+REUP_BYTES = b"DELAYED_GC_LEGIT_REUPLOAD_BYTES"
+OUTAGE_BYTES = b"RPC_OUTAGE_SHOULD_NOT_PIN_BYTES"
+RACE_BYTES = b"CONCURRENT_UNPIN_TOCTOU_RACE_BYTES"
 
 def sign_upload(acct, payload_bytes, ts, nonce):
     sha = hashlib.sha256(payload_bytes).hexdigest()
@@ -2005,9 +2011,13 @@ class Phase5Reg:
         self.datasets = []
         self.events = []
         self.licenses = {}
-    def is_connected(self): return True
+        self.fail_catalog_rpc = False
+    def is_connected(self): return not self.fail_catalog_rpc
     def get_block_number(self): return 50
-    def get_all_datasets(self): return list(self.datasets)
+    def get_all_datasets(self):
+        if self.fail_catalog_rpc:
+            raise RuntimeError("Simulated Ethereum RPC outage")
+        return list(self.datasets)
     def get_genomic_data(self, d):
         for ds in self.datasets:
             if ds["dataId"] == int(d): return ds
@@ -2022,12 +2032,14 @@ class Phase5Kubo:
             CID_META_V0: META_BYTES, CID_META_V1: META_BYTES,
             CID_RAW_V0: RAW_BYTES, CID_RAW_V1: RAW_BYTES,
             CID_ORPHAN: ORPHAN_BYTES, CID_PREGC: PREGC_BYTES,
+            CID_REUP: REUP_BYTES,
         }
         self.pins = {CID_META_V0: len(META_BYTES), CID_RAW_V0: len(RAW_BYTES)}
         self.gc_should_succeed = True
         self.gc_runs = 0
+        self.on_unpin_hook = None
     def health_check(self): return True
-    def add_stream(self, stream, filename, content_length, cid_version=1):
+    def add_stream(self, stream, filename, content_length, cid_version=1, pin=True):
         data = stream.read(content_length)
         if data == META_BYTES:
             cid = CID_META_V1
@@ -2037,18 +2049,31 @@ class Phase5Kubo:
             cid = CID_ORPHAN
         elif data == PREGC_BYTES:
             cid = CID_PREGC
+        elif data == REUP_BYTES:
+            cid = CID_REUP
+        elif data == OUTAGE_BYTES:
+            cid = CID_OUTAGE
         else:
             cid = CID_TINY
         self.blobs[cid] = data
-        self.pins[cid] = len(data)
+        if pin:
+            self.pins[cid] = len(data)
         return {"cid": cid, "size": len(data)}
+    def pin_cid(self, cid):
+        if cid not in self.blobs:
+            raise FileNotFoundError(cid)
+        self.pins[cid] = len(self.blobs[cid])
+        return True
     def list_recursive_pins(self): return list(self.pins.keys())
     def cat_cid(self, cid):
         if cid not in self.blobs:
             raise FileNotFoundError(cid)
         return self.blobs[cid]
     def unpin_cid(self, cid):
-        return self.pins.pop(cid, None) is not None
+        res = self.pins.pop(cid, None) is not None
+        if callable(self.on_unpin_hook):
+            self.on_unpin_hook(cid)
+        return res
     def run_gc(self):
         self.gc_runs += 1
         if not self.gc_should_succeed:
@@ -2280,6 +2305,94 @@ with tempfile.TemporaryDirectory() as td:
             assert usage_calls[0] <= 3, f"L3-01 fired {usage_calls[0]} SQLite quota checks for 32 tiny chunks!"
         finally:
             srv.gateway_upload_limiter._usage_locked = orig_usage
+
+        # ------------------------------------------------------------------
+        # Phase 5 Review Hardening #1: Zero untracked Kubo pins on 403 / 502!
+        # ------------------------------------------------------------------
+        assert CID_META_V1 not in kubo.pins, "403 REV-01A cross-owner re-upload polluted Kubo pins with CID_META_V1!"
+        assert CID_RAW_V1 not in kubo.pins, "403 REV-01B cross-owner re-upload polluted Kubo pins with CID_RAW_V1!"
+        reg.fail_catalog_rpc = True
+        srv.gateway_catalog_index.invalidate()
+        try:
+            req_502 = urllib.request.Request(
+                f"http://127.0.0.1:{port}/api/v0/upload",
+                data=OUTAGE_BYTES,
+                headers=sign_upload(VICTIM, OUTAGE_BYTES, now_ts, "outage-502-nopin-0001"),
+                method="POST",
+            )
+            st_502 = None
+            try:
+                urllib.request.urlopen(req_502, timeout=5)
+            except urllib.error.HTTPError as e:
+                st_502 = e.code
+            assert st_502 == 502, f"Expected 502 on catalog RPC outage, got {st_502}"
+            assert CID_OUTAGE not in kubo.pins, "502 RPC outage leaked an untracked immortal Kubo pin!"
+            # Direct record_pending_upload() MUST also fail closed when catalog RPC is down!
+            assert srv.gateway_upload_limiter.record_pending_upload(CID_OUTAGE, ATTACKER.address, len(OUTAGE_BYTES), now_ts) is False
+            assert srv.gateway_upload_limiter.get_upload_provenance(gw.extract_canonical_multihash(CID_OUTAGE)) is None
+        finally:
+            reg.fail_catalog_rpc = False
+            srv.gateway_catalog_index.invalidate()
+
+        # ------------------------------------------------------------------
+        # Phase 5 Review Hardening #2A: Delayed GC MUST NOT wipe provenance of a legitimate re-upload!
+        # ------------------------------------------------------------------
+        mh_reup = gw.extract_canonical_multihash(CID_REUP)
+        req_reup1 = urllib.request.Request(
+            f"http://127.0.0.1:{port}/api/v0/upload",
+            data=REUP_BYTES,
+            headers=sign_upload(VICTIM, REUP_BYTES, now_ts, "reup-legit-nonce-0001"),
+            method="POST",
+        )
+        with urllib.request.urlopen(req_reup1, timeout=5) as r_reup1:
+            assert r_reup1.status == 200
+        reg.datasets.append({
+            "dataId": 9, "tokenId": 9, "currentOwner": VICTIM.address, "originalCreator": VICTIM.address,
+            "rawCid": CID_REUP, "summaryCid": "", "metadataCid": "", "status": 2,
+        })
+        reg.events.append({"dataId": 9, "newStatus": 2})
+        rec_reup = gw.GdprErasureReconciler(reg, kubo, start_block=1, db_path=db_path, now_fn=lambda: now_ts + 2)
+        try:
+            kubo.gc_should_succeed = False
+            r_reup_fail = rec_reup.reconcile_once()
+            assert r_reup_fail["gcRan"] is False and r_reup_fail["gcPending"] is True
+            # Before delayed GC succeeds, Victim legitimately re-uploads CID_REUP!
+            req_reup2 = urllib.request.Request(
+                f"http://127.0.0.1:{port}/api/v0/upload",
+                data=REUP_BYTES,
+                headers=sign_upload(VICTIM, REUP_BYTES, now_ts + 5, "reup-legit-nonce-0002"),
+                method="POST",
+            )
+            with urllib.request.urlopen(req_reup2, timeout=5) as r_reup2:
+                assert r_reup2.status == 200
+            # Now delayed GC succeeds: Victim's re-uploaded provenance & pin MUST survive!
+            kubo.gc_should_succeed = True
+            r_reup_ok = rec_reup.reconcile_once()
+            assert r_reup_ok["gcRan"] is True
+            assert srv.gateway_upload_limiter.get_upload_provenance(mh_reup) == VICTIM.address.lower(), "Delayed GC wiped provenance of legitimate re-upload!"
+            assert CID_REUP in kubo.pins, "Delayed GC lost pin of legitimate re-upload!"
+        finally:
+            rec_reup.close()
+
+        # ------------------------------------------------------------------
+        # Phase 5 Review Hardening #2B: Post-unpin TOCTOU concurrent re-upload recovery!
+        # ------------------------------------------------------------------
+        rec_race = gw.GdprErasureReconciler(reg, kubo, start_block=1, db_path=db_path, orphan_pin_ttl_sec=60, now_fn=lambda: now_ts + 1000)
+        assert srv.gateway_upload_limiter.record_pending_upload(CID_RACE, VICTIM.address, len(RACE_BYTES), now_ts) is True
+        kubo.blobs[CID_RACE] = RACE_BYTES
+        kubo.pins[CID_RACE] = len(RACE_BYTES)
+        def _simulate_concurrent_reupload(unpinned_cid):
+            if unpinned_cid == CID_RACE:
+                srv.gateway_upload_limiter.record_pending_upload(CID_RACE, VICTIM.address, len(RACE_BYTES), now_ts + 1000)
+        kubo.on_unpin_hook = _simulate_concurrent_reupload
+        try:
+            unpinned_race = rec_race.reconcile_orphan_uploads(now_ts=now_ts + 1000)
+            assert CID_RACE not in unpinned_race, "Concurrent re-upload during unpin was still reported as orphan-unpinned!"
+            assert CID_RACE in kubo.pins, "Concurrent re-upload during unpin was NOT re-pinned in Kubo!"
+            assert srv.gateway_upload_limiter.get_upload_provenance(gw.extract_canonical_multihash(CID_RACE)) == VICTIM.address.lower()
+        finally:
+            kubo.on_unpin_hook = None
+            rec_race.close()
     finally:
         srv.shutdown(); srv.server_close()
 
@@ -2305,8 +2418,12 @@ print("PHASE5_GATEWAY_REMEDIATION_OK")
     expect(await getAllOwnerCapsulesPersistent("")).to.deep.equal([]);
     expect(await getAllBuyerCapsulesPersistent("")).to.deep.equal([]);
 
-    // Cross-account scope isolation: buyer cannot read seller's owner capsule and vice versa
+    // Cross-account scope isolation: buyer cannot read seller's owner capsule and vice versa,
+    // AND read-path must NEVER mutate module-global activeVaultAccount!
+    await saveOwnerCapsulePersistent(CID_A, capOwner, seller.address); // sets activeVaultAccount = seller
     expect(await loadOwnerCapsulePersistent(CID_A, buyer.address)).to.equal(null);
+    // If read mutated activeVaultAccount to buyer, default-scope read would fail; must still resolve seller!
+    expect(await loadOwnerCapsulePersistent(CID_A)).to.equal(capOwner);
     expect(await loadBuyerCapsulePersistent(CID_B, seller.address)).to.equal(null);
     expect(await getAllOwnerCapsulesPersistent(buyer.address)).to.deep.equal([]);
     expect(await getAllBuyerCapsulesPersistent(seller.address)).to.deep.equal([]);
@@ -2315,8 +2432,11 @@ print("PHASE5_GATEWAY_REMEDIATION_OK")
     expect(await loadOwnerCapsulePersistent(CID_A, seller.address)).to.equal(capOwner);
     expect(await loadBuyerCapsulePersistent(CID_B, buyer.address)).to.equal(capBuyer);
     clearVaultMemoryCache();
+    // After clearing activeVaultAccount (wallet disconnected), null buyer scope MUST fail closed!
+    expect(await loadBuyerCapsulePersistent(CID_B, null)).to.equal(null);
+    expect(await getAllBuyerCapsulesPersistent(null)).to.deep.equal([]);
 
-    // Verify L4-L1 focus ring tokens, L4-L3 modal guard on '/', and REV-I06 pure setPurchasedData updater
+    // Verify L4-L1 focus ring tokens, L4-L3 modal guard on '/', and REV-I06 pure setPurchasedData updater + unmount scrub
     const tokensCss = fs.readFileSync(path.resolve("frontend/src/styles/tokens.css"), "utf8");
     expect(tokensCss).to.include("--focus-ring-color: #005fcc;");
     expect(tokensCss).to.include("--focus-ring-color: #38bdf8;");
@@ -2326,5 +2446,6 @@ print("PHASE5_GATEWAY_REMEDIATION_OK")
     expect(filterBarSrc).to.include('[role="dialog"][aria-modal="true"]');
     const decHookSrc = fs.readFileSync(path.resolve("frontend/src/hooks/useDatasetDecryption.js"), "utf8");
     expect(decHookSrc).to.not.include("p.decryptedPdfBytes.fill(0)");
+    expect(decHookSrc).to.include("useEffect(() =>");
   });
 });

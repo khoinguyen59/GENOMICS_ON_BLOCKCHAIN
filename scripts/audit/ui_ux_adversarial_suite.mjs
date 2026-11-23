@@ -140,27 +140,39 @@ assert(
   `Buttons=${totalButtons} (unlabelled icon-only=${iconOnlyButtonsWithoutLabel}), focusVisible=${hasFocusVisibleRule}, bareGlobalOutlineNone=${hasBareGlobalOutlineNone}, htmlLangSync=${hasDynamicHtmlLangSync}`
 );
 
-// Test 2: Input fields have accompanying labels or aria-label attributes
+// Test 2: Input fields have explicit accessible names (aria-label/aria-labelledby/title or associated <label htmlFor>)
 let unlabelledInputs = 0;
 let totalInputs = 0;
+const unlabelledInputHits = [];
 for (const file of jsxFiles.filter(f => f.endsWith('.jsx'))) {
+  const rel = path.relative(rootDir, file);
   const content = fs.readFileSync(file, 'utf8');
   for (const inp of scanJsxTags(content, 'input')) {
+    if (/\btype\s*=\s*["']hidden["']/i.test(inp.attrs)) continue;
     totalInputs++;
+    const idMatch = inp.attrs.match(/\bid\s*=\s*["']([^"']+)["']/);
+    const escapedId = idMatch ? idMatch[1].replace(/[.*+?^${}()|[\]\\]/g, '\\$&') : null;
+    const hasAssociatedLabel = Boolean(
+      escapedId && new RegExp(`\\bhtmlFor\\s*=\\s*["']${escapedId}["']`).test(content)
+    );
     const hasLabel =
       /\baria-label\s*=/.test(inp.attrs) ||
       /\baria-labelledby\s*=/.test(inp.attrs) ||
-      /\bplaceholder\s*=/.test(inp.attrs) ||
-      /\bid\s*=/.test(inp.attrs) ||
-      /\btitle\s*=/.test(inp.attrs);
-    if (!hasLabel) unlabelledInputs++;
+      /\btitle\s*=/.test(inp.attrs) ||
+      hasAssociatedLabel;
+    if (!hasLabel) {
+      unlabelledInputs++;
+      unlabelledInputHits.push(rel);
+    }
   }
 }
 assert(
   unlabelledInputs === 0,
   'A11Y-02',
-  'Form inputs enforce accessibility labels or descriptive placeholders (WCAG 2.2 Input Purpose)',
-  `Scanned ${totalInputs} inputs across ${jsxFiles.length} components. Inputs lacking accessibility cues: ${unlabelledInputs}`
+  'Form inputs enforce explicit aria-label, aria-labelledby, title, or associated <label htmlFor> (WCAG 2.2 Input Purpose)',
+  unlabelledInputs === 0
+    ? `Scanned ${totalInputs} inputs across ${jsxFiles.length} components. Inputs lacking explicit accessible labels: 0`
+    : `Inputs lacking explicit accessible labels (${unlabelledInputs}) in: ${unlabelledInputHits.join(', ')}`
 );
 
 // Test 3: Modal dialogs implement strict ARIA dialog semantics + LIFO focus trap
@@ -284,7 +296,8 @@ for (const file of jsxFiles) {
     /\.innerHTML\s*=/.test(content) ||
     /\.outerHTML\s*=/.test(content) ||
     /\bdocument\.write\s*\(/.test(content) ||
-    /\beval\s*\(/.test(content)
+    /\beval\s*\(/.test(content) ||
+    /\bnew\s+Function\b/.test(content)
   ) {
     unsafeSinkHits.push(rel);
   }

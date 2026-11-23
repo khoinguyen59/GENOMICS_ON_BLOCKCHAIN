@@ -143,6 +143,7 @@ async function main() {
       console.log("  [PASS #2] Out-of-bounds queries uniformly revert.");
     }
   } catch (err) {
+    defectCount++;
     console.error("Test 2 error:", err);
   }
 
@@ -212,6 +213,7 @@ async function main() {
       console.log("  [PASS #3] Grant state cleaned up symmetrically.");
     }
   } catch (err) {
+    defectCount++;
     console.error("Test 3 error:", err);
   }
 
@@ -272,9 +274,11 @@ async function main() {
       passCount++;
       console.log("  [PASS #4] Secondary NFT Sale Resolved: New NFT owner successfully delivers capsule and receives 90 GENO proceeds (10 GENO royalty to creator).");
     } else {
+      defectCount++;
       console.log("  [FAIL #4] Expected original seller delivery to revert with NotDataOwner.");
     }
   } catch (err) {
+    defectCount++;
     console.error("Test 4 error:", err);
   }
 
@@ -308,6 +312,7 @@ async function main() {
       console.log("  [PASS #5] PDF xref offsets match byte boundaries perfectly.");
     }
   } catch (err) {
+    defectCount++;
     console.error("Test 5 error:", err);
   }
 
@@ -335,6 +340,7 @@ async function main() {
       console.log("  [PASS #6] No false pass claims found.");
     }
   } catch (err) {
+    defectCount++;
     console.error("Test 6 error:", err);
   }
 
@@ -377,6 +383,7 @@ async function main() {
       console.log("  [PASS #7] Pure molecular genetics enforced across data files.");
     }
   } catch (err) {
+    defectCount++;
     console.error("Test 7 error:", err);
   }
 
@@ -412,12 +419,16 @@ async function main() {
       console.log("  [PASS #8] Zero fake CIDs found in test suites.");
     }
   } catch (err) {
+    defectCount++;
     console.error("Test 8 error:", err);
   }
 
   console.log("\n" + "=".repeat(88));
   console.log(`ADVERSARIAL STRESS SUITE SUMMARY: ${passCount} Passed, ${defectCount} Verified Defect Candidates Found`);
   console.log("=".repeat(88));
+  if (defectCount > 0) {
+    process.exit(1);
+  }
 }
 
 main().catch((err) => {

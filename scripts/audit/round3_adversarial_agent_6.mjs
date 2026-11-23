@@ -482,7 +482,8 @@ async function runRound3AdversarialSuite() {
 
 runRound3AdversarialSuite()
   .then((res) => {
-    process.exit(res.findings.length > 0 ? 0 : 0); // Always exit cleanly for reporter
+    const failed = res.findings.length > 0 || res.passedTests !== res.totalTests;
+    process.exit(failed ? 1 : 0);
   })
   .catch((err) => {
     console.error("FATAL AUDIT ERROR:", err);

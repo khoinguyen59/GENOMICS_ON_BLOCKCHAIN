@@ -432,7 +432,7 @@ export default function OpenSeaSpotlightShowcase({ onPurchase }) {
                   e.stopPropagation();
                   setSlideIdx((prev) => (prev - 1 + slides.length) % slides.length);
                 }}
-                aria-label="Previous spotlight cohort"
+                aria-label={t("ariaPrevSpotlight")}
               >
                 ‹
               </button>
@@ -443,7 +443,7 @@ export default function OpenSeaSpotlightShowcase({ onPurchase }) {
                   e.stopPropagation();
                   setSlideIdx((prev) => (prev + 1) % slides.length);
                 }}
-                aria-label="Next spotlight cohort"
+                aria-label={t("ariaNextSpotlight")}
               >
                 ›
               </button>
@@ -483,7 +483,7 @@ export default function OpenSeaSpotlightShowcase({ onPurchase }) {
                     type="button"
                     className="os2-hero-contract-chip"
                     onClick={handleCopyContract}
-                    title="Copy GenomicsRegistry Contract Address"
+                    title={t("ariaCopyRegistryAddress")}
                   >
                     <span>{contractAddr.length >= 42 ? `${contractAddr.slice(0, 6)}...${contractAddr.slice(38)}` : (contractAddr || "N/A")}</span>
                     {copiedContract ? <CheckCircleIcon size={11} color="#10b981" /> : <CopyIcon size={11} />}
@@ -608,7 +608,7 @@ export default function OpenSeaSpotlightShowcase({ onPurchase }) {
                   type="button"
                   className={`os2-page-dash ${idx === safeSlideIdx ? "active" : ""}`}
                   onClick={() => setSlideIdx(idx)}
-                  aria-label={`Slide ${idx + 1}`}
+                  aria-label={`${t("ariaSlidePrefix")} ${idx + 1}`}
                 />
               ))}
             </div>

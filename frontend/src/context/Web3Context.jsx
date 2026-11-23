@@ -32,11 +32,13 @@ export const CONFIGURED_CHAIN_ID = (() => {
   const parsed = raw !== undefined && String(raw).trim() !== "" ? Number(raw) : Number(contractAddresses.chainId || 31337);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : 31337;
 })();
+const COMPILE_TIME_NON_LOCAL =
+  typeof __GENOCHAIN_NON_LOCAL_CHAIN__ !== "undefined" && __GENOCHAIN_NON_LOCAL_CHAIN__;
 export const CONFIGURED_RPC_URL = (() => {
   const raw = typeof import.meta !== "undefined" ? String(import.meta.env?.VITE_RPC_URL || "").trim() : "";
   if (raw) return raw;
-  // Never dial 127.0.0.1:8545 on non-31337 networks when VITE_RPC_URL is unset
-  return CONFIGURED_CHAIN_ID === 31337 ? "http://127.0.0.1:8545" : "";
+  // Never dial or bundle 127.0.0.1:8545 on non-31337 networks when VITE_RPC_URL is unset
+  return !COMPILE_TIME_NON_LOCAL && CONFIGURED_CHAIN_ID === 31337 ? "http://127.0.0.1:8545" : "";
 })();
 export const CONFIGURED_CHAIN_HEX = `0x${CONFIGURED_CHAIN_ID.toString(16)}`;
 export const CONFIGURED_CHAIN_NAME =

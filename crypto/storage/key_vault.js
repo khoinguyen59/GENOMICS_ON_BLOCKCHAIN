@@ -193,18 +193,15 @@ export async function saveOwnerCapsulePersistent(rawCid, capsule, account = null
 
 export async function loadOwnerCapsulePersistent(rawCid, account = null) {
   if (!rawCid) return null;
+  if (account !== null && account !== undefined && (typeof account !== "string" || account.trim().length === 0)) {
+    return null;
+  }
   const scopedKey = makeScopedCidKey(rawCid, account);
   try {
     const idb = await withStore("vault_capsules", "readonly", (s) => s.get(scopedKey));
     if (typeof idb === "string" && idb.length > 0) return idb;
   } catch (e) { console.warn("IndexedDB capsule read error:", e); }
   if (memCapsuleStore.has(scopedKey)) return memCapsuleStore.get(scopedKey);
-  if (!account) {
-    for (const [k, v] of memCapsuleStore.entries()) {
-      if (k.startsWith(BUYER_SCOPE_PREFIX)) continue;
-      if (k === rawCid || k.endsWith(`:${rawCid}`)) return v;
-    }
-  }
   return null;
 }
 
@@ -225,27 +222,35 @@ export async function saveBuyerCapsulePersistent(rawCid, capsule, account = null
 
 export async function loadBuyerCapsulePersistent(rawCid, account = null) {
   if (!rawCid) return null;
-  const scopedKey = makeScopedBuyerKey(rawCid, account);
+  if (account !== null && account !== undefined && (typeof account !== "string" || account.trim().length === 0)) {
+    return null;
+  }
+  const targetAccount =
+    typeof account === "string" && account.trim().length > 0
+      ? account.trim().toLowerCase()
+      : activeVaultAccount;
+  if (!targetAccount) return null;
+  const scopedKey = `${BUYER_SCOPE_PREFIX}${targetAccount}:${rawCid}`;
   try {
     const idb = await withStore("vault_capsules", "readonly", (s) => s.get(scopedKey));
     if (typeof idb === "string" && idb.length > 0) return idb;
   } catch (e) { console.warn("IndexedDB buyer capsule read error:", e); }
   if (memCapsuleStore.has(scopedKey)) return memCapsuleStore.get(scopedKey);
-  if (!account) {
-    for (const [k, v] of memCapsuleStore.entries()) {
-      if (k.startsWith(BUYER_SCOPE_PREFIX) && k.endsWith(`:${rawCid}`)) return v;
-    }
-  }
   return null;
 }
 
 export async function getAllBuyerCapsulesPersistent(account = null) {
-  const scopePrefix = account
-    ? `${BUYER_SCOPE_PREFIX}${account.trim().toLowerCase()}:`
-    : (activeVaultAccount ? `${BUYER_SCOPE_PREFIX}${activeVaultAccount}:` : BUYER_SCOPE_PREFIX);
+  if (account !== null && account !== undefined && (typeof account !== "string" || account.trim().length === 0)) {
+    return [];
+  }
+  const targetAccount =
+    typeof account === "string" && account.trim().length > 0
+      ? account.trim().toLowerCase()
+      : activeVaultAccount;
+  if (!targetAccount) return [];
+  const scopePrefix = `${BUYER_SCOPE_PREFIX}${targetAccount}:`;
   const matchesBuyer = (key, capStr) => {
     if (typeof key !== "string" || !key.startsWith(BUYER_SCOPE_PREFIX)) return false;
-    if (scopePrefix === BUYER_SCOPE_PREFIX) return true;
     if (key.startsWith(scopePrefix)) return true;
     if (typeof capStr === "string" && capStr.startsWith("{")) {
       try {
@@ -293,12 +298,18 @@ export async function getAllBuyerCapsulesPersistent(account = null) {
 }
 
 export async function getAllOwnerCapsulesPersistent(account = null) {
-  const scopePrefix = account ? `${account.trim().toLowerCase()}:` : (activeVaultAccount ? `${activeVaultAccount}:` : null);
+  if (account !== null && account !== undefined && (typeof account !== "string" || account.trim().length === 0)) {
+    return [];
+  }
+  const targetAccount =
+    typeof account === "string" && account.trim().length > 0
+      ? account.trim().toLowerCase()
+      : (activeVaultAccount || "global");
+  const scopePrefix = `${targetAccount}:`;
   const matchesAccount = (key, capStr) => {
     if (typeof key === "string" && key.startsWith(BUYER_SCOPE_PREFIX)) return false;
-    if (!scopePrefix) return true;
     if (typeof key === "string" && key.startsWith(scopePrefix)) return true;
-    if (typeof capStr === "string" && capStr.startsWith("{")) {
+    if (targetAccount !== "global" && typeof capStr === "string" && capStr.startsWith("{")) {
       try {
         const parsed = JSON.parse(capStr);
         if (parsed?.owner && `${parsed.owner.toLowerCase()}:` === scopePrefix) return true;

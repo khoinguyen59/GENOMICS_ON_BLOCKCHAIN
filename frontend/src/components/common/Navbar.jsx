@@ -115,7 +115,7 @@ export default function Navbar() {
 
       {/* Right: Role Switcher, Sign in / Wallet Cluster & Profile Circle */}
       <div className="os2-top-right">
-        <div className="os2-role-switch-group" role="group" aria-label="Role Switcher">
+        <div className="os2-role-switch-group" role="group" aria-label={t("ariaRoleSwitcher")}>
           <button
             id="navbar-role-researcher"
             type="button"
@@ -230,7 +230,7 @@ export default function Navbar() {
         )}
 
         {/* Language & Theme Switchers */}
-        <div className="os2-pill-group os2-lang-group" role="group" aria-label="Language Switcher">
+        <div className="os2-pill-group os2-lang-group" role="group" aria-label={t("ariaLanguageSwitcher")}>
           <button
             id="navbar-lang-vi"
             type="button"

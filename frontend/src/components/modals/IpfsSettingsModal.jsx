@@ -84,7 +84,11 @@ export default function IpfsSettingsModal() {
               className="field-input"
               value={kuboRpcInput}
               onChange={(e) => setKuboRpcInput(e.target.value)}
-              placeholder="http://127.0.0.1:5001"
+              placeholder={
+                typeof __GENOCHAIN_NON_LOCAL_CHAIN__ !== "undefined" && __GENOCHAIN_NON_LOCAL_CHAIN__
+                  ? "https://ipfs-api.genochain.example.com"
+                  : "http://127.0.0.1:5001"
+              }
             />
           </div>
 

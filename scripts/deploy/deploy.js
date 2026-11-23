@@ -85,6 +85,7 @@ async function main() {
   const skipSeeding = parseEnvFlag("SKIP_SEEDING");
   const disableFaucet = parseEnvFlag("DISABLE_FAUCET");
   const skipZkCeremony = parseEnvFlag("SKIP_ZK_CEREMONY");
+  const enableTimelock = parseEnvFlag("ENABLE_TIMELOCK");
   const rawFaucetVoucherSigner = String(process.env.FAUCET_VOUCHER_SIGNER || "").trim();
   const rawCapsuleDispatcher = String(process.env.CAPSULE_DISPATCHER_ADDRESS || "").trim();
   const rawInitialLabAttestor = String(process.env.INITIAL_LAB_ATTESTOR || "").trim();
@@ -118,7 +119,7 @@ async function main() {
   if (researcher) {
     console.log(`Researcher (#2)    : ${researcher.address}`);
   }
-  console.log(`Production Flags   : SKIP_SEEDING=${skipSeeding ? 1 : 0}, DISABLE_FAUCET=${disableFaucet ? 1 : 0}, ENABLE_TIMELOCK=${process.env.ENABLE_TIMELOCK === "1" ? 1 : 0}`);
+  console.log(`Production Flags   : SKIP_SEEDING=${skipSeeding ? 1 : 0}, DISABLE_FAUCET=${disableFaucet ? 1 : 0}, ENABLE_TIMELOCK=${enableTimelock ? 1 : 0}`);
 
   let faucetVoucherSigner = null;
   if (rawFaucetVoucherSigner) {
@@ -158,7 +159,7 @@ async function main() {
 
   // Fail-fast Timelock governance env validation BEFORE sending any deployment transactions (0 gas wasted)
   let timelockConfig = null;
-  if (process.env.ENABLE_TIMELOCK === "1") {
+  if (enableTimelock) {
     const rawDelayEnv = process.env.TIMELOCK_DELAY_SEC;
     let minDelaySec = 172800;
     if (rawDelayEnv !== undefined && String(rawDelayEnv).trim() !== "") {
@@ -1019,15 +1020,16 @@ async function main() {
     Deployer: deployer.address,
   };
 
-  const outputDir = path.resolve(process.env.OUTPUT_CONTRACTS_DIR || "frontend/src/contracts");
-  if (!fs.existsSync(outputDir)) {
-    fs.mkdirSync(outputDir, { recursive: true });
+  const outputContractsDir = path.resolve(process.env.OUTPUT_CONTRACTS_DIR || "frontend/src/contracts");
+  if (!fs.existsSync(outputContractsDir)) {
+    fs.mkdirSync(outputContractsDir, { recursive: true });
   }
+  const addressesOutPath = path.join(outputContractsDir, "contractAddresses.json");
   fs.writeFileSync(
-    path.join(outputDir, "contractAddresses.json"),
+    addressesOutPath,
     JSON.stringify(addresses, null, 2)
   );
-  console.log(`\n[FILE] Contract addresses saved to frontend/src/contracts/contractAddresses.json (deployedBlock=${deployedBlock})`);
+  console.log(`\n[FILE] Contract addresses saved to ${addressesOutPath} (deployedBlock=${deployedBlock})`);
 
   // Save Contract ABIs for frontend
   const contractsToExport = ["GenomicToken", "GenomicNFT", "GenomicsRegistry", "GenomicZkVerifier", "GenomicTimelock"];
@@ -1035,11 +1037,12 @@ async function main() {
     const artifactPath = path.resolve(`artifacts/contracts/${name}.sol/${name}.json`);
     if (fs.existsSync(artifactPath)) {
       const artifact = JSON.parse(fs.readFileSync(artifactPath, "utf8"));
+      const abiOutPath = path.join(outputContractsDir, `${name}ABI.json`);
       fs.writeFileSync(
-        path.join(outputDir, `${name}ABI.json`),
+        abiOutPath,
         JSON.stringify(artifact.abi, null, 2)
       );
-      console.log(`[FILE] Exported ABI for ${name} to frontend/src/contracts/${name}ABI.json`);
+      console.log(`[FILE] Exported ABI for ${name} to ${abiOutPath}`);
     }
   }
 
@@ -1048,11 +1051,12 @@ async function main() {
     seeds: publicSeeds,
   };
 
+  const seedMetadataOutPath = path.join(outputContractsDir, "seedMetadata.json");
   fs.writeFileSync(
-    path.join(outputDir, "seedMetadata.json"),
+    seedMetadataOutPath,
     JSON.stringify(publicSeedDataStore, null, 2)
   );
-  console.log(`[FILE] Public seed metadata catalog saved to frontend/src/contracts/seedMetadata.json (${publicSeeds.length} Cohorts, Zero keys leaked)`);
+  console.log(`[FILE] Public seed metadata catalog saved to ${seedMetadataOutPath} (${publicSeeds.length} Cohorts, Zero keys leaked)`);
 
   // Private key envelopes saved strictly to git-ignored .local/ dispatcher vault
   const localVaultDir = path.resolve(process.env.LOCAL_VAULT_DIR || ".local");
@@ -1065,21 +1069,23 @@ async function main() {
     deployerAddress: deployer.address,
     seeds: secretSeeds,
   };
+  const vaultOutPath = path.join(localVaultDir, "dispatcher_seed_vault.json");
   fs.writeFileSync(
-    path.join(localVaultDir, "dispatcher_seed_vault.json"),
+    vaultOutPath,
     JSON.stringify(secretKeyStore, null, 2),
     { mode: 0o600 }
   );
-  console.log(`[SECURITY] Seed secret envelopes saved strictly to .local/dispatcher_seed_vault.json (vaultVersion=2, kdf=${dispatcherVaultMeta.algorithm})`);
+  console.log(`[SECURITY] Seed secret envelopes saved strictly to ${vaultOutPath} (vaultVersion=2, kdf=${dispatcherVaultMeta.algorithm})`);
 
   if (timelockHandoff) {
     timelockHandoff.chainId = liveChainId;
+    const handoffOutPath = path.join(localVaultDir, "timelock_handoff.json");
     fs.writeFileSync(
-      path.join(localVaultDir, "timelock_handoff.json"),
+      handoffOutPath,
       JSON.stringify(timelockHandoff, null, 2),
       { mode: 0o600 }
     );
-    console.log("[GOV] Saved Timelock batch handoff payload to .local/timelock_handoff.json");
+    console.log(`[GOV] Saved Timelock batch handoff payload to ${handoffOutPath}`);
   }
 
   console.log("\n==================================================");

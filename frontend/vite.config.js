@@ -43,7 +43,12 @@ function stripLoopbackCspForNonLocalChains(chainIdRaw) {
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
   const effectiveChainId = process.env.VITE_CHAIN_ID ?? env.VITE_CHAIN_ID ?? "";
+  const trimmedChainId = String(effectiveChainId || "").trim();
+  const isNonLocal = trimmedChainId !== "" && trimmedChainId !== "31337";
   return {
+    define: {
+      __GENOCHAIN_NON_LOCAL_CHAIN__: JSON.stringify(isNonLocal),
+    },
     plugins: [react(), stripLoopbackCspForNonLocalChains(effectiveChainId)],
     resolve: {
       alias: {

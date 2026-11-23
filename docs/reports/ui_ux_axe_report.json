@@ -1,0 +1,397 @@
+{
+  "scenarios_count": 34,
+  "blocking_violations_total": 0,
+  "overflow_failures_total": 0,
+  "wcag_live_checks": {
+    "htmlLangSync": {
+      "vi": "vi",
+      "en": "en",
+      "viBack": "vi",
+      "passed": true
+    },
+    "searchClearTargetSize": {
+      "rendered": true,
+      "width": 24,
+      "height": 24,
+      "meets24px": true
+    },
+    "keyboardFocusVisible": {
+      "focusedTag": "BUTTON",
+      "focusedId": "navbar-role-researcher",
+      "matchesFocusVisible": true,
+      "outlineStyle": "solid",
+      "outlineWidth": "2px",
+      "passed": true
+    }
+  },
+  "navbar_diagnostics": {
+    "navHeight": "56px",
+    "brandFontSize": "19px",
+    "balanceFontSize": "13px",
+    "addressFontSize": "13px",
+    "faucetFontSize": "12.5px",
+    "langGroupWidth": "64.6875px",
+    "roleBtns": [
+      {
+        "id": "navbar-role-researcher",
+        "text": "Nhà Nghiên Cứu",
+        "fontSize": "12.5px",
+        "padding": "0px 11px"
+      },
+      {
+        "id": "navbar-role-donor",
+        "text": "Nhà Cung Cấp",
+        "fontSize": "12.5px",
+        "padding": "0px 11px"
+      },
+      {
+        "id": "navbar-role-admin",
+        "text": "Quản Trị",
+        "fontSize": "12.5px",
+        "padding": "0px 11px"
+      }
+    ]
+  },
+  "scenarios": [
+    {
+      "scenario": "desktop_light_vi_researcher",
+      "passes_count": 43,
+      "violations_count": 0,
+      "blocking_count": 0,
+      "overflow_px": 0,
+      "scroll_width": 1440,
+      "client_width": 1440,
+      "violations": []
+    },
+    {
+      "scenario": "desktop_light_vi_provider_mint",
+      "passes_count": 40,
+      "violations_count": 0,
+      "blocking_count": 0,
+      "overflow_px": 0,
+      "scroll_width": 1440,
+      "client_width": 1440,
+      "violations": []
+    },
+    {
+      "scenario": "desktop_light_vi_provider_vault",
+      "passes_count": 44,
+      "violations_count": 0,
+      "blocking_count": 0,
+      "overflow_px": 0,
+      "scroll_width": 1440,
+      "client_width": 1440,
+      "violations": []
+    },
+    {
+      "scenario": "desktop_light_vi_admin",
+      "passes_count": 39,
+      "violations_count": 0,
+      "blocking_count": 0,
+      "overflow_px": 0,
+      "scroll_width": 1440,
+      "client_width": 1440,
+      "violations": []
+    },
+    {
+      "scenario": "desktop_dark_vi_researcher",
+      "passes_count": 43,
+      "violations_count": 0,
+      "blocking_count": 0,
+      "overflow_px": 0,
+      "scroll_width": 1440,
+      "client_width": 1440,
+      "violations": []
+    },
+    {
+      "scenario": "desktop_dark_vi_provider_mint",
+      "passes_count": 40,
+      "violations_count": 0,
+      "blocking_count": 0,
+      "overflow_px": 0,
+      "scroll_width": 1440,
+      "client_width": 1440,
+      "violations": []
+    },
+    {
+      "scenario": "desktop_dark_vi_provider_vault",
+      "passes_count": 44,
+      "violations_count": 0,
+      "blocking_count": 0,
+      "overflow_px": 0,
+      "scroll_width": 1440,
+      "client_width": 1440,
+      "violations": []
+    },
+    {
+      "scenario": "desktop_dark_vi_admin",
+      "passes_count": 39,
+      "violations_count": 0,
+      "blocking_count": 0,
+      "overflow_px": 0,
+      "scroll_width": 1440,
+      "client_width": 1440,
+      "violations": []
+    },
+    {
+      "scenario": "desktop_light_en_admin",
+      "passes_count": 38,
+      "violations_count": 0,
+      "blocking_count": 0,
+      "overflow_px": 0,
+      "scroll_width": 1440,
+      "client_width": 1440,
+      "violations": []
+    },
+    {
+      "scenario": "desktop_light_en_researcher",
+      "passes_count": 43,
+      "violations_count": 0,
+      "blocking_count": 0,
+      "overflow_px": 0,
+      "scroll_width": 1440,
+      "client_width": 1440,
+      "violations": []
+    },
+    {
+      "scenario": "desktop_dark_en_admin",
+      "passes_count": 38,
+      "violations_count": 0,
+      "blocking_count": 0,
+      "overflow_px": 0,
+      "scroll_width": 1440,
+      "client_width": 1440,
+      "violations": []
+    },
+    {
+      "scenario": "desktop_dark_en_provider_mint",
+      "passes_count": 40,
+      "violations_count": 0,
+      "blocking_count": 0,
+      "overflow_px": 0,
+      "scroll_width": 1440,
+      "client_width": 1440,
+      "violations": []
+    },
+    {
+      "scenario": "desktop_light_vi_modal",
+      "passes_count": 44,
+      "violations_count": 0,
+      "blocking_count": 0,
+      "overflow_px": 0,
+      "scroll_width": 1440,
+      "client_width": 1440,
+      "violations": []
+    },
+    {
+      "scenario": "desktop_light_vi_vault_tags_modal",
+      "passes_count": 45,
+      "violations_count": 0,
+      "blocking_count": 0,
+      "overflow_px": 0,
+      "scroll_width": 1440,
+      "client_width": 1440,
+      "violations": []
+    },
+    {
+      "scenario": "desktop_light_vi_vault_worker_modal",
+      "passes_count": 45,
+      "violations_count": 0,
+      "blocking_count": 0,
+      "overflow_px": 0,
+      "scroll_width": 1440,
+      "client_width": 1440,
+      "violations": []
+    },
+    {
+      "scenario": "desktop_light_vi_vault_escrow_modal",
+      "passes_count": 45,
+      "violations_count": 0,
+      "blocking_count": 0,
+      "overflow_px": 0,
+      "scroll_width": 1440,
+      "client_width": 1440,
+      "violations": []
+    },
+    {
+      "scenario": "desktop_light_ipfs_modal",
+      "passes_count": 45,
+      "violations_count": 0,
+      "blocking_count": 0,
+      "overflow_px": 0,
+      "scroll_width": 1440,
+      "client_width": 1440,
+      "violations": []
+    },
+    {
+      "scenario": "desktop_dark_ipfs_modal",
+      "passes_count": 45,
+      "violations_count": 0,
+      "blocking_count": 0,
+      "overflow_px": 0,
+      "scroll_width": 1440,
+      "client_width": 1440,
+      "violations": []
+    },
+    {
+      "scenario": "desktop_light_vi_table_view",
+      "passes_count": 47,
+      "violations_count": 0,
+      "blocking_count": 0,
+      "overflow_px": 0,
+      "scroll_width": 1440,
+      "client_width": 1440,
+      "violations": []
+    },
+    {
+      "scenario": "desktop_light_vi_activity_view",
+      "passes_count": 46,
+      "violations_count": 0,
+      "blocking_count": 0,
+      "overflow_px": 0,
+      "scroll_width": 1440,
+      "client_width": 1440,
+      "violations": []
+    },
+    {
+      "scenario": "desktop_light_vi_licensed_view",
+      "passes_count": 36,
+      "violations_count": 0,
+      "blocking_count": 0,
+      "overflow_px": 0,
+      "scroll_width": 1440,
+      "client_width": 1440,
+      "violations": []
+    },
+    {
+      "scenario": "desktop_dark_vi_activity_view",
+      "passes_count": 46,
+      "violations_count": 0,
+      "blocking_count": 0,
+      "overflow_px": 0,
+      "scroll_width": 1440,
+      "client_width": 1440,
+      "violations": []
+    },
+    {
+      "scenario": "desktop_dark_vi_licensed_view",
+      "passes_count": 36,
+      "violations_count": 0,
+      "blocking_count": 0,
+      "overflow_px": 0,
+      "scroll_width": 1440,
+      "client_width": 1440,
+      "violations": []
+    },
+    {
+      "scenario": "tablet_1024x768_light_vi_researcher",
+      "passes_count": 43,
+      "violations_count": 0,
+      "blocking_count": 0,
+      "overflow_px": 0,
+      "scroll_width": 1024,
+      "client_width": 1024,
+      "violations": []
+    },
+    {
+      "scenario": "tablet_1024x768_light_vi_admin",
+      "passes_count": 38,
+      "violations_count": 0,
+      "blocking_count": 0,
+      "overflow_px": 0,
+      "scroll_width": 1024,
+      "client_width": 1024,
+      "violations": []
+    },
+    {
+      "scenario": "tablet_1024x768_dark_vi_researcher",
+      "passes_count": 43,
+      "violations_count": 0,
+      "blocking_count": 0,
+      "overflow_px": 0,
+      "scroll_width": 1024,
+      "client_width": 1024,
+      "violations": []
+    },
+    {
+      "scenario": "tablet_1024x768_dark_vi_admin",
+      "passes_count": 38,
+      "violations_count": 0,
+      "blocking_count": 0,
+      "overflow_px": 0,
+      "scroll_width": 1024,
+      "client_width": 1024,
+      "violations": []
+    },
+    {
+      "scenario": "mobile_light_vi_researcher",
+      "passes_count": 43,
+      "violations_count": 0,
+      "blocking_count": 0,
+      "overflow_px": 0,
+      "scroll_width": 390,
+      "client_width": 390,
+      "violations": []
+    },
+    {
+      "scenario": "mobile_light_vi_provider_mint",
+      "passes_count": 41,
+      "violations_count": 0,
+      "blocking_count": 0,
+      "overflow_px": 0,
+      "scroll_width": 390,
+      "client_width": 390,
+      "violations": []
+    },
+    {
+      "scenario": "mobile_light_vi_provider_vault",
+      "passes_count": 45,
+      "violations_count": 0,
+      "blocking_count": 0,
+      "overflow_px": 0,
+      "scroll_width": 390,
+      "client_width": 390,
+      "violations": []
+    },
+    {
+      "scenario": "mobile_light_vi_admin",
+      "passes_count": 39,
+      "violations_count": 0,
+      "blocking_count": 0,
+      "overflow_px": 0,
+      "scroll_width": 390,
+      "client_width": 390,
+      "violations": []
+    },
+    {
+      "scenario": "mobile_dark_vi_researcher",
+      "passes_count": 43,
+      "violations_count": 0,
+      "blocking_count": 0,
+      "overflow_px": 0,
+      "scroll_width": 390,
+      "client_width": 390,
+      "violations": []
+    },
+    {
+      "scenario": "mobile_dark_vi_admin",
+      "passes_count": 39,
+      "violations_count": 0,
+      "blocking_count": 0,
+      "overflow_px": 0,
+      "scroll_width": 390,
+      "client_width": 390,
+      "violations": []
+    },
+    {
+      "scenario": "mobile_light_vi_modal",
+      "passes_count": 44,
+      "violations_count": 0,
+      "blocking_count": 0,
+      "overflow_px": 0,
+      "scroll_width": 390,
+      "client_width": 390,
+      "violations": []
+    }
+  ]
+}

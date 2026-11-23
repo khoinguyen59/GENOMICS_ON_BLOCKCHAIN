@@ -43,6 +43,8 @@
   --text-disabled: #475569;
 
   /* Curated Biotech Vibrant Accent Palettes */
+  --accent-primary: #005fcc;
+  --focus-ring-color: #005fcc;
   --accent-cyan: #0369a1;
   --accent-cyan-light: #0369a1;
   --accent-cyan-glow: rgba(2, 132, 199, 0.15);
@@ -130,6 +132,8 @@
   --text-muted: #8492a6;
   --text-disabled: #94a3b8;
 
+  --accent-primary: #38bdf8;
+  --focus-ring-color: #38bdf8;
   --accent-cyan: #06b6d4;
   --accent-cyan-light: #38bdf8;
   --accent-cyan-glow: rgba(56, 189, 248, 0.25);

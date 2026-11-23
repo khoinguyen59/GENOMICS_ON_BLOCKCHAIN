@@ -44,7 +44,8 @@ async function main() {
   const predecessor = handoff?.predecessor || ethers.ZeroHash;
   const salt = handoff?.salt || ethers.id(`GENOCHAIN_TIMELOCK_HANDOFF_${timelockAddress.toLowerCase()}`);
   const minDelay = BigInt(await timelock.getMinDelay());
-  const delay = handoff?.minDelaySec !== undefined ? BigInt(handoff.minDelaySec) : minDelay;
+  const handoffDelay = handoff?.minDelaySec !== undefined ? BigInt(handoff.minDelaySec) : 0n;
+  const delay = handoffDelay > minDelay ? handoffDelay : minDelay;
 
   const opId = await timelock.hashOperationBatch(targets, values, payloads, predecessor, salt);
   console.log("==================================================");

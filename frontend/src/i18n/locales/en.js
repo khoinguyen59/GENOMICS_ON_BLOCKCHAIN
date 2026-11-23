@@ -370,6 +370,15 @@ export const en = {
   spotlightEmptyDesc: "No datasets match the active filter or search criteria.", spotlightResetFilterBtn: "Reset Filters",
   spotlightEstVolumeTooltip: "Estimated cumulative license value across active cohorts", spotlightEstVolume: "Est. License Value",
   escrow24hBadge: "Escrow Protected",
+  ariaRoleSwitcher: "Role Switcher", ariaLanguageSwitcher: "Language Switcher",
+  ariaProtocolStatusBar: "GenoChain Protocol Status Bar", ariaPrimaryNav: "GenoChain Primary Navigation",
+  brandHomeTitle: "GenoChain - DeSci Genomic Data Exchange", ariaImportVaultJson: "Import Sovereign Vault JSON",
+  ariaClearSearch: "Clear search", ariaRemoveFilterPrefix: "Remove",
+  ariaDatasetFilters: "Dataset Filters", ariaActivityTableScroll: "Activity table scroll container",
+  ariaInspectCohort: "Inspect Genomic Cohort", ariaCopyAddress: "Copy address",
+  ariaCopyTxHash: "Copy Tx Hash", ariaPrevSpotlight: "Previous spotlight cohort",
+  ariaNextSpotlight: "Next spotlight cohort", ariaCopyRegistryAddress: "Copy GenomicsRegistry Contract Address",
+  ariaSlidePrefix: "Slide",
 };
 
 export default en;

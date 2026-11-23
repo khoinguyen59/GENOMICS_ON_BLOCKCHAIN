@@ -140,8 +140,13 @@ export default function GenomicFilterBar({ children, onPurchase }) {
   // Keyboard shortcut listener: press '/' to focus search input, 'Escape' to blur
   useEffect(() => {
     const handleKeyDown = (e) => {
+      if (document.querySelector('[role="dialog"][aria-modal="true"]')) return;
       const activeTag = document.activeElement?.tagName;
-      if (e.key === "/" && !["INPUT", "TEXTAREA", "SELECT"].includes(activeTag)) {
+      if (
+        e.key === "/" &&
+        !["INPUT", "TEXTAREA", "SELECT"].includes(activeTag) &&
+        !document.activeElement?.isContentEditable
+      ) {
         e.preventDefault();
         const searchInput = document.getElementById("input-filter-search");
         if (searchInput) {
@@ -300,7 +305,8 @@ export default function GenomicFilterBar({ children, onPurchase }) {
                 type="button"
                 className="opensea-search-clear-btn"
                 onClick={() => setFilterKeyword("")}
-                title="Clear search"
+                title={t("ariaClearSearch")}
+                aria-label={t("ariaClearSearch")}
               >
                 <CloseCrossIcon size={12} color="var(--text-muted)" />
               </button>
@@ -457,7 +463,8 @@ export default function GenomicFilterBar({ children, onPurchase }) {
                   type="button"
                   className="tag-remove-btn"
                   onClick={chip.clear}
-                  title={`Remove ${chip.label}`}
+                  title={`${t("ariaRemoveFilterPrefix")} ${chip.label}`}
+                  aria-label={`${t("ariaRemoveFilterPrefix")} ${chip.label}`}
                 >
                   <CloseCrossIcon size={11} />
                 </button>
@@ -481,7 +488,7 @@ export default function GenomicFilterBar({ children, onPurchase }) {
       <div className={`opensea-split-layout ${showSidebar ? "has-sidebar" : "no-sidebar"}`}>
         {/* Left Sidebar */}
         {showSidebar && (
-          <div className="opensea-filter-sidebar" role="region" aria-label="Dataset Filters">
+          <div className="opensea-filter-sidebar" role="region" aria-label={t("ariaDatasetFilters")}>
             <div className="sidebar-sticky-scroll">
               {/* Group 1: Status */}
               <div className="sidebar-accordion-item">

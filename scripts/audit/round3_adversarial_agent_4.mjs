@@ -507,10 +507,14 @@ async function runAdversarialAgent4Suite() {
     });
     console.log("--------------------------------------------------------------------------------\n");
   }
+  return { totalTests, passedTests, auditDefects };
 }
 
 runAdversarialAgent4Suite()
-  .then(() => process.exit(0))
+  .then((res) => {
+    const failed = res.auditDefects.length > 0 || res.passedTests !== res.totalTests;
+    process.exit(failed ? 1 : 0);
+  })
   .catch((err) => {
     console.error("FATAL ERROR in Round 3 Adversarial Agent 4 Suite:", err);
     process.exit(1);

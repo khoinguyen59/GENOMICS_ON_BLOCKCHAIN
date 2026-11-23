@@ -456,7 +456,10 @@ async function runRound3AdversarialSuite() {
 }
 
 runRound3AdversarialSuite()
-  .then(() => process.exit(0))
+  .then((res) => {
+    const failed = res.defectFindings.length > 0 || res.passedTests !== res.totalTests;
+    process.exit(failed ? 1 : 0);
+  })
   .catch((err) => {
     console.error("Fatal error in test suite:", err);
     process.exit(1);

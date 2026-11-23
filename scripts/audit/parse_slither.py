@@ -32,7 +32,7 @@ def parse_report_file(report_path: str) -> None:
         elements = d.get("elements", [])
         is_our_contract = False
         for el in elements:
-            src = el.get("source_mapping", {}).get("filename_relative", "")
+            src = str(el.get("source_mapping", {}).get("filename_relative", "")).replace("\\", "/")
             if src.startswith("contracts/") and not src.startswith("contracts/mocks/"):
                 is_our_contract = True
                 break

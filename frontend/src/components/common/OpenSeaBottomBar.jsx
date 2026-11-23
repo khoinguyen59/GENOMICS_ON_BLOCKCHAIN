@@ -56,7 +56,7 @@ export default function OpenSeaBottomBar() {
     : undefined;
 
   return (
-    <footer className="os2-bottom-bar" aria-label="GenoChain Protocol Status Bar">
+    <footer className="os2-bottom-bar" aria-label={t("ariaProtocolStatusBar")}>
       <div className="os2-bottom-inner">
         {/* Left Cluster: Live Node & Cryptographic Standards */}
         <div className="os2-bottom-left">

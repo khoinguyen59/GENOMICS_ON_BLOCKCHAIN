@@ -533,7 +533,7 @@ export default function PatientSovereignVault({
               type="file"
               ref={fileInputRef}
               accept=".json"
-              aria-label="Import Sovereign Vault JSON"
+              aria-label={t("ariaImportVaultJson")}
               id="vault-file-import"
               style={{ display: "none" }}
               onChange={handleImportVaultFile}

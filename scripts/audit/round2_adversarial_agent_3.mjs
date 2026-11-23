@@ -164,7 +164,7 @@ async function runAdversarialAudit() {
     ) {
       recordPass("INVARIANT-09 Non-Extractable Key Protection", "WebCrypto and createWalletKeyBackup strictly enforce non-extractability.");
     } else {
-      console.log("Unexpected error in key backup:", err);
+      recordDefect("DEF2-3-03", "Unexpected error in Wallet Key Backup", "High", String(err.message || err));
     }
   }
 
@@ -361,7 +361,7 @@ async function runAdversarialAudit() {
 }
 
 runAdversarialAudit()
-  .then(() => process.exit(0))
+  .then((defects) => process.exit(defects.length > 0 ? 1 : 0))
   .catch((err) => {
     console.error("FATAL SUITE ERROR:", err);
     process.exit(1);

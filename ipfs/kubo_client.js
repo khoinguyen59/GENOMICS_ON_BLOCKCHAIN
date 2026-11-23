@@ -3,8 +3,10 @@
  * @description Local IPFS Kubo Daemon RPC Client (http://127.0.0.1:5001).
  */
 
-const DEFAULT_KUBO_RPC = "http://127.0.0.1:5001";
-const DEFAULT_KUBO_GATEWAY = "http://127.0.0.1:8080";
+const COMPILE_TIME_NON_LOCAL =
+  typeof __GENOCHAIN_NON_LOCAL_CHAIN__ !== "undefined" && __GENOCHAIN_NON_LOCAL_CHAIN__;
+const DEFAULT_KUBO_RPC = COMPILE_TIME_NON_LOCAL ? "" : "http://127.0.0.1:5001";
+const DEFAULT_KUBO_GATEWAY = COMPILE_TIME_NON_LOCAL ? "" : "http://127.0.0.1:8080";
 const FORBIDDEN_URI_SCHEME_RE = /^(?:javascript|data|vbscript|file|blob|about):/i;
 
 /**
@@ -78,12 +80,39 @@ export function isNonLocalConfiguredChain() {
   return false;
 }
 
+function isLoopbackHostname(hostname) {
+  const h = String(hostname || "").trim().toLowerCase();
+  return h === "127.0.0.1" || h === "localhost" || h === "[::1]" || h === "::1";
+}
+
 function isLocalRawKuboGateway(url) {
-  return (
-    url === "http://127.0.0.1:8080" ||
-    url === "http://localhost:8080" ||
-    url === "/ipfs-gw"
-  );
+  if (url === "/ipfs-gw") return true;
+  try {
+    const parsed = new URL(url);
+    return (
+      parsed.protocol === "http:" &&
+      isLoopbackHostname(parsed.hostname) &&
+      parsed.port === "8080" &&
+      (parsed.pathname === "/" || parsed.pathname === "")
+    );
+  } catch {
+    return false;
+  }
+}
+
+function isLocalRawKuboRpc(url) {
+  if (url === "/ipfs-rpc") return true;
+  try {
+    const parsed = new URL(url);
+    return (
+      parsed.protocol === "http:" &&
+      isLoopbackHostname(parsed.hostname) &&
+      parsed.port === "5001" &&
+      (parsed.pathname === "/" || parsed.pathname === "")
+    );
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -408,7 +437,7 @@ export async function queryKuboLocalRefs(kuboRpc, isBrowser, isLocalRpc) {
 
   const fetchPromise = (async () => {
     const refsUrls = isBrowser && isLocalRpc
-      ? ["/ipfs-rpc/refs/local", "http://127.0.0.1:5001/api/v0/refs/local"]
+      ? (DEFAULT_KUBO_RPC ? ["/ipfs-rpc/refs/local", `${DEFAULT_KUBO_RPC}/api/v0/refs/local`] : ["/ipfs-rpc/refs/local"])
       : [`${kuboRpc}/api/v0/refs/local`];
 
     for (const url of refsUrls) {
@@ -709,13 +738,13 @@ export async function pinFileToKubo(fileBytes, fileName, mimeType, customRpc = n
     };
 
     const isBrowser = typeof window !== "undefined";
-    const isLocalDefault = kuboRpc === "http://127.0.0.1:5001" || kuboRpc === "http://localhost:5001" || kuboRpc === "/ipfs-rpc";
+    const isLocalDefault = isLocalRawKuboRpc(kuboRpc);
     const kuboUrl = (isBrowser && isLocalDefault)
       ? "/ipfs-rpc/add"
       : `${kuboRpc}/api/v0/add`;
 
     const directUrl = kuboRpc === "/ipfs-rpc"
-      ? "http://127.0.0.1:5001/api/v0/add"
+      ? (DEFAULT_KUBO_RPC ? `${DEFAULT_KUBO_RPC}/api/v0/add` : "/ipfs-rpc/add")
       : `${kuboRpc}/api/v0/add`;
     const payloadSize = fileBytes?.byteLength ?? fileBytes?.length ?? 0;
     const uploadTimeoutMs = Math.max(
@@ -778,13 +807,13 @@ export async function pinJsonToKubo(jsonData, fileName = "metadata.json", custom
     };
 
     const isBrowser = typeof window !== "undefined";
-    const isLocalDefault = kuboRpc === "http://127.0.0.1:5001" || kuboRpc === "http://localhost:5001" || kuboRpc === "/ipfs-rpc";
+    const isLocalDefault = isLocalRawKuboRpc(kuboRpc);
     const kuboUrl = (isBrowser && isLocalDefault)
       ? "/ipfs-rpc/add"
       : `${kuboRpc}/api/v0/add`;
 
     const directUrl = kuboRpc === "/ipfs-rpc"
-      ? "http://127.0.0.1:5001/api/v0/add"
+      ? (DEFAULT_KUBO_RPC ? `${DEFAULT_KUBO_RPC}/api/v0/add` : "/ipfs-rpc/add")
       : `${kuboRpc}/api/v0/add`;
     let res = null;
     try {
@@ -847,10 +876,7 @@ export async function fetchFromKuboGateway(cid, customGateway = null, options = 
   // Step 1: Local Kubo RPC fast path (skipped when targeting a remote Private IPFS Gateway without explicit RPC)
   const shouldProbeKuboRpc = Boolean(kuboRpc && (explicitRpc || !isPrivateGatewayConfigured));
   if (shouldProbeKuboRpc) {
-    const isLocalRpc =
-      kuboRpc === "http://127.0.0.1:5001" ||
-      kuboRpc === "http://localhost:5001" ||
-      kuboRpc === "/ipfs-rpc";
+    const isLocalRpc = isLocalRawKuboRpc(kuboRpc);
 
     let skipRpcCat = false;
     if (fastOffline) {
@@ -872,10 +898,12 @@ export async function fetchFromKuboGateway(cid, customGateway = null, options = 
     if (!skipRpcCat) {
       const rpcCandidates =
         isBrowser && isLocalRpc
-          ? [
-              `/ipfs-rpc/cat?arg=${encodeURIComponent(cleanCid)}&offline=true`,
-              `http://127.0.0.1:5001/api/v0/cat?arg=${encodeURIComponent(cleanCid)}&offline=true`,
-            ]
+          ? (DEFAULT_KUBO_RPC
+              ? [
+                  `/ipfs-rpc/cat?arg=${encodeURIComponent(cleanCid)}&offline=true`,
+                  `${DEFAULT_KUBO_RPC}/api/v0/cat?arg=${encodeURIComponent(cleanCid)}&offline=true`,
+                ]
+              : [`/ipfs-rpc/cat?arg=${encodeURIComponent(cleanCid)}&offline=true`])
           : [`${kuboRpc}/api/v0/cat?arg=${encodeURIComponent(cleanCid)}&offline=true`];
 
       for (const rpcUrl of rpcCandidates) {
@@ -916,7 +944,9 @@ export async function fetchFromKuboGateway(cid, customGateway = null, options = 
 
   const candidateUrls =
     isBrowser && isLocalDefault
-      ? [`/ipfs-gw/ipfs/${encodeURIComponent(cleanCid)}`, `http://127.0.0.1:8080/ipfs/${encodeURIComponent(cleanCid)}`]
+      ? (DEFAULT_KUBO_GATEWAY
+          ? [`/ipfs-gw/ipfs/${encodeURIComponent(cleanCid)}`, `${DEFAULT_KUBO_GATEWAY}/ipfs/${encodeURIComponent(cleanCid)}`]
+          : [`/ipfs-gw/ipfs/${encodeURIComponent(cleanCid)}`])
       : [`${gateway}/ipfs/${encodeURIComponent(cleanCid)}`];
 
   let reqHeaders = options?.headers ? { ...options.headers } : {};

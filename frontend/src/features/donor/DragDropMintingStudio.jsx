@@ -537,6 +537,7 @@ export default function DragDropMintingStudio({ onPublishSuccess }) {
             <input
               type="file"
               id="genomic-file-input"
+              aria-label={t("dragDropBoxTitle")}
               ref={fileInputRef}
               style={{ display: "none" }}
               accept=".vcf,.vcf.gz,.bam,.c4gh,.fastq,.fastq.gz,.fq,.fasta,.fa,.json,.txt"

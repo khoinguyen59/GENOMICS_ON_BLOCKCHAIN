@@ -225,6 +225,7 @@ async function runAdversarialAgent4Suite() {
     grantAccessRevertedOOB = err.message.includes("DataNotFound");
   }
 
+  assert(grantAccessRevertedZero && grantAccessRevertedOOB, "grantAccess must revert DataNotFound on 0 and out-of-bounds");
   recordPass(
     "Boundary Condition: grantAccess reverts DataNotFound on dataId 0 and out-of-bounds",
     `Revert on 0: ${grantAccessRevertedZero}, Revert on 9999: ${grantAccessRevertedOOB} (Identified DEF2-4-04: SLOAD gas optimization point)`
@@ -245,6 +246,7 @@ async function runAdversarialAgent4Suite() {
   } catch (err) {
     updatePriceReverted = err.message.includes("ConsentPermanentlyRevoked");
   }
+  assert(statusRevoked === 2n && unrevokeReverted && updatePriceReverted, "Revoked dataset must reject un-revoke and reprice");
   recordPass(
     "GDPR Permanent Revocation Invariant (DEF2-4-05 Fixed): Revoked dataset cannot be un-revoked or repriced",
     `Revoked: ${statusRevoked === 2n}, Unrevoke Reverted: ${unrevokeReverted}, Reprice Reverted: ${updatePriceReverted}`
@@ -260,6 +262,7 @@ async function runAdversarialAgent4Suite() {
     // Reverts with "No active access grant" or custom error
     zeroAddrStoreAccepted = false;
   }
+  assert(!zeroAddrStoreAccepted, "storeTransformedCapsule must reject zero-address researcher");
   recordPass(
     "Zero-Address Check: storeTransformedCapsule rejects zero address researcher",
     `Zero-address store accepted: ${zeroAddrStoreAccepted}`
@@ -283,6 +286,7 @@ async function runAdversarialAgent4Suite() {
   } catch (err) {
     repeatEoaBlocked = err.message.includes("FaucetCooldownActive");
   }
+  assert(repeatEoaBlocked, "Repeat EOA faucet call within cooldown must revert FaucetCooldownActive");
   recordPass(
     "Anti-Sybil Cooldown: Immediate repeat call from same EOA blocked by 1-hour rate limit",
     `Blocked with FaucetCooldownActive: ${repeatEoaBlocked}`
@@ -335,6 +339,7 @@ async function runAdversarialAgent4Suite() {
   } catch (err) {
     truncationCaught = true;
   }
+  assert(truncationCaught, "Truncated chunked payload must throw");
   recordPass(
     "Crypt4GH Byzantine Fault Injection: Truncated payload halts before releasing unauthenticated plaintext",
     `Truncation rejected safely: ${truncationCaught}`
@@ -352,6 +357,7 @@ async function runAdversarialAgent4Suite() {
     }
     ivSet.add(hex);
   }
+  assert(!collision && ivSet.size === 500, "500 CSPRNG 96-bit IVs must have zero collisions");
   recordPass(
     "IV Nonce Collision Resistance: 500 consecutive 96-bit IVs generated with zero collisions",
     `Distinct IV count: ${ivSet.size}/500`
@@ -369,6 +375,7 @@ async function runAdversarialAgent4Suite() {
   const missingInEn = viKeys.filter((k) => !enKeys.includes(k));
   const missingInVi = enKeys.filter((k) => !viKeys.includes(k));
 
+  assert(missingInEn.length === 0 && missingInVi.length === 0, "i18n VI/EN dictionary parity mismatch");
   recordPass(
     `i18n Translation Coverage: VI keys = ${viKeys.length}, EN keys = ${enKeys.length}`,
     `Missing in EN: ${missingInEn.length}, Missing in VI: ${missingInVi.length}`
@@ -429,7 +436,7 @@ function assert(condition, message) {
 }
 
 runAdversarialAgent4Suite()
-  .then(() => process.exit(0))
+  .then((findings) => process.exit(findings.length > 0 ? 1 : 0))
   .catch((err) => {
     console.error("Adversarial suite failure:", err);
     process.exit(1);

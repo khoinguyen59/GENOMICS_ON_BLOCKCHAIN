@@ -150,8 +150,8 @@ async function runRound2AdversarialSuite() {
 
   const escrowAfterStore = await registry.escrowDeposits(dataId1, buyerBob.address);
   assertTest(
-    "EMPIRICAL PROOF DEF2-1-01: storeTransformedCapsule checks status vs executes on Revoked data",
-    true, // Record state
+    "EMPIRICAL PROOF DEF2-1-01: storeTransformedCapsule rejects delivery on Revoked data",
+    !storeCapsuleSucceeded && !escrowAfterStore.released,
     `storeTransformedCapsule execution on Revoked data: ${storeCapsuleSucceeded ? "SUCCEEDED (VULNERABILITY CONFIRMED: Seller drained escrow on revoked data)" : "BLOCKED"}`
   );
 
@@ -205,8 +205,8 @@ async function runRound2AdversarialSuite() {
   const daveDiff = daveBalAfter - daveBalBeforeTransfer;
 
   assertTest(
-    "EMPIRICAL PROOF DEF2-1-02: Who received seller proceeds of the escrow?",
-    true,
+    "EMPIRICAL PROOF DEF2-1-02: Escrow settlement conserves exact EIP-2981 royalty + seller proceeds",
+    aliceDiff + daveDiff === price1 && aliceDiff === (price1 * BigInt(royalty1)) / 10000n,
     `Alice received: ${ethers.formatUnits(aliceDiff, 18)} GENO (Royalty: 10%), Dave received: ${ethers.formatUnits(daveDiff, 18)} GENO (Seller Proceeds: 90%)`
   );
   console.log(`         ↳ Finding: Dave (the buyer of the NFT) captured the pending escrow sales proceeds of ${ethers.formatUnits(daveDiff, 18)} GENO!`);

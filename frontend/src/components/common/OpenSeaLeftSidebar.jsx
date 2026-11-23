@@ -166,14 +166,14 @@ export default function OpenSeaLeftSidebar({ activeNav, onSelectNav }) {
   ];
 
   return (
-    <aside className="os2-left-sidebar" aria-label="GenoChain Primary Navigation">
+    <aside className="os2-left-sidebar" aria-label={t("ariaPrimaryNav")}>
       <nav className="os2-left-nav">
         {/* Top Brand Row: GenoChain Helix Emblem + Wordmark on Hover */}
         <button
           type="button"
           className="os2-brand-btn"
           onClick={() => handleNavClick("discover")}
-          title="GenoChain - DeSci Genomic Data Exchange"
+          title={t("brandHomeTitle")}
         >
           <span className="os2-brand-logo-wrap">
             <GenoLogoIcon size={26} color="#0284c7" />

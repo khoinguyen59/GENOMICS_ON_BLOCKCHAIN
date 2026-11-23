@@ -370,6 +370,15 @@ export const vi = {
   spotlightEmptyDesc: "Không có bộ dữ liệu nào khớp bộ lọc hoặc từ khóa hiện tại.", spotlightResetFilterBtn: "Đặt Lại Bộ Lọc",
   spotlightEstVolumeTooltip: "Ước tính tổng giá trị cấp phép trên các quần thể đang hoạt động", spotlightEstVolume: "Giá Trị Cấp Phép Ước Tính",
   escrow24hBadge: "Bảo Vệ Ký Quỹ",
+  ariaRoleSwitcher: "Bộ Chuyển Đổi Vai Trò", ariaLanguageSwitcher: "Bộ Chuyển Đổi Ngôn Ngữ",
+  ariaProtocolStatusBar: "Thanh Trạng Thái Giao Thức GenoChain", ariaPrimaryNav: "Điều Hướng Chính GenoChain",
+  brandHomeTitle: "GenoChain - Sàn Trao Đổi Dữ Liệu Hệ Gen DeSci", ariaImportVaultJson: "Nhập Tệp JSON Két Chủ Quyền",
+  ariaClearSearch: "Xóa tìm kiếm", ariaRemoveFilterPrefix: "Gỡ bộ lọc",
+  ariaDatasetFilters: "Bộ Lọc Tập Dữ Liệu", ariaActivityTableScroll: "Vùng cuộn bảng hoạt động on-chain",
+  ariaInspectCohort: "Xem Chi Tiết Quần Thể Gen", ariaCopyAddress: "Sao chép địa chỉ",
+  ariaCopyTxHash: "Sao chép mã giao dịch", ariaPrevSpotlight: "Quần thể nổi bật trước",
+  ariaNextSpotlight: "Quần thể nổi bật tiếp theo", ariaCopyRegistryAddress: "Sao chép địa chỉ hợp đồng GenomicsRegistry",
+  ariaSlidePrefix: "Trang trình chiếu",
 };
 
 export default vi;

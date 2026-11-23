@@ -23,10 +23,10 @@ async function run() {
   const price = ethers.parseUnits("100", 18);
   await registry.registerGenomicData(
     ethers.keccak256(ethers.toUtf8Bytes("DNA")),
-    "QmTestRaw1111111111111111111111111111111111111",
-    "QmTestSum1111111111111111111111111111111111111",
-    "QmTestMeta111111111111111111111111111111111111",
-    "ipfs://meta",
+    "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG",
+    "QmZ4tDuvesekSs4qM5ZBKpXiZGun7S2CYtEZRB3DYXkjGx",
+    "QmPZ9qBzzyAtRaQQQUZr6xHS6wVfETRR249s63UME18znJ",
+    "ipfs://QmPZ9qBzzyAtRaQQQUZr6xHS6wVfETRR249s63UME18znJ",
     price,
     86400,
     1000
@@ -35,10 +35,11 @@ async function run() {
   // Researcher buys access
   await token.faucet(researcher.address);
   await token.connect(researcher).approve(registry.target, price);
-  await registry.connect(researcher).grantAccess(1);
+  await registry.connect(researcher)["grantAccess(uint256)"](1);
 
-  // Store capsule
-  await registry.storeTransformedCapsule(1, researcher.address, "SECRET_CAPSULE_PAYLOAD");
+  // Store valid RFC 8259 RSA-OAEP capsule
+  const validCapsule = JSON.stringify({ version: "GENO-ASYM-RSA-OAEP-v2", keyCipher: "ab".repeat(256) });
+  await registry.storeTransformedCapsule(1, researcher.address, validCapsule);
 
   // Owner REVOKES data status
   console.log("Owner revoking dataset #1 status...");
@@ -46,16 +47,29 @@ async function run() {
 
   // Check hasActiveAccess
   const hasAccess = await registry.hasActiveAccess(1, researcher.address);
-  console.log("hasActiveAccess for researcher:", hasAccess); // Expect false
+  console.log("hasActiveAccess for researcher:", hasAccess);
+  if (hasAccess !== false) {
+    throw new Error("FAIL: hasActiveAccess remained true after dataset revocation!");
+  }
 
-  // Call getTransformedCapsule as researcher
+  // Call getTransformedCapsule as researcher -> MUST revert
+  let reverted = false;
   try {
     const capsule = await registry.connect(researcher).getTransformedCapsule(1);
-    console.log("CONFIRMED VULNERABILITY/DISCREPANCY: getTransformedCapsule returned:", capsule);
-    console.log("Even though dataset status is REVOKED, researcher STILL retrieved the capsule!");
+    throw new Error(`FAIL: Revoked dataset leaked capsule via getTransformedCapsule: ${capsule.slice(0, 32)}...`);
   } catch (e) {
-    console.log("getTransformedCapsule reverted with:", e.message);
+    if (String(e.message || "").startsWith("FAIL:")) throw e;
+    reverted = true;
+    console.log("PASS: getTransformedCapsule reverted as expected on Revoked dataset:", e.message);
+  }
+  if (!reverted) {
+    throw new Error("FAIL: Expected getTransformedCapsule to revert on Revoked dataset.");
   }
 }
 
-run().catch(console.error);
+run()
+  .then(() => process.exit(0))
+  .catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });

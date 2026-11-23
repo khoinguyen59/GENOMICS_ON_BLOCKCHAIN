@@ -15,6 +15,12 @@ import {
   decryptKeyCapsule,
   exportSovereignKeyVault,
   importSovereignKeyVault,
+  saveOwnerCapsulePersistent,
+  loadOwnerCapsulePersistent,
+  saveBuyerCapsulePersistent,
+  loadBuyerCapsulePersistent,
+  getAllOwnerCapsulesPersistent,
+  getAllBuyerCapsulesPersistent,
   clearVaultMemoryCache,
   computeDataHash,
 } from "../crypto/client_crypto.js";
@@ -1928,5 +1934,397 @@ print("HYBRID_VAULT_OK")
 `;
     const pyOut = execFileSync(resolvePythonBin(), ["-c", pyHybrid], { encoding: "utf8" });
     expect(pyOut).to.include("HYBRID_VAULT_OK");
+  });
+
+  // =========================================================================
+  // R18-06j: Phase 5 Private IPFS Gateway Hardening (REV-01A/B, REV-02, REV-03, L3-L1/L2, L3-01/02)
+  // =========================================================================
+  it("R18-06j: blocks post-anchor upload_provenance hijack (REV-01A/B), cross-owner private_mhs metadata censorship (REV-02), orphan-pin lock & TOCTOU (REV-03/L3-L2), pre-GC provenance purge (L3-L1/L3-02) & batched chunk quota contention (L3-01)", async function () {
+    this.timeout(30000);
+    const pyPhase5Gateway = `
+import base64, hashlib, http.client, json, os, sqlite3, sys, tempfile, threading, time, urllib.error, urllib.request
+from eth_account import Account
+from eth_account.messages import encode_defunct
+
+sys.path.insert(0, os.path.abspath("deploy"))
+import ipfs_access_gateway as gw
+
+VICTIM = Account.create()
+BUYER = Account.create()
+ATTACKER = Account.create()
+CHAIN_ID = 31337
+REGISTRY = "0x5FbDB2315678afecb367f032d93F642f64180aa3"
+
+CID_META_V0 = "QmZ4tDuvesekSs4qM5ZBKpXiZGun7S2CYtEZRB3DYXkjGx"
+mh_meta = gw.extract_canonical_multihash(CID_META_V0)
+meta_digest = bytes.fromhex(mh_meta.split(":")[-1])
+CID_META_V1 = "b" + base64.b32encode(bytes([0x01, 0x70, 0x12, 0x20]) + meta_digest).decode("ascii").rstrip("=").lower()
+assert gw.extract_canonical_multihash(CID_META_V1) == mh_meta
+
+CID_RAW_V0 = "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG"
+mh_raw = gw.extract_canonical_multihash(CID_RAW_V0)
+raw_digest = bytes.fromhex(mh_raw.split(":")[-1])
+CID_RAW_V1 = "b" + base64.b32encode(bytes([0x01, 0x70, 0x12, 0x20]) + raw_digest).decode("ascii").rstrip("=").lower()
+assert gw.extract_canonical_multihash(CID_RAW_V1) == mh_raw
+
+CID_ORPHAN = "b" + base64.b32encode(bytes([0x01, 0x55, 0x12, 0x20]) + hashlib.sha256(b"rev03_orphan_payload").digest()).decode("ascii").rstrip("=").lower()
+CID_PREGC = "b" + base64.b32encode(bytes([0x01, 0x55, 0x12, 0x20]) + hashlib.sha256(b"l3l1_pregc_payload").digest()).decode("ascii").rstrip("=").lower()
+CID_TINY = "b" + base64.b32encode(bytes([0x01, 0x55, 0x12, 0x20]) + hashlib.sha256(b"l301_tiny_chunks").digest()).decode("ascii").rstrip("=").lower()
+
+META_BYTES = b'{"id":"ANON_VICTIM_01","phenopacket":true}'
+RAW_BYTES = b"GNC2_ENCRYPTED_VICTIM_RAW_SEQ_BYTES"
+ORPHAN_BYTES = b"ABANDONED_VICTIM_UPLOAD_BYTES"
+PREGC_BYTES = b"PRE_GC_PROTECTED_CIPHERTEXT_BYTES"
+
+def sign_upload(acct, payload_bytes, ts, nonce):
+    sha = hashlib.sha256(payload_bytes).hexdigest()
+    msg = gw.build_siwe_upload_message(CHAIN_ID, REGISTRY, sha, acct.address, ts, nonce)
+    sig = acct.sign_message(encode_defunct(text=msg)).signature.hex()
+    return {
+        "Content-Type": "application/octet-stream",
+        "X-GenoChain-Address": acct.address,
+        "X-GenoChain-Timestamp": str(ts),
+        "X-GenoChain-Nonce": nonce,
+        "X-GenoChain-Signature": sig if sig.startswith("0x") else "0x" + sig,
+        "X-GenoChain-Content-Sha256": sha,
+    }
+
+def sign_download(acct, data_id, cid, ts, nonce):
+    msg = gw.build_siwe_auth_message(CHAIN_ID, REGISTRY, data_id, cid, acct.address, ts, nonce)
+    sig = acct.sign_message(encode_defunct(text=msg)).signature.hex()
+    return {
+        "X-GenoChain-Data-Id": str(data_id),
+        "X-GenoChain-Address": acct.address,
+        "X-GenoChain-Timestamp": str(ts),
+        "X-GenoChain-Nonce": nonce,
+        "X-GenoChain-Signature": sig if sig.startswith("0x") else "0x" + sig,
+    }
+
+class Phase5Reg:
+    def __init__(self):
+        self.datasets = []
+        self.events = []
+        self.licenses = {}
+    def is_connected(self): return True
+    def get_block_number(self): return 50
+    def get_all_datasets(self): return list(self.datasets)
+    def get_genomic_data(self, d):
+        for ds in self.datasets:
+            if ds["dataId"] == int(d): return ds
+        raise KeyError("DataNotFound")
+    def has_active_access(self, d, buyer):
+        return (int(d), str(buyer).lower()) in self.licenses
+    def get_status_updated_events(self, a, b): return list(self.events)
+
+class Phase5Kubo:
+    def __init__(self):
+        self.blobs = {
+            CID_META_V0: META_BYTES, CID_META_V1: META_BYTES,
+            CID_RAW_V0: RAW_BYTES, CID_RAW_V1: RAW_BYTES,
+            CID_ORPHAN: ORPHAN_BYTES, CID_PREGC: PREGC_BYTES,
+        }
+        self.pins = {CID_META_V0: len(META_BYTES), CID_RAW_V0: len(RAW_BYTES)}
+        self.gc_should_succeed = True
+        self.gc_runs = 0
+    def health_check(self): return True
+    def add_stream(self, stream, filename, content_length, cid_version=1):
+        data = stream.read(content_length)
+        if data == META_BYTES:
+            cid = CID_META_V1
+        elif data == RAW_BYTES:
+            cid = CID_RAW_V1
+        elif data == ORPHAN_BYTES:
+            cid = CID_ORPHAN
+        elif data == PREGC_BYTES:
+            cid = CID_PREGC
+        else:
+            cid = CID_TINY
+        self.blobs[cid] = data
+        self.pins[cid] = len(data)
+        return {"cid": cid, "size": len(data)}
+    def list_recursive_pins(self): return list(self.pins.keys())
+    def cat_cid(self, cid):
+        if cid not in self.blobs:
+            raise FileNotFoundError(cid)
+        return self.blobs[cid]
+    def unpin_cid(self, cid):
+        return self.pins.pop(cid, None) is not None
+    def run_gc(self):
+        self.gc_runs += 1
+        if not self.gc_should_succeed:
+            return False
+        # Physically delete unpinned blocks on successful GC
+        for c in list(self.blobs.keys()):
+            if c not in self.pins:
+                mh_c = gw.extract_canonical_multihash(c)
+                if not any(gw.extract_canonical_multihash(p) == mh_c for p in self.pins):
+                    self.blobs.pop(c, None)
+        return True
+
+with tempfile.TemporaryDirectory() as td:
+    db_path = os.path.join(td, "phase5_gateway.sqlite")
+    reg = Phase5Reg()
+    kubo = Phase5Kubo()
+    now_ts = int(time.time())
+
+    # Pre-existing anchored dataset #1 BEFORE gateway SQLite DB even exists (fresh/upgraded gateway scenario)
+    reg.datasets = [
+        {
+            "dataId": 1, "tokenId": 1,
+            "currentOwner": VICTIM.address, "originalCreator": VICTIM.address,
+            "rawCid": CID_RAW_V0, "summaryCid": "", "metadataCid": CID_META_V0, "status": 0,
+        }
+    ]
+    reg.licenses[(1, BUYER.address.lower())] = True
+
+    srv = gw.create_gateway_server(
+        host="127.0.0.1", port=0, chain_id=CHAIN_ID, registry_address=REGISTRY,
+        registry_adapter=reg, kubo_adapter=kubo, state_db_path=db_path,
+        upload_policy="open-dev", now_fn=lambda: now_ts,
+    )
+    port = srv.server_address[1]
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        # ------------------------------------------------------------------
+        # REV-01A: Fresh DB (0 upload_provenance) -> ATTACKER re-uploads Victim's public metadataCid
+        # ------------------------------------------------------------------
+        assert srv.gateway_upload_limiter.get_upload_provenance(mh_meta) is None
+        req_1a = urllib.request.Request(
+            f"http://127.0.0.1:{port}/api/v0/upload", data=META_BYTES,
+            headers=sign_upload(ATTACKER, META_BYTES, now_ts, "rev01a-attacker-upload-01"),
+            method="POST",
+        )
+        st_1a = None
+        try:
+            urllib.request.urlopen(req_1a, timeout=5)
+        except urllib.error.HTTPError as e:
+            st_1a = e.code
+        assert st_1a == 403, f"REV-01A expected 403, got {st_1a}"
+        assert srv.gateway_upload_limiter.get_upload_provenance(mh_meta) == VICTIM.address.lower()
+
+        # Victim's public metadata STILL serves 200; Attacker revoking dummy #2 MUST NOT unpin Victim's metadata!
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/ipfs/{CID_META_V0}", timeout=5) as r_pub:
+            assert r_pub.status == 200 and r_pub.read() == META_BYTES
+
+        reg.datasets.append({
+            "dataId": 2, "tokenId": 2,
+            "currentOwner": ATTACKER.address, "originalCreator": ATTACKER.address,
+            "rawCid": "", "summaryCid": "", "metadataCid": CID_META_V1, "status": 2,
+        })
+        reg.events.append({"dataId": 2, "newStatus": 2, "blockNumber": 10})
+        rec = gw.GdprErasureReconciler(reg, kubo, start_block=1, db_path=db_path, now_fn=lambda: now_ts)
+        r_1a = rec.reconcile_once()
+        assert CID_META_V0 in kubo.pins and CID_META_V1 in r_1a["skippedSharedCids"], f"REV-01A unpinned Victim metadata: {r_1a}"
+
+        # ------------------------------------------------------------------
+        # REV-01B: Licensed BUYER re-uploads Victim's anchored rawCid -> blocked 403, owner keeps 200, dummy revoke cannot unpin!
+        # ------------------------------------------------------------------
+        req_1b = urllib.request.Request(
+            f"http://127.0.0.1:{port}/api/v0/upload", data=RAW_BYTES,
+            headers=sign_upload(BUYER, RAW_BYTES, now_ts, "rev01b-buyer-upload-0001"),
+            method="POST",
+        )
+        st_1b = None
+        try:
+            urllib.request.urlopen(req_1b, timeout=5)
+        except urllib.error.HTTPError as e:
+            st_1b = e.code
+        assert st_1b == 403, f"REV-01B expected 403, got {st_1b}"
+        assert srv.gateway_upload_limiter.get_upload_provenance(mh_raw) == VICTIM.address.lower()
+
+        # Owner still downloads dataId=1 (200)
+        req_own = urllib.request.Request(
+            f"http://127.0.0.1:{port}/ipfs/{CID_RAW_V0}",
+            headers=sign_download(VICTIM, 1, CID_RAW_V0, now_ts, "rev01b-owner-dl-00000001"),
+        )
+        with urllib.request.urlopen(req_own, timeout=5) as r_own:
+            assert r_own.status == 200 and r_own.read() == RAW_BYTES
+
+        reg.datasets.append({
+            "dataId": 3, "tokenId": 3,
+            "currentOwner": BUYER.address, "originalCreator": BUYER.address,
+            "rawCid": CID_RAW_V1, "summaryCid": "", "metadataCid": "", "status": 2,
+        })
+        reg.events.append({"dataId": 3, "newStatus": 2, "blockNumber": 11})
+        r_1b = rec.reconcile_once()
+        assert CID_RAW_V0 in kubo.pins and CID_RAW_V1 in r_1b["skippedSharedCids"], f"REV-01B unpinned Victim ciphertext: {r_1b}"
+
+        # ------------------------------------------------------------------
+        # REV-02: Attacker registers & revokes dummy dataset setting rawCid = Victim.metadataCid -> Victim stays PUBLIC (200)!
+        # ------------------------------------------------------------------
+        reg.datasets.append({
+            "dataId": 4, "tokenId": 4,
+            "currentOwner": ATTACKER.address, "originalCreator": ATTACKER.address,
+            "rawCid": CID_META_V1, "summaryCid": "", "metadataCid": "", "status": 2,
+        })
+        reg.datasets.append({
+            "dataId": 5, "tokenId": 5,
+            "currentOwner": ATTACKER.address, "originalCreator": ATTACKER.address,
+            "rawCid": "", "summaryCid": CID_META_V0, "metadataCid": "", "status": 0,
+        })
+        srv.gateway_catalog_index.invalidate()
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/ipfs/{CID_META_V0}", timeout=5) as r_rev02:
+            assert r_rev02.status == 200 and r_rev02.read() == META_BYTES
+
+        # ------------------------------------------------------------------
+        # REV-03 + L3-L2: Abandoned Victim upload referenced by Attacker dummy dataset is STILL GC'd cleanly!
+        # ------------------------------------------------------------------
+        req_orp = urllib.request.Request(
+            f"http://127.0.0.1:{port}/api/v0/upload", data=ORPHAN_BYTES,
+            headers=sign_upload(VICTIM, ORPHAN_BYTES, now_ts, "rev03-victim-orphan-0001"),
+            method="POST",
+        )
+        with urllib.request.urlopen(req_orp, timeout=5) as r_orp:
+            assert r_orp.status == 200
+        # Attacker references Victim's abandoned CID in an Active dummy dataset #6 trying to pin-lock it forever
+        reg.datasets.append({
+            "dataId": 6, "tokenId": 6,
+            "currentOwner": ATTACKER.address, "originalCreator": ATTACKER.address,
+            "rawCid": CID_ORPHAN, "summaryCid": "", "metadataCid": "", "status": 0,
+        })
+        rec_orphan = gw.GdprErasureReconciler(
+            reg, kubo, start_block=1, db_path=db_path,
+            orphan_pin_ttl_sec=3600, now_fn=lambda: now_ts + 4000,
+        )
+        r_orp_gc = rec_orphan.reconcile_once()
+        assert CID_ORPHAN in r_orp_gc["orphanUnpinnedCids"], f"REV-03 orphan pin was immortalized by attacker: {r_orp_gc}"
+        assert CID_ORPHAN not in kubo.pins
+        rec_orphan.close()
+
+        # ------------------------------------------------------------------
+        # L3-L1 + L3-02: Deferred/failed run_gc() MUST retain upload_provenance & persist _gc_pending across restarts!
+        # ------------------------------------------------------------------
+        req_pg = urllib.request.Request(
+            f"http://127.0.0.1:{port}/api/v0/upload", data=PREGC_BYTES,
+            headers=sign_upload(VICTIM, PREGC_BYTES, now_ts, "l3l1-victim-pregc-000001"),
+            method="POST",
+        )
+        with urllib.request.urlopen(req_pg, timeout=5) as r_pg:
+            assert r_pg.status == 200
+        mh_pregc = gw.extract_canonical_multihash(CID_PREGC)
+
+        # Front-runner lands earlier dataId=7 (Active); Victim lands dataId=8 and then revokes dataId=8
+        reg.datasets.append({
+            "dataId": 7, "tokenId": 7,
+            "currentOwner": ATTACKER.address, "originalCreator": ATTACKER.address,
+            "rawCid": CID_PREGC, "summaryCid": "", "metadataCid": "", "status": 0,
+        })
+        reg.datasets.append({
+            "dataId": 8, "tokenId": 8,
+            "currentOwner": VICTIM.address, "originalCreator": VICTIM.address,
+            "rawCid": CID_PREGC, "summaryCid": "", "metadataCid": "", "status": 2,
+        })
+        reg.events.append({"dataId": 8, "newStatus": 2, "blockNumber": 20})
+        srv.gateway_catalog_index.invalidate()
+
+        # Simulate Kubo repo/gc failure -> unpinned block still exists in Kubo blobs!
+        kubo.gc_should_succeed = False
+        r_fail_gc = rec.reconcile_once()
+        assert r_fail_gc["gcRan"] is False and r_fail_gc["gcPending"] is True
+        assert srv.gateway_upload_limiter.get_upload_provenance(mh_pregc) == VICTIM.address.lower(), "L3-L1 purged upload_provenance BEFORE repo/gc succeeded!"
+
+        # Front-runner (dataId=7) MUST STILL receive 403 while block awaits GC!
+        req_fr = urllib.request.Request(
+            f"http://127.0.0.1:{port}/ipfs/{CID_PREGC}",
+            headers=sign_download(ATTACKER, 7, CID_PREGC, now_ts, "l3l1-frontrunner-dl-0001"),
+        )
+        st_fr = None
+        try:
+            urllib.request.urlopen(req_fr, timeout=5)
+        except urllib.error.HTTPError as e:
+            st_fr = e.code
+        assert st_fr == 403, f"L3-L1 front-runner bypassed 403 before GC! got {st_fr}"
+
+        # Simulate process restart with new reconciler reading SQLite: _gc_pending MUST still be True!
+        rec.close()
+        rec_restarted = gw.GdprErasureReconciler(reg, kubo, start_block=1, db_path=db_path, now_fn=lambda: now_ts + 5)
+        assert rec_restarted._gc_pending is True, "L3-02 _gc_pending did not survive restart!"
+        kubo.gc_should_succeed = True
+        r_ok_gc = rec_restarted.reconcile_once()
+        assert r_ok_gc["gcRan"] is True and r_ok_gc["gcPending"] is False
+        assert srv.gateway_upload_limiter.get_upload_provenance(mh_pregc) is None, "L3-L1 did not flush upload_provenance AFTER repo/gc succeeded!"
+        assert CID_PREGC not in kubo.blobs
+        rec_restarted.close()
+
+        # ------------------------------------------------------------------
+        # L3-01: Tiny-chunk streaming upload does NOT hit SQLite on every chunk!
+        # ------------------------------------------------------------------
+        tiny_chunks = [b"x" * 64 for _ in range(32)]  # 2048 bytes in 32 tiny chunks
+        tiny_full = b"".join(tiny_chunks)
+        tiny_sha = hashlib.sha256(tiny_full).hexdigest()
+        n_tiny = "l301-tiny-chunks-nonce-1"
+        s_tiny = VICTIM.sign_message(encode_defunct(text=gw.build_siwe_upload_message(CHAIN_ID, REGISTRY, tiny_sha, VICTIM.address, now_ts, n_tiny))).signature.hex()
+
+        orig_usage = srv.gateway_upload_limiter._usage_locked
+        usage_calls = [0]
+        def counted_usage(*a, **kw):
+            usage_calls[0] += 1
+            return orig_usage(*a, **kw)
+        srv.gateway_upload_limiter._usage_locked = counted_usage
+        try:
+            ct = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+            ct.putrequest("POST", "/api/v0/upload")
+            ct.putheader("Transfer-Encoding", "chunked")
+            ct.putheader("X-GenoChain-Address", VICTIM.address)
+            ct.putheader("X-GenoChain-Timestamp", str(now_ts))
+            ct.putheader("X-GenoChain-Nonce", n_tiny)
+            ct.putheader("X-GenoChain-Signature", s_tiny if s_tiny.startswith("0x") else "0x" + s_tiny)
+            ct.putheader("X-GenoChain-Content-Sha256", tiny_sha)
+            ct.endheaders()
+            for ch in tiny_chunks:
+                ct.send(f"{len(ch):x}\\r\\n".encode() + ch + b"\\r\\n")
+            ct.send(b"0\\r\\n\\r\\n")
+            rt = ct.getresponse(); rt.read(); ct.close()
+            assert rt.status == 200, f"L3-01 tiny chunk upload failed: {rt.status}"
+            # 1 check at reserve() + 1 final verify_streamed_quota() == 2 (NOT 34!)
+            assert usage_calls[0] <= 3, f"L3-01 fired {usage_calls[0]} SQLite quota checks for 32 tiny chunks!"
+        finally:
+            srv.gateway_upload_limiter._usage_locked = orig_usage
+    finally:
+        srv.shutdown(); srv.server_close()
+
+print("PHASE5_GATEWAY_REMEDIATION_OK")
+`;
+    const out = execFileSync(resolvePythonBin(), ["-c", pyPhase5Gateway], { encoding: "utf8" });
+    expect(out).to.include("PHASE5_GATEWAY_REMEDIATION_OK");
+  });
+
+  // =========================================================================
+  // R18-06k: Key Vault Fail-Closed Account Scope (LOW-01), WCAG Focus Tokens (L4-L1), Modal Hotkey Guard (L4-L3) & Pure Updater (REV-I06)
+  // =========================================================================
+  it("R18-06k: fails closed on empty/null key_vault account scopes (LOW-01) and enforces WCAG focus tokens, modal '/' guard & pure state updater", async function () {
+    clearVaultMemoryCache();
+    const capOwner = JSON.stringify({ version: "GENO-ASYM-RSA-OAEP-v2", owner: seller.address, keyCipher: "ab".repeat(256) });
+    const capBuyer = JSON.stringify({ version: "GENO-ASYM-RSA-OAEP-v2", recipient: buyer.address, keyCipher: "cd".repeat(256) });
+    await saveOwnerCapsulePersistent(CID_A, capOwner, seller.address);
+    await saveBuyerCapsulePersistent(CID_B, capBuyer, buyer.address);
+
+    // Explicit empty string scope MUST fail closed (never scan across accounts)
+    expect(await loadOwnerCapsulePersistent(CID_A, "")).to.equal(null);
+    expect(await loadBuyerCapsulePersistent(CID_B, "")).to.equal(null);
+    expect(await getAllOwnerCapsulesPersistent("")).to.deep.equal([]);
+    expect(await getAllBuyerCapsulesPersistent("")).to.deep.equal([]);
+
+    // Cross-account scope isolation: buyer cannot read seller's owner capsule and vice versa
+    expect(await loadOwnerCapsulePersistent(CID_A, buyer.address)).to.equal(null);
+    expect(await loadBuyerCapsulePersistent(CID_B, seller.address)).to.equal(null);
+    expect(await getAllOwnerCapsulesPersistent(buyer.address)).to.deep.equal([]);
+    expect(await getAllBuyerCapsulesPersistent(seller.address)).to.deep.equal([]);
+
+    // Legitimate scoped reads still succeed
+    expect(await loadOwnerCapsulePersistent(CID_A, seller.address)).to.equal(capOwner);
+    expect(await loadBuyerCapsulePersistent(CID_B, buyer.address)).to.equal(capBuyer);
+    clearVaultMemoryCache();
+
+    // Verify L4-L1 focus ring tokens, L4-L3 modal guard on '/', and REV-I06 pure setPurchasedData updater
+    const tokensCss = fs.readFileSync(path.resolve("frontend/src/styles/tokens.css"), "utf8");
+    expect(tokensCss).to.include("--focus-ring-color: #005fcc;");
+    expect(tokensCss).to.include("--focus-ring-color: #38bdf8;");
+    const baseCss = fs.readFileSync(path.resolve("frontend/src/styles/base.css"), "utf8");
+    expect(baseCss).to.include("var(--focus-ring-color");
+    const filterBarSrc = fs.readFileSync(path.resolve("frontend/src/features/researcher/GenomicFilterBar.jsx"), "utf8");
+    expect(filterBarSrc).to.include('[role="dialog"][aria-modal="true"]');
+    const decHookSrc = fs.readFileSync(path.resolve("frontend/src/hooks/useDatasetDecryption.js"), "utf8");
+    expect(decHookSrc).to.not.include("p.decryptedPdfBytes.fill(0)");
   });
 });

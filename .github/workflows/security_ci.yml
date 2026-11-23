@@ -45,8 +45,11 @@ jobs:
       - name: Run Hardhat Smart Contract & Cryptographic Verification Suite
         run: npm test
 
-      - name: Run Independent Adversarial Stress Suite
-        run: npm run test:stress
+      - name: Run Independent Adversarial Stress, Diverse Datasets & Chunked Fuzz Suites
+        run: |
+          npm run test:stress
+          node scripts/audit/test_diverse_datasets_e2e.mjs
+          node scripts/audit/test_chunked_fuzz.mjs
 
   static-analysis-and-linting:
     name: 2. Static Analysis & Linter Verification (Slither & Solhint)
@@ -108,6 +111,21 @@ jobs:
         run: |
           npm audit --omit=dev
           npm --prefix frontend audit --omit=dev
+
+      - name: Verify Non-Local Chain CSP & First-Party Bundles Strip Loopback Origins
+        run: |
+          VITE_CHAIN_ID=11155111 npm --prefix frontend run build
+          if grep -E "127\.0\.0\.1|localhost" frontend/dist/index.html; then
+            echo "FAIL: Non-local Sepolia CSP leaked loopback origin in index.html!"
+            exit 1
+          fi
+          for f in frontend/dist/assets/*.js; do
+            case "$(basename "$f")" in vendor-*) continue ;; esac
+            if grep -E "http://127\.0\.0\.1|http://localhost|ws://127\.0\.0\.1|ws://localhost" "$f"; then
+              echo "FAIL: Non-local Sepolia JS bundle leaked loopback origin in $f!"
+              exit 1
+            fi
+          done
 
       - name: Build Production Frontend Assets
         run: npm --prefix frontend run build

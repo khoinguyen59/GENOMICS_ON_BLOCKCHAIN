@@ -428,11 +428,14 @@ async function runRound2AdversarialSuite() {
   }
   console.log("================================================================================\n");
 
-  return findings;
+  return { totalTests, passedTests, findings };
 }
 
 runRound2AdversarialSuite()
-  .then(() => process.exit(0))
+  .then((res) => {
+    const failed = res.findings.length > 0 || res.passedTests !== res.totalTests;
+    process.exit(failed ? 1 : 0);
+  })
   .catch((err) => {
     console.error("Audit Suite Crash:", err);
     process.exit(1);

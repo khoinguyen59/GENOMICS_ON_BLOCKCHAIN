@@ -98,7 +98,14 @@ jobs:
         run: |
           VITE_CHAIN_ID=11155111 npm --prefix frontend run build
           if grep -E "127\.0\.0\.1|localhost" frontend/dist/index.html; then
-            echo "FAIL: Non-local Sepolia CSP leaked loopback origin!"
+            echo "FAIL: Non-local Sepolia CSP leaked loopback origin in index.html!"
             exit 1
           fi
+          for f in frontend/dist/assets/*.js; do
+            case "$(basename "$f")" in vendor-*) continue ;; esac
+            if grep -E "http://127\.0\.0\.1|http://localhost|ws://127\.0\.0\.1|ws://localhost" "$f"; then
+              echo "FAIL: Non-local Sepolia JS bundle leaked loopback origin in $f!"
+              exit 1
+            fi
+          done
           npm --prefix frontend run build

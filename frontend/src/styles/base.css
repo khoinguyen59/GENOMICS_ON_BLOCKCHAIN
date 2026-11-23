@@ -77,7 +77,7 @@ input:focus-visible,
 select:focus-visible,
 textarea:focus-visible,
 [tabindex]:not([tabindex="-1"]):focus-visible {
-  outline: 2px solid var(--accent-primary, #38bdf8);
+  outline: 2px solid var(--focus-ring-color, var(--accent-primary, #005fcc));
   outline-offset: 2px;
 }
 

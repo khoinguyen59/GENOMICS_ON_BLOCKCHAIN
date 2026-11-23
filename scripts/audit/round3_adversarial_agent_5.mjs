@@ -289,13 +289,23 @@ async function runRound3Audit() {
     }
   );
 
-  // 3.3 Visual Cover UI typo check in refactored user portal screenshot description
-  const userPortalImgDesc = "OLive Zero - Plaintext Transmission Privacy Audit100%";
-  const hasConcatTypoInFrontend = false; // Checked earlier in jsx
+  // 3.3 Visual Cover UI typo check in refactored donor portal components
+  const dragDropSrc = fs.readFileSync(
+    path.join(ROOT_DIR, "frontend", "src", "features", "donor", "DragDropMintingStudio.jsx"),
+    "utf-8"
+  );
+  const liveAuditPath = path.join(ROOT_DIR, "frontend", "src", "features", "donor", "LiveTransmissionAudit.jsx");
+  const liveAuditSrc = fs.existsSync(liveAuditPath) ? fs.readFileSync(liveAuditPath, "utf-8") : "";
+  const combinedDonorUi = `${dragDropSrc}\n${liveAuditSrc}`;
+  const hasConcatTypoInFrontend =
+    combinedDonorUi.includes("OLive Zero") || combinedDonorUi.includes("Audit100%");
   assertTest(
-    true,
+    !hasConcatTypoInFrontend,
     "Frontend UI Typography: Zero-Plaintext Transmission widget renders proper whitespace in production build",
-    "Verified in frontend/src/features/donor/DragDropMintingStudio.jsx"
+    !hasConcatTypoInFrontend
+      ? "Verified clean whitespace in DragDropMintingStudio.jsx & LiveTransmissionAudit.jsx"
+      : "Found concatenated typography typo in donor portal UI",
+    "DEF3-5-08"
   );
 
   // ===========================================================================
@@ -453,10 +463,17 @@ async function runRound3Audit() {
   };
 }
 
-runRound3Audit().then((res) => {
-  if (res.defects.length > 0) {
-    console.log(`\n[Agent 5 Audit Finished] ${res.defects.length} defect candidates surfaced for peer-swap consensus.`);
-  } else {
-    console.log("\n[Agent 5 Audit Finished] All invariants passed.");
-  }
-});
+runRound3Audit()
+  .then((res) => {
+    if (res.failed > 0 || res.defects.length > 0) {
+      console.log(`\n[Agent 5 Audit Finished] ${res.defects.length} defect candidate(s) / ${res.failed} failure(s) surfaced.`);
+      process.exit(1);
+    } else {
+      console.log("\n[Agent 5 Audit Finished] All invariants passed.");
+      process.exit(0);
+    }
+  })
+  .catch((err) => {
+    console.error("[Agent 5 Audit Fatal Error]:", err);
+    process.exit(1);
+  });

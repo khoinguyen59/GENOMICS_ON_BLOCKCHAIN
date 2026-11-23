@@ -663,7 +663,10 @@ async function runAgent2AdversarialSuite() {
 }
 
 runAgent2AdversarialSuite()
-  .then(() => process.exit(0))
+  .then((res) => {
+    const failed = res.verifiedDefects.length > 0 || res.passedTests !== res.totalTests;
+    process.exit(failed ? 1 : 0);
+  })
   .catch((err) => {
     console.error("Adversarial suite encountered error:", err);
     process.exit(1);

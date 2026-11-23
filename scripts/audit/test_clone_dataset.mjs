@@ -20,15 +20,17 @@ async function run() {
   await nft.setRegistryContract(registry.target);
 
   const rawHash = ethers.keccak256(ethers.toUtf8Bytes("PATIENT_GENOME_CONFIDENTIAL_1"));
-  const rawCid = "QmGenuineDataset1111111111111111111111111111111";
+  const rawCid = "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG";
+  const sumCid = "QmZ4tDuvesekSs4qM5ZBKpXiZGun7S2CYtEZRB3DYXkjGx";
+  const metaCid = "QmPZ9qBzzyAtRaQQQUZr6xHS6wVfETRR249s63UME18znJ";
 
   // Honest patient registers dataset
   const id1 = await registry.connect(honestPatient).registerGenomicData.staticCall(
     rawHash,
     rawCid,
-    "QmSummary1",
-    "QmMeta1",
-    "ipfs://token1",
+    sumCid,
+    metaCid,
+    `ipfs://${metaCid}`,
     ethers.parseUnits("100", 18),
     86400,
     1000
@@ -36,9 +38,9 @@ async function run() {
   await registry.connect(honestPatient).registerGenomicData(
     rawHash,
     rawCid,
-    "QmSummary1",
-    "QmMeta1",
-    "ipfs://token1",
+    sumCid,
+    metaCid,
+    `ipfs://${metaCid}`,
     ethers.parseUnits("100", 18),
     86400,
     1000
@@ -51,9 +53,9 @@ async function run() {
     await registry.connect(copycatAttacker).registerGenomicData(
       rawHash,
       rawCid,
-      "QmSummaryFake",
-      "QmMetaFake",
-      "ipfs://token2",
+      sumCid,
+      metaCid,
+      `ipfs://${metaCid}`,
       ethers.parseUnits("50", 18),
       86400,
       1000
@@ -70,4 +72,9 @@ async function run() {
   }
 }
 
-run().catch(console.error);
+run()
+  .then(() => process.exit(0))
+  .catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });

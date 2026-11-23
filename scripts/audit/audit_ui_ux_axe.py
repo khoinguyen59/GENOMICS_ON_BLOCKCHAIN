@@ -537,7 +537,7 @@ async def run_audit():
         navbar_info = await page.evaluate(
             """() => {
                 const nav = document.querySelector('.os2-top-navbar');
-                const brand = document.querySelector('.os2-brand-text');
+                const brand = document.querySelector('.os2-brand-wordmark');
                 const balance = document.querySelector('.os2-wallet-bal');
                 const address = document.querySelector('.os2-wallet-addr');
                 const faucet = document.querySelector('.os2-faucet-btn');

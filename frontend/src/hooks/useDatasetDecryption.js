@@ -20,6 +20,7 @@ export function useDatasetDecryption({
   const activeAccountRef = useRef(hookAccount);
   activeAccountRef.current = hookAccount;
   const decryptSeqRef = useRef(0);
+  const decryptedBuffersRef = useRef(new Map());
 
   const handleDecryptData = useCallback(
     async (dataId, options = {}) => {
@@ -142,6 +143,19 @@ export function useDatasetDecryption({
         }
 
         if (setPurchasedData) {
+          const prevEntry = decryptedBuffersRef.current.get(dataId);
+          if (prevEntry) {
+            if (prevEntry.raw instanceof Uint8Array && prevEntry.raw !== decryptedPlaintext) {
+              prevEntry.raw.fill(0);
+            }
+            if (prevEntry.pdf instanceof Uint8Array && prevEntry.pdf !== decryptedPdfBytes) {
+              prevEntry.pdf.fill(0);
+            }
+          }
+          decryptedBuffersRef.current.set(dataId, {
+            raw: decryptedPlaintext instanceof Uint8Array ? decryptedPlaintext : null,
+            pdf: decryptedPdfBytes instanceof Uint8Array ? decryptedPdfBytes : null
+          });
           setPurchasedData((prev) =>
             (prev || []).map((p) =>
               p.dataId === dataId
@@ -241,14 +255,24 @@ export function useDatasetDecryption({
         decryptSeqRef.current += 1;
         setDecryptingDataId(null);
         setDecryptionProgress(0);
+        for (const entry of decryptedBuffersRef.current.values()) {
+          if (entry.raw instanceof Uint8Array) entry.raw.fill(0);
+          if (entry.pdf instanceof Uint8Array) entry.pdf.fill(0);
+        }
+        decryptedBuffersRef.current.clear();
+      } else {
+        const entry = decryptedBuffersRef.current.get(dataId);
+        if (entry) {
+          if (entry.raw instanceof Uint8Array) entry.raw.fill(0);
+          if (entry.pdf instanceof Uint8Array) entry.pdf.fill(0);
+          decryptedBuffersRef.current.delete(dataId);
+        }
       }
       if (!setPurchasedData) return;
+      // Pure React state updater: zero in-place buffer mutation side effects inside setState
       setPurchasedData((prev) =>
         (prev || []).map((p) => {
           if (dataId === null || p.dataId === dataId) {
-            if (p.decryptedPdfBytes instanceof Uint8Array) {
-              p.decryptedPdfBytes.fill(0);
-            }
             return {
               ...p,
               decryptedContent: null,

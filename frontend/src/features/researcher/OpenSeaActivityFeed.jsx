@@ -551,7 +551,7 @@ export default function OpenSeaActivityFeed() {
         className="opensea-activity-table-wrap"
         tabIndex="0"
         role="region"
-        aria-label="Activity table scroll container"
+        aria-label={t("ariaActivityTableScroll")}
       >
         <table className="opensea-activity-table">
           <thead>
@@ -679,7 +679,7 @@ export default function OpenSeaActivityFeed() {
                             if (dataset.dataId) setSelectedAssetModal(dataset);
                           }
                         }}
-                        title="Inspect Genomic Cohort"
+                        title={t("ariaInspectCohort")}
                       >
                         <div className="activity-thumb-box">
                           <GenomicVisualCover dataset={dataset} height={36} showAvatar={false} />
@@ -746,7 +746,8 @@ export default function OpenSeaActivityFeed() {
                             type="button"
                             className="icon-copy-btn"
                             onClick={() => copyText(ev.from, `from-${ev.id}`)}
-                            title="Copy address"
+                            title={t("ariaCopyAddress")}
+                            aria-label={t("ariaCopyAddress")}
                           >
                             {copiedKey === `from-${ev.id}` ? (
                               <CheckCircleIcon size={11} color="var(--accent-emerald)" />
@@ -773,7 +774,8 @@ export default function OpenSeaActivityFeed() {
                                 type="button"
                                 className="icon-copy-btn"
                                 onClick={() => copyText(displayTo, `to-${ev.id}`)}
-                                title="Copy address"
+                                title={t("ariaCopyAddress")}
+                                aria-label={t("ariaCopyAddress")}
                               >
                                 {copiedKey === `to-${ev.id}` ? (
                                   <CheckCircleIcon size={11} color="var(--accent-emerald)" />
@@ -797,7 +799,8 @@ export default function OpenSeaActivityFeed() {
                           type="button"
                           className="icon-copy-btn"
                           onClick={() => copyText(ev.txHash, `tx-${ev.id}`)}
-                          title="Copy Tx Hash"
+                          title={t("ariaCopyTxHash")}
+                          aria-label={t("ariaCopyTxHash")}
                         >
                           {copiedKey === `tx-${ev.id}` ? (
                             <CheckCircleIcon size={11} color="var(--accent-emerald)" />

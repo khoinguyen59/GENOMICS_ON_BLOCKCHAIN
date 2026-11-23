@@ -357,6 +357,12 @@ async function runAudit() {
     });
     console.log("");
   }
+  return { totalTests, passedTests, failedTests, findings };
 }
 
-runAudit().catch(console.error);
+runAudit()
+  .then((res) => process.exit(res.failedTests > 0 || res.findings.length > 0 ? 1 : 0))
+  .catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });

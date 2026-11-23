@@ -28,11 +28,11 @@ AGENTS.md
 GEMINI.md
 UNIVERSAL_AGENT_SYSTEM/
 
-# Knowledge Graph Local Output
-graphify-out/
+# Ephemeral Audit Scratch Outputs (canonical docs/ and graphify-out/ remain tracked)
+docs/reports/theme_checks/
+docs/reports/swarm_audit/
 
-# Academic / Coursework Documents & Internal Audit Reports
-docs/
+# Binary Coursework Drafts & Scratch Extractors
 *.docx
 *.xlsx
 *.pdf

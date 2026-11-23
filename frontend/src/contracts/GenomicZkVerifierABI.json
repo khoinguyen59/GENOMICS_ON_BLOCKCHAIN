@@ -17,6 +17,16 @@
   },
   {
     "inputs": [],
+    "name": "AttestationExpired",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "AttestorSlotFull",
+    "type": "error"
+  },
+  {
+    "inputs": [],
     "name": "BountyExpiredOrInactive",
     "type": "error"
   },
@@ -42,6 +52,11 @@
   },
   {
     "inputs": [],
+    "name": "DowngradeNotAllowed",
+    "type": "error"
+  },
+  {
+    "inputs": [],
     "name": "InvalidAddress",
     "type": "error"
   },
@@ -57,12 +72,22 @@
   },
   {
     "inputs": [],
+    "name": "InvalidLabAttestation",
+    "type": "error"
+  },
+  {
+    "inputs": [],
     "name": "InvalidPaymentToken",
     "type": "error"
   },
   {
     "inputs": [],
     "name": "InvalidZkProof",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "LabAttestationRequired",
     "type": "error"
   },
   {
@@ -109,6 +134,118 @@
     "type": "error"
   },
   {
+    "inputs": [],
+    "name": "SponsorActiveBountyLimitReached",
+    "type": "error"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "lab",
+        "type": "address"
+      },
+      {
+        "indexed": true,
+        "internalType": "bool",
+        "name": "approved",
+        "type": "bool"
+      }
+    ],
+    "name": "ApprovedLabAttestorUpdated",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "uint256",
+        "name": "bountyId",
+        "type": "uint256"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "requiredAttestor",
+        "type": "address"
+      }
+    ],
+    "name": "AttestedZkBountyCreated",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "uint256",
+        "name": "bountyId",
+        "type": "uint256"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "donor",
+        "type": "address"
+      },
+      {
+        "indexed": true,
+        "internalType": "bytes32",
+        "name": "targetTraitId",
+        "type": "bytes32"
+      },
+      {
+        "indexed": false,
+        "internalType": "bytes32",
+        "name": "rawDataHash",
+        "type": "bytes32"
+      },
+      {
+        "indexed": false,
+        "internalType": "bytes32",
+        "name": "variantCommitment",
+        "type": "bytes32"
+      }
+    ],
+    "name": "DatasetTraitAttested",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "bool",
+        "name": "required",
+        "type": "bool"
+      }
+    ],
+    "name": "LabAttestationPolicyUpdated",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "previousOwner",
+        "type": "address"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "newOwner",
+        "type": "address"
+      }
+    ],
+    "name": "OwnershipTransferStarted",
+    "type": "event"
+  },
+  {
     "anonymous": false,
     "inputs": [
       {
@@ -143,7 +280,7 @@
         "type": "address"
       },
       {
-        "indexed": false,
+        "indexed": true,
         "internalType": "uint256",
         "name": "amount",
         "type": "uint256"
@@ -181,7 +318,7 @@
         "type": "address"
       },
       {
-        "indexed": false,
+        "indexed": true,
         "internalType": "uint256",
         "name": "refundedAmount",
         "type": "uint256"
@@ -284,6 +421,91 @@
   },
   {
     "inputs": [],
+    "name": "MAX_ACTIVE_BOUNTIES",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "MAX_ACTIVE_BOUNTIES_PER_SPONSOR",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "MAX_BOUNTY_DURATION",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "MIN_BOUNTY_DURATION",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "MIN_BOUNTY_REWARD",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "acceptOwnership",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "activeBountyCount",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "count",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
     "name": "alpha",
     "outputs": [
       {
@@ -295,6 +517,25 @@
         "internalType": "uint256",
         "name": "y",
         "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "name": "approvedLabAttestors",
+    "outputs": [
+      {
+        "internalType": "bool",
+        "name": "",
+        "type": "bool"
       }
     ],
     "stateMutability": "view",
@@ -349,6 +590,11 @@
         "type": "address"
       },
       {
+        "internalType": "bool",
+        "name": "isActive",
+        "type": "bool"
+      },
+      {
         "internalType": "bytes32",
         "name": "targetTraitId",
         "type": "bytes32"
@@ -387,11 +633,6 @@
         "internalType": "uint256",
         "name": "expiresAt",
         "type": "uint256"
-      },
-      {
-        "internalType": "bool",
-        "name": "isActive",
-        "type": "bool"
       }
     ],
     "stateMutability": "view",
@@ -408,6 +649,116 @@
       }
     ],
     "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "name": "bountyRequiredAttestor",
+    "outputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "bountyId",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256[2]",
+        "name": "a",
+        "type": "uint256[2]"
+      },
+      {
+        "internalType": "uint256[2][2]",
+        "name": "b",
+        "type": "uint256[2][2]"
+      },
+      {
+        "internalType": "uint256[2]",
+        "name": "c",
+        "type": "uint256[2]"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "variantCommitment",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "uint256",
+        "name": "attestationDeadline",
+        "type": "uint256"
+      },
+      {
+        "internalType": "bytes",
+        "name": "labSignature",
+        "type": "bytes"
+      }
+    ],
+    "name": "claimAttestedZkBounty",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "bountyId",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256[2]",
+        "name": "a",
+        "type": "uint256[2]"
+      },
+      {
+        "internalType": "uint256[2][2]",
+        "name": "b",
+        "type": "uint256[2][2]"
+      },
+      {
+        "internalType": "uint256[2]",
+        "name": "c",
+        "type": "uint256[2]"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "variantCommitment",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "rawDataHash",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "uint256",
+        "name": "attestationDeadline",
+        "type": "uint256"
+      },
+      {
+        "internalType": "bytes",
+        "name": "labSignature",
+        "type": "bytes"
+      }
+    ],
+    "name": "claimDatasetAttestedZkBounty",
+    "outputs": [],
+    "stateMutability": "nonpayable",
     "type": "function"
   },
   {
@@ -435,7 +786,7 @@
             "type": "uint256[2]"
           }
         ],
-        "internalType": "struct GenomicZkVerifier.ZkProof",
+        "internalType": "struct GenomicZkBountyStorage.ZkProof",
         "name": "proof",
         "type": "tuple"
       },
@@ -489,13 +840,57 @@
         "internalType": "uint256",
         "name": "durationSeconds",
         "type": "uint256"
+      },
+      {
+        "internalType": "address",
+        "name": "requiredAttestor",
+        "type": "address"
+      }
+    ],
+    "name": "createAttestedZkBounty",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "bountyId",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "targetTraitId",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "string",
+        "name": "traitDescription",
+        "type": "string"
+      },
+      {
+        "internalType": "uint256",
+        "name": "rewardPerClaim",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "maxClaims",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "durationSeconds",
+        "type": "uint256"
       }
     ],
     "name": "createZkBounty",
     "outputs": [
       {
         "internalType": "uint256",
-        "name": "",
+        "name": "bountyId",
         "type": "uint256"
       }
     ],
@@ -528,6 +923,19 @@
       }
     ],
     "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "bountyId",
+        "type": "uint256"
+      }
+    ],
+    "name": "emergencyCancelBounty",
+    "outputs": [],
+    "stateMutability": "nonpayable",
     "type": "function"
   },
   {
@@ -586,6 +994,35 @@
     "inputs": [
       {
         "internalType": "bytes32",
+        "name": "rawDataHash",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "traitId",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "address",
+        "name": "donor",
+        "type": "address"
+      }
+    ],
+    "name": "hasVerifiedDatasetTrait",
+    "outputs": [
+      {
+        "internalType": "bool",
+        "name": "verified",
+        "type": "bool"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
         "name": "targetTraitId",
         "type": "bytes32"
       },
@@ -604,7 +1041,7 @@
     "outputs": [
       {
         "internalType": "bool",
-        "name": "",
+        "name": "verified",
         "type": "bool"
       }
     ],
@@ -628,7 +1065,7 @@
     "outputs": [
       {
         "internalType": "bool",
-        "name": "",
+        "name": "verified",
         "type": "bool"
       }
     ],
@@ -673,6 +1110,42 @@
   },
   {
     "inputs": [],
+    "name": "ic2",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "x",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "y",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "ic3",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "x",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "y",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
     "name": "owner",
     "outputs": [
       {
@@ -690,7 +1163,7 @@
     "outputs": [
       {
         "internalType": "contract IERC20",
-        "name": "",
+        "name": "token",
         "type": "address"
       }
     ],
@@ -699,9 +1172,67 @@
   },
   {
     "inputs": [],
+    "name": "pendingOwner",
+    "outputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "maxIterations",
+        "type": "uint256"
+      }
+    ],
+    "name": "pruneExpiredBounties",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "pruned",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "bountyId",
+        "type": "uint256"
+      }
+    ],
+    "name": "pruneExpiredBounty",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [],
     "name": "renounceOwnership",
     "outputs": [],
     "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "requireLabAttestation",
+    "outputs": [
+      {
+        "internalType": "bool",
+        "name": "",
+        "type": "bool"
+      }
+    ],
+    "stateMutability": "view",
     "type": "function"
   },
   {
@@ -723,6 +1254,37 @@
       }
     ],
     "name": "rescueTokens",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "lab",
+        "type": "address"
+      },
+      {
+        "internalType": "bool",
+        "name": "approved",
+        "type": "bool"
+      }
+    ],
+    "name": "setApprovedLabAttestor",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bool",
+        "name": "required",
+        "type": "bool"
+      }
+    ],
+    "name": "setRequireLabAttestation",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
@@ -768,6 +1330,73 @@
   {
     "inputs": [
       {
+        "internalType": "uint256[2]",
+        "name": "alphaPt",
+        "type": "uint256[2]"
+      },
+      {
+        "internalType": "uint256[2][2]",
+        "name": "betaPt",
+        "type": "uint256[2][2]"
+      },
+      {
+        "internalType": "uint256[2][2]",
+        "name": "gammaPt",
+        "type": "uint256[2][2]"
+      },
+      {
+        "internalType": "uint256[2][2]",
+        "name": "deltaPt",
+        "type": "uint256[2][2]"
+      },
+      {
+        "internalType": "uint256[2]",
+        "name": "ic0Pt",
+        "type": "uint256[2]"
+      },
+      {
+        "internalType": "uint256[2]",
+        "name": "ic1Pt",
+        "type": "uint256[2]"
+      },
+      {
+        "internalType": "uint256[2]",
+        "name": "ic2Pt",
+        "type": "uint256[2]"
+      },
+      {
+        "internalType": "uint256[2]",
+        "name": "ic3Pt",
+        "type": "uint256[2]"
+      }
+    ],
+    "name": "setupVerificationKeyV2",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "name": "sponsorActiveBounties",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
         "internalType": "address",
         "name": "newOwner",
         "type": "address"
@@ -776,6 +1405,25 @@
     "name": "transferOwnership",
     "outputs": [],
     "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "",
+        "type": "bytes32"
+      }
+    ],
+    "name": "usedLabAttestationDigests",
+    "outputs": [
+      {
+        "internalType": "bool",
+        "name": "",
+        "type": "bool"
+      }
+    ],
+    "stateMutability": "view",
     "type": "function"
   },
   {
@@ -795,7 +1443,7 @@
     "outputs": [
       {
         "internalType": "bool",
-        "name": "",
+        "name": "verified",
         "type": "bool"
       }
     ],

@@ -19,8 +19,8 @@ describe("Diverse Genomic Datasets EVM & Cryptographic Compatibility (GA4GH, GAT
 
   const DATASET_TESTS = [
     {
-      name: "GA4GH Phenopacket v2 (ABCA4 Retinal Photoreceptor Trait JSON)",
-      filePath: "frontend/public/datasets/GA4GH_Phenopacket_ABCA4_PMID_10874631_II_2.json",
+      name: "GA4GH Phenopacket v2 (ALDH2 rs671 Acetaldehyde Metabolism Trait JSON)",
+      filePath: "frontend/public/datasets/GA4GH_Phenopacket_ALDH2_rs671_KHV.json",
       rawCid: "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG",
       summaryCid: "QmZ4tDuvesekSs4qM5ZBKpXiZGun7S2CYtEZRB3DYXkjGx",
       metadataCid: "QmPZ9qBzzyAtRaQQQUZr6xHS6wVfETRR249s63UME18znJ",

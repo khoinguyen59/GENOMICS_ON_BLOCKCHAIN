@@ -1,13 +1,12 @@
 import json
 import os
+import shutil
+import subprocess
 import sys
+import tempfile
 
 
-def main():
-    if len(sys.argv) < 2 or not str(sys.argv[1]).strip():
-        print("[FAIL] Usage: python scripts/audit/parse_slither.py <slither_results.json>")
-        sys.exit(1)
-    report_path = os.path.abspath(sys.argv[1])
+def parse_report_file(report_path: str) -> None:
     if not os.path.exists(report_path):
         print(f"[FAIL] Slither JSON report not found: {report_path}")
         sys.exit(1)
@@ -27,7 +26,7 @@ def main():
     print(f"Total raw detectors triggered: {len(detectors)}")
 
     contract_findings = []
-    high_findings = []
+    blocking_findings = []
     for d in detectors:
         desc = d.get("description", "")
         elements = d.get("elements", [])
@@ -38,26 +37,54 @@ def main():
                 is_our_contract = True
                 break
         if is_our_contract:
+            impact = str(d.get("impact", "")).strip()
             finding = {
                 "check": d.get("check"),
-                "impact": d.get("impact"),
+                "impact": impact,
                 "confidence": d.get("confidence"),
                 "description": desc,
             }
             contract_findings.append(finding)
-            if str(finding["impact"]).lower() == "high":
-                high_findings.append(finding)
+            if impact.lower() in ("high", "medium"):
+                blocking_findings.append(finding)
 
     print(f"\n--- Findings in contracts/ ({len(contract_findings)}) ---")
-    for i, cf in enumerate(contract_findings[:14], 1):
-        print(f"\n[{i}] [{str(cf['impact']).upper()}] Check: {cf['check']}")
+    for i, cf in enumerate(contract_findings, 1):
+        print(f"\n[{i}] [{str(cf['impact']).upper()}] Check: {cf['check']} (Confidence: {cf['confidence']})")
         print(cf["description"].strip())
 
-    if high_findings:
-        print(f"\n[FAIL] Detected {len(high_findings)} HIGH-impact Slither finding(s) in production contracts/.")
+    if blocking_findings:
+        print(
+            f"\n[FAIL] Detected {len(blocking_findings)} HIGH/MEDIUM-impact Slither finding(s) in production contracts/."
+        )
         sys.exit(1)
 
-    print("\n[PASS] Zero HIGH-impact Slither findings in production contracts/.")
+    print("\n[PASS] Zero HIGH or MEDIUM-impact Slither findings in production contracts/.")
+
+
+def main():
+    if len(sys.argv) >= 2 and str(sys.argv[1]).strip() and str(sys.argv[1]).strip() != "--run":
+        parse_report_file(os.path.abspath(sys.argv[1]))
+        return
+
+    slither_bin = shutil.which("slither")
+    if not slither_bin:
+        print("[FAIL] 'slither' executable not found on PATH. Install slither-analyzer or pass an existing JSON report.")
+        sys.exit(1)
+
+    with tempfile.TemporaryDirectory(prefix="genochain_slither_") as tmpdir:
+        tmp_json = os.path.join(tmpdir, "slither_report.json")
+        cmd = [slither_bin, ".", "--exclude-dependencies", "--json", tmp_json]
+        print(f"[*] Running Slither static analysis -> temporary report ({os.path.basename(tmp_json)})...")
+        proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
+        if not os.path.exists(tmp_json):
+            if proc.stdout:
+                print(proc.stdout)
+            if proc.stderr:
+                print(proc.stderr, file=sys.stderr)
+            print(f"[FAIL] Slither failed to emit JSON report (exit={proc.returncode}).")
+            sys.exit(1)
+        parse_report_file(tmp_json)
 
 
 if __name__ == "__main__":

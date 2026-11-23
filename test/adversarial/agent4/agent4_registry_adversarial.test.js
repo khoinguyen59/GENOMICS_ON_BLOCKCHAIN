@@ -105,7 +105,7 @@ describe("AGENT4 / PART1 — adversarial controls that HOLD", function () {
 
   async function register(seed, price = PRICE, duration = DURATION, bps = 1000n, who = owner, reg = registry) {
     const cleanSeed = String(seed).replace(/0/g, "x").replace(/O/g, "o").replace(/I/g, "i").replace(/l/g, "1").replace(/[^1-9A-HJ-NP-Za-km-z]/g, "");
-    const cid = `QmAgent4${cleanSeed}1111111111111111111111111111111`;
+    const cid = "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG";
     const hash = ethers.keccak256(ethers.toUtf8Bytes(`agent4-dataset-${seed}`));
     const tx = await reg.connect(who).registerGenomicData(hash, cid, cid, cid, `ipfs://${seed}`, price, duration, bps);
     await tx.wait();
@@ -238,7 +238,7 @@ describe("AGENT4 / PART1 — adversarial controls that HOLD", function () {
     });
 
     it("registration guards revert with custom errors and leave no half-written record", async function () {
-      const cid = "QmAgent4Guard111111111111111111111111111111";
+      const cid = "QmbZcuWgbypfuBPschz8S1nrT9SZc3xz88c2cdLbTDbnMY";
       const h = ethers.keccak256(ethers.toUtf8Bytes("agent4-guard"));
       await expect(
         registry.registerGenomicData(ethers.ZeroHash, cid, cid, cid, "ipfs://x", PRICE, DURATION, 1000)
@@ -274,9 +274,9 @@ describe("AGENT4 / PART1 — adversarial controls that HOLD", function () {
       await (
         await mal.registerWithRegistry(
           ethers.keccak256(ethers.toUtf8Bytes("agent4-reenter-1")),
-          "QmAgent4A11111111111111111111111111111",
-          "QmAgent4B11111111111111111111111111111",
-          "QmAgent4C11111111111111111111111111111",
+          "QmPNwgApbEUHup9ombcNVnM1X2ZVC1NvrH7SKF51tZBBxT",
+          "QmUqY88SpRKqG9175jggXJKdsiu7cAX2iy2X3L4pQCcySn",
+          "QmfPyGUEFV8wXBW8eR4Adp4T52eefPvuPir3dG29yRiP36",
           "ipfs://mal-a",
           PRICE,
           DURATION,
@@ -303,9 +303,9 @@ describe("AGENT4 / PART1 — adversarial controls that HOLD", function () {
       await (
         await reg2.registerGenomicData(
           ethers.keccak256(ethers.toUtf8Bytes("agent4-reenter-2")),
-          "QmAgent4D11111111111111111111111111111",
-          "QmAgent4E11111111111111111111111111111",
-          "QmAgent4F11111111111111111111111111111",
+          "Qmb7QRvBwLvmqKE8TFs2b9zUw11oj9dQmtU3Zva4mntNEw",
+          "QmXghdGqRhuGivoi2tReu7Fbczcz8geYBLokQLNJUEr3vu",
+          "QmUCohxuDKNqdAtP6qahx7f2ycyLa8uV1KF929Sjdi53xB",
           "ipfs://mal-b",
           PRICE,
           DURATION,
@@ -347,9 +347,9 @@ describe("AGENT4 / PART1 — adversarial controls that HOLD", function () {
       await (
         await reg3.registerGenomicData(
           ethers.keccak256(ethers.toUtf8Bytes("agent4-nst")),
-          "QmAgent4N11111111111111111111111111111",
-          "QmAgent4N111111111111111111111111111111",
-          "QmAgent4N211111111111111111111111111111",
+          "QmZxvE7vAYHxrUhgq9idYx9cAj7iSysuRhtHM5fL9DGFmp",
+          "QmZ1TYeWW8xQ8VphwLfSrFWuJdrS4AYKCrKGEvfMdgBtnu",
+          "QmPwBecE9cDUQnBXdbYtE94xas76VLqLNLRpoSRyRuxAaF",
           "ipfs://nst",
           PRICE,
           DURATION,
@@ -433,12 +433,12 @@ describe("AGENT4 / PART1 — adversarial controls that HOLD", function () {
       expect((await registry.getGenomicData(dataId)).currentOwner).to.equal(buyerB.address);
     });
 
-    it("royalty bps boundary: 10001 reverts (OZ ERC2981) leaving zero state, 10000 routes 100% to the creator", async function () {
-      const cid = "QmAgent4Bps11111111111111111111111111111111";
+    it("royalty bps boundary: 5001 reverts (MAX_ROYALTY_BPS = 5000) leaving zero state, 5000 splits 50/50", async function () {
+      const cid = "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG";
       await expect(
         registry.registerGenomicData(
           ethers.keccak256(ethers.toUtf8Bytes("bps-high")),
-          cid, cid, cid, "ipfs://x", PRICE, DURATION, 10001
+          cid, cid, cid, "ipfs://x", PRICE, DURATION, 5001
         )
       ).to.be.revertedWithCustomError(nft, "ERC2981InvalidTokenRoyalty");
       expect(await registry.dataCount()).to.equal(0n);
@@ -447,15 +447,15 @@ describe("AGENT4 / PART1 — adversarial controls that HOLD", function () {
       await (
         await registry.registerGenomicData(
           ethers.keccak256(ethers.toUtf8Bytes("bps-max")),
-          cid, cid, cid, "ipfs://x", PRICE, DURATION, 10000
+          cid, cid, cid, "ipfs://x", PRICE, DURATION, 5000
         )
       ).wait();
       await (await nft.transferFrom(owner.address, buyerB.address, 1n)).wait();
       const creator0 = await token.balanceOf(owner.address);
       const seller0 = await token.balanceOf(buyerB.address);
       await (await registry.connect(buyerA).grantAccess(1n)).wait();
-      expect(await token.balanceOf(owner.address)).to.equal(creator0 + PRICE);
-      expect(await token.balanceOf(buyerB.address)).to.equal(seller0, "100% royalty -> seller receives zero");
+      expect(await token.balanceOf(owner.address)).to.equal(creator0 + PRICE / 2n);
+      expect(await token.balanceOf(buyerB.address)).to.equal(seller0 + (PRICE - PRICE / 2n), "50% max royalty -> creator & reseller split evenly");
     });
 
     it("MEV price front-running reverts PriceExceedsMax with the real numbers and moves no funds", async function () {
@@ -536,9 +536,15 @@ describe("AGENT4 / PART1 — adversarial controls that HOLD", function () {
         registry,
         "CapsuleAlreadyDelivered"
       );
-      await expect(registry.storeTransformedCapsule(dataId, buyerA.address, "caps-2")).to.be.revertedWithCustomError(
+      await expect(
+        registry.storeTransformedCapsule(
+          dataId,
+          buyerA.address,
+          JSON.stringify({ version: "GENO-ASYM-RSA-OAEP-v2", tag: "caps-2", keyCipher: "cd".repeat(256) })
+        )
+      ).to.be.revertedWithCustomError(
         registry,
-        "EscrowNotActive"
+        "CapsuleAlreadyDelivered"
       );
       expect(await token.balanceOf(registry.target)).to.equal(0n);
     });
@@ -632,8 +638,14 @@ describe("AGENT4 / PART1 — adversarial controls that HOLD", function () {
         registry,
         "DataNotActive"
       );
-      expect(await registry.connect(buyerA).buyerCapsules(dataId, buyerA.address)).to.equal("");
-      expect(await registry.buyerCapsules(dataId, buyerA.address)).to.equal("", "owner path also cuts off");
+      await expect(registry.connect(buyerA).buyerCapsules(dataId, buyerA.address)).to.be.revertedWithCustomError(
+        registry,
+        "DataNotActive"
+      );
+      await expect(registry.buyerCapsules(dataId, buyerA.address)).to.be.revertedWithCustomError(
+        registry,
+        "DataNotActive"
+      );
       await expect(registry.storeTransformedCapsule(dataId, buyerA.address, "nope")).to.be.revertedWithCustomError(
         registry,
         "DataNotActive"

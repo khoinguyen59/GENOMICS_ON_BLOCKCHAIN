@@ -1,7 +1,10 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
+import { ethers } from "ethers";
 import { useWeb3 } from "../../context/Web3Context";
 import { useLanguage } from "../../context/LanguageContext";
 import { useDatasets } from "../../context/DatasetContext";
+import contractAddresses from "../../contracts/contractAddresses.json";
+import GenomicZkVerifierABI from "../../contracts/GenomicZkVerifierABI.json";
 import {
   DataOwnerShieldIcon,
   GenoTokenIcon,
@@ -12,14 +15,71 @@ import {
   UserPlusIcon,
   DatabaseNodesIcon,
   WalletKeyIcon,
-  SealedCipherIcon
+  SealedCipherIcon,
+  CpuChipIcon,
+  RefreshSpinIcon
 } from "../../components/icons/GenoIcons";
 import {
   exportSovereignVault,
   importSovereignVault,
   computeBlindTagHex,
-  releaseEscrow as releaseEscrowSvc
+  computeDonorWitnessCommitment,
+  claimZkTraitBounty,
+  releaseEscrow as releaseEscrowSvc,
+  setDatasetDispatcherOptOut,
+  queryFilterChunked,
+  getDeploymentStartBlock
 } from "../../services/datasetService";
+import { useModalFocusTrap } from "../../hooks/useModalFocusTrap";
+import { runWithConcurrency } from "../../utils/asyncResilience";
+
+const getBlindTagsSessionKey = (addr) =>
+  addr ? `genochain_blind_tags_session_v1_${String(addr).toLowerCase()}` : "";
+
+function loadBlindTagsFromSession(addr) {
+  const storageKey = getBlindTagsSessionKey(addr);
+  if (!storageKey || typeof window === "undefined" || !window.sessionStorage) return {};
+  try {
+    const raw = window.sessionStorage.getItem(storageKey);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    const sanitized = {};
+    for (const [k, v] of Object.entries(parsed)) {
+      if (v && Array.isArray(v.entries)) {
+        const cleanEntries = v.entries
+          .filter((it) => it && typeof it.key === "string" && typeof it.value === "string")
+          .map((it) => ({ key: it.key.trim(), value: it.value.trim() }))
+          .filter((it) => it.key && it.value)
+          .slice(0, 16);
+        sanitized[k] = { entries: cleanEntries };
+      }
+    }
+    return sanitized;
+  } catch {
+    return {};
+  }
+}
+
+function saveBlindTagsToSession(addr, mapObj) {
+  const storageKey = getBlindTagsSessionKey(addr);
+  if (!storageKey || typeof window === "undefined" || !window.sessionStorage) return;
+  try {
+    const toPersist = {};
+    for (const [k, v] of Object.entries(mapObj || {})) {
+      if (v && Array.isArray(v.entries)) {
+        // Persist ONLY non-secret tag entries in sessionStorage (never write raw plaintext salt)
+        toPersist[k] = {
+          entries: v.entries
+            .filter((it) => it && it.key && it.value)
+            .map((it) => ({ key: String(it.key), value: String(it.value) }))
+            .slice(0, 16)
+        };
+      }
+    }
+    window.sessionStorage.setItem(storageKey, JSON.stringify(toPersist));
+  } catch {}
+}
 
 export default function PatientSovereignVault({
   onUpdateStatus,
@@ -30,9 +90,36 @@ export default function PatientSovereignVault({
   onUpdateBlindTags,
   onReleaseEscrow
 }) {
-  const { account, signer, contracts, getProviderAndSigner, showToast } = useWeb3();
+  const { account, signer, contracts, getProviderAndSigner, showToast, refreshBalance, refreshKeyVaultState } = useWeb3();
   const { datasets, getLocalizedTitle, fetchOnChainDatasets } = useDatasets();
   const { t, language } = useLanguage();
+  const activeAccountRef = useRef(account);
+  activeAccountRef.current = account;
+
+  const [savedTagsByDataId, setSavedTagsByDataId] = useState(() => loadBlindTagsFromSession(account));
+  useEffect(() => {
+    setSavedTagsByDataId(loadBlindTagsFromSession(account));
+    setTagsModalData(null);
+    setGrantModalData(null);
+    setDispatchModalData(null);
+    setWorkerModalData(null);
+    setEscrowModalData(null);
+    // L-06: Immediately clear sensitive donor secrets/inputs on wallet switch or disconnect
+    setZkWitnessSecret("");
+    setExternalZkProofJson("");
+    setUseExternalZkProof(false);
+    setZkLabSignature("");
+    setZkAttestationDeadline("");
+    setZkDatasetRawHash("");
+    setVaultPassphrase("");
+    setShowPassphraseInput(false);
+    setVaultFeedback(null);
+  }, [account]);
+  const [dispatcherDisabledMap, setDispatcherDisabledMap] = useState({});
+  const [busyDispatcherId, setBusyDispatcherId] = useState(null);
+  const dispatcherSeqRef = useRef(0);
+  const escrowModalSeqRef = useRef(0);
+  const zkBountySeqRef = useRef(0);
 
   const [editingPriceDataId, setEditingPriceDataId] = useState(null);
   const [newPriceInput, setNewPriceInput] = useState("");
@@ -41,15 +128,160 @@ export default function PatientSovereignVault({
   const [dispatchModalData, setDispatchModalData] = useState(null);
   const [dispatchRecipient, setDispatchRecipient] = useState("");
   const [workerModalData, setWorkerModalData] = useState(null);
-  const [workerAddressInput, setWorkerAddressInput] = useState("0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266");
+  const [workerAddressInput, setWorkerAddressInput] = useState("");
   const [tagsModalData, setTagsModalData] = useState(null);
   const [tagKeyInput, setTagKeyInput] = useState("gene");
   const [tagValInput, setTagValInput] = useState("ALDH2");
   const [tagSaltInput, setTagSaltInput] = useState("GENOCHAIN_COHORT_SALT_V1");
+  const [tagEntries, setTagEntries] = useState([]);
   const [escrowModalData, setEscrowModalData] = useState(null);
+  const [escrowModalNowSec, setEscrowModalNowSec] = useState(() => Math.floor(Date.now() / 1000));
   const [escrowBuyerInput, setEscrowBuyerInput] = useState("");
   const [detectedEscrows, setDetectedEscrows] = useState([]);
+  const [loadingEscrows, setLoadingEscrows] = useState(false);
   const [busyEscrowRelease, setBusyEscrowRelease] = useState(false);
+
+  useEffect(() => {
+    if (!escrowModalData) return undefined;
+    const timer = setInterval(() => {
+      setEscrowModalNowSec((prev) => prev + 1);
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [escrowModalData]);
+
+  // ZK Trait Bounty Claim State (Data Provider)
+  const [zkBounties, setZkBounties] = useState([]);
+  const [zkWitnessSecret, setZkWitnessSecret] = useState("");
+  const [useExternalZkProof, setUseExternalZkProof] = useState(false);
+  const [externalZkProofJson, setExternalZkProofJson] = useState("");
+  const [zkLabSignature, setZkLabSignature] = useState("");
+  const [zkAttestationDeadline, setZkAttestationDeadline] = useState("");
+  const [zkDatasetRawHash, setZkDatasetRawHash] = useState("");
+  const [claimingBountyId, setClaimingBountyId] = useState(null);
+
+  const loadDonorZkBounties = useCallback(async () => {
+    const mySeq = ++zkBountySeqRef.current;
+    try {
+      const { provider: readProv } = await getProviderAndSigner();
+      if (!readProv || zkBountySeqRef.current !== mySeq) return;
+      const onChainZk = contracts?.registry ? await contracts.registry.zkVerifier().catch(() => ethers.ZeroAddress) : ethers.ZeroAddress;
+      const targetZk = onChainZk && onChainZk !== ethers.ZeroAddress ? onChainZk : contractAddresses.GenomicZkVerifier;
+      if (!targetZk || targetZk === ethers.ZeroAddress || zkBountySeqRef.current !== mySeq) return;
+      const zk = new ethers.Contract(targetZk, GenomicZkVerifierABI, readProv);
+      const count = Number(await zk.bountyCount());
+      const latestBlock = await readProv.getBlock("latest").catch(() => null);
+      const nowSec = latestBlock?.timestamp ? Number(latestBlock.timestamp) : Math.floor(Date.now() / 1000);
+      const bountyIds = Array.from({ length: count }, (_, idx) => idx + 1);
+      const fetchedRows = await runWithConcurrency(
+        bountyIds,
+        async (i) => {
+          try {
+            const [b, requiredAttestor, claimed] = await Promise.all([
+              zk.bounties(i),
+              zk.bountyRequiredAttestor?.(i).catch(() => ethers.ZeroAddress),
+              account ? zk.hasClaimedBounty(i, account).catch(() => false) : Promise.resolve(false)
+            ]);
+            const isAttested = Boolean(requiredAttestor && requiredAttestor !== ethers.ZeroAddress);
+            return {
+              bountyId: Number(b.bountyId),
+              targetTraitId: b.targetTraitId,
+              traitDescription: b.traitDescription,
+              rewardPerClaim: Number(ethers.formatUnits(b.rewardPerClaim, 18)),
+              maxClaims: Number(b.maxClaims),
+              currentClaims: Number(b.currentClaims),
+              remainingFunding: Number(ethers.formatUnits(b.remainingFunding, 18)),
+              isActive: Boolean(b.isActive) && nowSec < Number(b.expiresAt) && Number(b.currentClaims) < Number(b.maxClaims),
+              claimed: Boolean(claimed),
+              requiredAttestor: isAttested ? requiredAttestor : null,
+              isAttested
+            };
+          } catch {
+            return null;
+          }
+        },
+        6
+      );
+      if (zkBountySeqRef.current !== mySeq) return;
+      setZkBounties(fetchedRows.filter(Boolean));
+    } catch {}
+  }, [account, contracts, getProviderAndSigner]);
+
+  useEffect(() => {
+    loadDonorZkBounties();
+  }, [loadDonorZkBounties]);
+
+  const handleClaimZkBounty = async (bounty) => {
+    if (!account) {
+      showToast(t("vaultErrConnectWallet"), "error");
+      return;
+    }
+    const trimmedWitness = zkWitnessSecret.trim();
+    const trimmedProofJson = externalZkProofJson.trim();
+    if (useExternalZkProof && !trimmedProofJson) {
+      showToast(t("zkExternalProofMissing"), "error");
+      return;
+    }
+    if (!useExternalZkProof && !trimmedWitness) {
+      showToast(t("zkWitnessRequired"), "error");
+      return;
+    }
+    const trimmedLabSig = zkLabSignature.trim();
+    const parsedDeadline = Number(zkAttestationDeadline.trim());
+    if (bounty.isAttested) {
+      if (!/^0x[0-9a-fA-F]{130}$/.test(trimmedLabSig) || !Number.isFinite(parsedDeadline) || parsedDeadline <= 0) {
+        showToast(t("zkLabAttestationRequired"), "error");
+        return;
+      }
+    }
+    const claimAccount = account;
+    try {
+      setClaimingBountyId(bounty.bountyId);
+      const provAndSigner = await getProviderAndSigner();
+      const readProv = provAndSigner?.provider;
+      if (bounty.isAttested && bounty.requiredAttestor && readProv) {
+        const onChainZk = contracts?.registry ? await contracts.registry.zkVerifier().catch(() => ethers.ZeroAddress) : ethers.ZeroAddress;
+        const targetZk = onChainZk && onChainZk !== ethers.ZeroAddress ? onChainZk : contractAddresses.GenomicZkVerifier;
+        if (targetZk && targetZk !== ethers.ZeroAddress) {
+          const zkRead = new ethers.Contract(targetZk, GenomicZkVerifierABI, readProv);
+          const [strictLab, isApproved] = await Promise.all([
+            zkRead.requireLabAttestation?.().catch(() => false),
+            zkRead.approvedLabAttestors?.(bounty.requiredAttestor).catch(() => true)
+          ]);
+          if (strictLab && !isApproved) {
+            showToast(t("zkLabAttestorRevokedErr"), "error");
+            return;
+          }
+        }
+      }
+      const activeSigner = signer || provAndSigner?.signer;
+      showToast(`${t("zkGeneratingProofToast")}${bounty.bountyId}...`, "info");
+      await claimZkTraitBounty({
+        bountyId: bounty.bountyId,
+        targetTraitId: bounty.targetTraitId,
+        witnessSecret: trimmedWitness,
+        explicitProof: useExternalZkProof ? (trimmedProofJson || null) : null,
+        rawDataHash: bounty.isAttested && zkDatasetRawHash ? zkDatasetRawHash : null,
+        attestationDeadline: bounty.isAttested ? Math.floor(parsedDeadline) : null,
+        labSignature: bounty.isAttested ? trimmedLabSig : null,
+        account: claimAccount,
+        signer: activeSigner
+      });
+      showToast(`${t("zkClaimSuccessPrefix")} +${bounty.rewardPerClaim} $GENO (#${bounty.bountyId}).`);
+      // Only refresh balances/catalog for the claiming account if the user has not switched wallets mid-tx
+      if (activeAccountRef.current && activeAccountRef.current.toLowerCase() === claimAccount.toLowerCase()) {
+        await refreshBalance?.(claimAccount);
+        await fetchOnChainDatasets?.(claimAccount);
+      } else if (activeAccountRef.current) {
+        await refreshBalance?.(activeAccountRef.current);
+      }
+      await loadDonorZkBounties();
+    } catch (err) {
+      const msg = err.shortMessage || err.message || "";
+      showToast(`${t("zkClaimFailedPrefix")}${msg}`, "error");
+    } finally {
+      setClaimingBountyId(null);
+    }
+  };
 
   const [vaultLoading, setVaultLoading] = useState(false);
   const [vaultFeedback, setVaultFeedback] = useState(null);
@@ -57,79 +289,144 @@ export default function PatientSovereignVault({
   const [showPassphraseInput, setShowPassphraseInput] = useState(false);
   const fileInputRef = useRef(null);
 
-  useEffect(() => {
-    const anyModalOpen =
-      grantModalData || dispatchModalData || workerModalData || tagsModalData || escrowModalData;
-    if (!anyModalOpen) return undefined;
-    const onKeyDown = (e) => {
-      if (e.key === "Escape") {
-        setGrantModalData(null);
-        setDispatchModalData(null);
-        setWorkerModalData(null);
-        setTagsModalData(null);
-        setEscrowModalData(null);
-      }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [grantModalData, dispatchModalData, workerModalData, tagsModalData, escrowModalData]);
+  const grantModalRef = useModalFocusTrap(Boolean(grantModalData), () => setGrantModalData(null));
+  const dispatchModalRef = useModalFocusTrap(Boolean(dispatchModalData), () => setDispatchModalData(null));
+  const workerModalRef = useModalFocusTrap(Boolean(workerModalData), () => setWorkerModalData(null));
+  const tagsModalRef = useModalFocusTrap(Boolean(tagsModalData), () => setTagsModalData(null));
+  const escrowModalRef = useModalFocusTrap(Boolean(escrowModalData), () => setEscrowModalData(null));
 
   const myDatasets = datasets.filter(
     (d) => account && d.owner.toLowerCase() === account.toLowerCase()
   );
 
+  const myDatasetIdsKey = myDatasets.map((d) => d.dataId).join(",");
+
+  useEffect(() => {
+    const mySeq = ++dispatcherSeqRef.current;
+    if (!contracts?.registry || typeof contracts.registry.dispatcherDisabled !== "function" || !myDatasetIdsKey) {
+      setDispatcherDisabledMap({});
+      return;
+    }
+    const ids = myDatasetIdsKey.split(",").map((s) => Number(s)).filter((n) => Number.isFinite(n) && n > 0);
+    (async () => {
+      const entries = await runWithConcurrency(
+        ids,
+        async (id) => {
+          try {
+            const disabled = Boolean(await contracts.registry.dispatcherDisabled(id));
+            return [id, disabled];
+          } catch {
+            return [id, false];
+          }
+        },
+        6
+      );
+      if (dispatcherSeqRef.current !== mySeq) return;
+      const nextMap = {};
+      for (const [id, val] of entries) nextMap[id] = val;
+      setDispatcherDisabledMap(nextMap);
+    })();
+  }, [contracts, myDatasetIdsKey]);
+
+  const handleToggleDispatcherOptOut = async (dataId) => {
+    try {
+      setBusyDispatcherId(dataId);
+      const activeSigner = signer || (await getProviderAndSigner?.())?.signer;
+      if (!activeSigner) {
+        showToast(t("vaultErrConnectWallet"), "error");
+        return;
+      }
+      const nextDisabled = !Boolean(dispatcherDisabledMap[dataId]);
+      await setDatasetDispatcherOptOut({
+        dataId,
+        disabled: nextDisabled,
+        account,
+        signer: activeSigner
+      });
+      setDispatcherDisabledMap((prev) => ({ ...prev, [dataId]: nextDisabled }));
+      showToast(`${nextDisabled ? t("vaultDispatcherUpdatedOff") : t("vaultDispatcherUpdatedOn")}${dataId}`);
+    } catch (err) {
+      showToast((err.shortMessage || err.message), "error");
+    } finally {
+      setBusyDispatcherId(null);
+    }
+  };
+
+  useEffect(() => {
+    if (zkDatasetRawHash && !myDatasets.some((d) => d.rawDataHash === zkDatasetRawHash)) {
+      setZkDatasetRawHash("");
+    }
+  }, [zkDatasetRawHash, myDatasets]);
+
   const handleStartEditPrice = (d) => {
     setEditingPriceDataId(d.dataId);
-    setNewPriceInput(d.price.toString());
+    setNewPriceInput(d.priceFormatted || d.price.toString());
   };
 
   const handleSavePrice = async (dataId) => {
-    const p = parseFloat(newPriceInput);
-    if (isNaN(p) || p <= 0) {
-      showToast("Please enter a valid positive price in $GENO.", "error");
+    const trimmed = String(newPriceInput ?? "").trim();
+    if (!/^\d+(\.\d{1,18})?$/.test(trimmed) || ethers.parseUnits(trimmed, 18) <= 0n) {
+      showToast(t("vaultErrPositivePrice"), "error");
       return;
     }
-    await onUpdatePrice?.(dataId, p);
-    setEditingPriceDataId(null);
+    const ok = await onUpdatePrice?.(dataId, trimmed);
+    if (ok) {
+      setEditingPriceDataId(null);
+    }
   };
 
   const handleExecuteGrant = async () => {
-    if (!grantRecipient || !grantRecipient.startsWith("0x") || grantRecipient.length !== 42) {
-      showToast("Please enter a valid 42-character EVM address (0x...).", "error");
+    const cleanRecipient = String(grantRecipient || "").trim();
+    if (!ethers.isAddress(cleanRecipient)) {
+      showToast(t("vaultErrInvalidAddress"), "error");
       return;
     }
-    await onGrantDirectAccess?.(grantModalData.dataId, grantRecipient);
-    setGrantModalData(null);
-    setGrantRecipient("");
+    const ok = await onGrantDirectAccess?.(grantModalData.dataId, cleanRecipient);
+    if (ok) {
+      setGrantModalData(null);
+      setGrantRecipient("");
+    }
   };
 
   const handleExecuteDispatch = async () => {
-    if (!dispatchRecipient || !dispatchRecipient.startsWith("0x") || dispatchRecipient.length !== 42) {
-      showToast("Please enter a valid 42-character EVM address (0x...).", "error");
+    const cleanRecipient = String(dispatchRecipient || "").trim();
+    if (!ethers.isAddress(cleanRecipient)) {
+      showToast(t("vaultErrInvalidAddress"), "error");
       return;
     }
-    await onDispatchCapsule?.({
+    const ok = await onDispatchCapsule?.({
       dataId: dispatchModalData.dataId,
-      recipientAddress: dispatchRecipient,
+      recipientAddress: cleanRecipient,
       rawCid: dispatchModalData.rawCid
     });
-    setDispatchModalData(null);
-    setDispatchRecipient("");
+    if (ok) {
+      setDispatchModalData(null);
+      setDispatchRecipient("");
+    }
   };
 
   const handleExportVault = async () => {
     if (!account) {
-      showToast("Please connect your wallet first.", "error");
+      showToast(t("vaultErrConnectWallet"), "error");
+      return;
+    }
+    const cleanPass = vaultPassphrase.trim() || null;
+    if (cleanPass && cleanPass.length < 8) {
+      const errMsg = t("vaultPassphraseTooShort");
+      setVaultFeedback({ type: "error", msg: errMsg });
+      showToast(errMsg, "error");
       return;
     }
     setVaultLoading(true);
     setVaultFeedback(null);
     try {
-      const activeSigner = signer || (await getProviderAndSigner?.())?.signer;
+      const activeSigner = cleanPass ? null : (signer || (await getProviderAndSigner?.())?.signer);
       const backupJson = await exportSovereignVault({
         signer: activeSigner,
         account,
-        password: vaultPassphrase.trim() || null
+        password: cleanPass,
+        contracts,
+        datasets
       });
 
       const blob = new Blob([backupJson], { type: "application/json" });
@@ -141,15 +438,15 @@ export default function PatientSovereignVault({
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
-      URL.revokeObjectURL(url);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
 
       const parsed = JSON.parse(backupJson);
-      const successMsg = `Sovereign Vault exported successfully (${parsed.capsuleCount || 0} dataset capsules secured).`;
+      const successMsg = `${t("vaultExportSuccessPrefix")} (${parsed.capsuleCount || 0} ${t("vaultExportCapsulesSuffix")}).`;
       setVaultFeedback({ type: "success", msg: successMsg });
       showToast?.(successMsg, "success");
     } catch (err) {
       console.error("Vault export error:", err);
-      setVaultFeedback({ type: "error", msg: err.message || "Failed to export sovereign key vault." });
+      setVaultFeedback({ type: "error", msg: err.message || t("vaultExportError") });
     } finally {
       setVaultLoading(false);
     }
@@ -171,12 +468,20 @@ export default function PatientSovereignVault({
         password: vaultPassphrase.trim() || null
       });
 
-      const successMsg = `Sovereign Vault imported! ${res.restoredCount} dataset capsules securely written to persistent IndexedDB.`;
-      setVaultFeedback({ type: "success", msg: successMsg });
-      showToast?.(successMsg, "success");
+      await refreshKeyVaultState?.();
+
+      const successMsg = `${t("vaultImportSuccessPrefix")} (${res.restoredCount} ${t("vaultImportRestoredSuffix")})`;
+      if (res?.keyRotated) {
+        const rotatedWarn = t("vaultImportRotatedWarning");
+        setVaultFeedback({ type: "success", msg: `${successMsg} ${rotatedWarn}` });
+        showToast?.(rotatedWarn, "warning");
+      } else {
+        setVaultFeedback({ type: "success", msg: successMsg });
+        showToast?.(successMsg, "success");
+      }
     } catch (err) {
       console.error("Vault import error:", err);
-      setVaultFeedback({ type: "error", msg: err.message || "Failed to import key vault. Check signature/password." });
+      setVaultFeedback({ type: "error", msg: err.message || t("vaultImportError") });
     } finally {
       setVaultLoading(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
@@ -267,10 +572,14 @@ export default function PatientSovereignVault({
 
         {showPassphraseInput && (
           <div style={{ display: "flex", alignItems: "center", gap: "10px", background: "var(--bg-input)", padding: "8px 12px", borderRadius: "var(--radius-sm)", border: "1px solid var(--border-subtle)" }}>
-            <span style={{ fontSize: "11px", fontFamily: "var(--font-mono)", color: "var(--text-muted)" }}>
+            <label
+              htmlFor="vault-passphrase-input"
+              style={{ fontSize: "11px", fontFamily: "var(--font-mono)", color: "var(--text-muted)" }}
+            >
               {t("vaultPassphrasePrompt")}
-            </span>
+            </label>
             <input
+              id="vault-passphrase-input"
               type="password"
               placeholder={t("vaultPassphrasePlaceholder")}
               value={vaultPassphrase}
@@ -302,6 +611,275 @@ export default function PatientSovereignVault({
             }}
           >
             {vaultFeedback.msg}
+          </div>
+        )}
+      </div>
+
+      {/* ZK Trait Bounty Claim Panel for Data Providers */}
+      <div
+        id="donor-zk-bounty-panel"
+        style={{
+          background: "var(--bg-surface)",
+          border: "1px solid var(--border-subtle)",
+          borderRadius: "var(--radius-md)",
+          padding: "14px 20px",
+          marginBottom: "18px"
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "10px", marginBottom: "10px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <CpuChipIcon size={18} color="#10b981" />
+            <span style={{ fontSize: "13px", fontWeight: 700, color: "var(--text-primary)" }}>
+              {t("zkPanelTitle")} ({zkBounties.length})
+            </span>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+            <input
+              id="donor-zk-witness-input"
+              type="password"
+              autoComplete="off"
+              className="field-input"
+              style={{ width: "220px", height: "30px", fontSize: "11px", fontFamily: "var(--font-mono)" }}
+              placeholder={t("zkWitnessPlaceholder")}
+              aria-label={t("zkWitnessPlaceholder")}
+              value={zkWitnessSecret}
+              onChange={(e) => setZkWitnessSecret(e.target.value)}
+            />
+            <button
+              id="donor-zk-external-toggle"
+              type="button"
+              className={`btn-terminal ${useExternalZkProof ? "btn-terminal-primary" : "btn-terminal-ghost"}`}
+              style={{ height: "30px", fontSize: "11px", padding: "0 10px" }}
+              onClick={() => setUseExternalZkProof((prev) => !prev)}
+            >
+              <span>{t("zkExternalProofToggle")}</span>
+            </button>
+            <button
+              id="donor-refresh-bounties-btn"
+              type="button"
+              className="btn-terminal btn-terminal-ghost"
+              style={{ height: "30px", fontSize: "11px", padding: "0 10px" }}
+              title={t("adminRefreshTelemetry")}
+              onClick={loadDonorZkBounties}
+            >
+              <RefreshSpinIcon size={12} />
+              <span>{t("adminRefreshTelemetry")}</span>
+            </button>
+          </div>
+        </div>
+        <div
+          style={{
+            marginBottom: "10px",
+            display: "flex",
+            alignItems: "center",
+            gap: "10px",
+            flexWrap: "wrap",
+            padding: "8px 12px",
+            borderRadius: "var(--radius-sm)",
+            border: "1px solid var(--border-subtle)",
+            background: "var(--bg-input)"
+          }}
+        >
+          <label
+            htmlFor="donor-zk-dataset-select"
+            className="field-label"
+            style={{ fontSize: "11px", marginBottom: 0, whiteSpace: "nowrap" }}
+          >
+            {t("zkDatasetSelectLabel")}
+          </label>
+          <select
+            id="donor-zk-dataset-select"
+            className="field-select"
+            style={{ flex: "1 1 260px", height: "30px", fontSize: "11px", fontFamily: "var(--font-mono)" }}
+            aria-label={t("zkDatasetSelectLabel")}
+            value={zkDatasetRawHash}
+            onChange={(e) => setZkDatasetRawHash(e.target.value)}
+          >
+            <option value="">{t("zkDatasetSelectNone")}</option>
+            {myDatasets
+              .filter((d) => d.rawDataHash && /^0x[0-9a-fA-F]{64}$/.test(d.rawDataHash))
+              .map((d) => (
+                <option key={d.dataId} value={d.rawDataHash}>
+                  #{d.dataId} {d.geneSymbol || d.gene} ({d.rawDataHash.slice(0, 12)}...{d.rawDataHash.slice(-6)})
+                </option>
+              ))}
+          </select>
+        </div>
+        {useExternalZkProof && (
+          <div style={{ marginBottom: "10px", padding: "10px 12px", borderRadius: "var(--radius-sm)", border: "1px solid var(--border-subtle)", background: "var(--bg-input)" }}>
+            <label htmlFor="donor-zk-proof-json-input" className="field-label" style={{ fontSize: "11px", marginBottom: "6px", display: "block" }}>
+              {t("zkExternalProofToggle")}
+            </label>
+            <textarea
+              id="donor-zk-proof-json-input"
+              rows={4}
+              className="field-input"
+              style={{ width: "100%", fontFamily: "var(--font-mono)", fontSize: "11px", padding: "8px", resize: "vertical" }}
+              placeholder={t("zkExternalProofPlaceholder")}
+              aria-label={t("zkExternalProofToggle")}
+              value={externalZkProofJson}
+              onChange={(e) => setExternalZkProofJson(e.target.value)}
+            />
+            <div style={{ fontSize: "10.5px", color: "var(--text-muted)", fontFamily: "var(--font-mono)", marginTop: "4px" }}>
+              {t("zkExternalProofHint")}
+            </div>
+          </div>
+        )}
+        {zkBounties.some((b) => b.isAttested) && (
+          <div style={{ marginBottom: "10px", padding: "10px 12px", borderRadius: "var(--radius-sm)", border: "1px solid var(--border-subtle)", background: "var(--bg-input)", display: "flex", gap: "10px", flexWrap: "wrap", alignItems: "flex-end" }}>
+            <div style={{ flex: "1 1 260px" }}>
+              <label htmlFor="donor-zk-lab-sig-input" className="field-label" style={{ fontSize: "11px", marginBottom: "4px", display: "block" }}>
+                {t("zkLabSignatureLabel")}
+              </label>
+              <input
+                id="donor-zk-lab-sig-input"
+                type="text"
+                className="field-input"
+                style={{ width: "100%", height: "30px", fontSize: "11px", fontFamily: "var(--font-mono)" }}
+                placeholder={t("zkLabSignaturePlaceholder")}
+                aria-label={t("zkLabSignatureLabel")}
+                value={zkLabSignature}
+                onChange={(e) => setZkLabSignature(e.target.value)}
+              />
+            </div>
+            <div style={{ flex: "0 1 190px" }}>
+              <label htmlFor="donor-zk-lab-deadline-input" className="field-label" style={{ fontSize: "11px", marginBottom: "4px", display: "block" }}>
+                {t("zkLabDeadlineLabel")}
+              </label>
+              <input
+                id="donor-zk-lab-deadline-input"
+                type="number"
+                className="field-input"
+                style={{ width: "100%", height: "30px", fontSize: "11px", fontFamily: "var(--font-mono)" }}
+                placeholder="1795000000"
+                aria-label={t("zkLabDeadlineLabel")}
+                value={zkAttestationDeadline}
+                onChange={(e) => setZkAttestationDeadline(e.target.value)}
+              />
+            </div>
+            {account && zkWitnessSecret.trim() && (
+              <div
+                id="donor-zk-commitment-preview"
+                style={{
+                  flex: "1 1 100%",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "6px",
+                  paddingTop: "6px",
+                  borderTop: "1px dashed var(--border-subtle)"
+                }}
+              >
+                <div style={{ fontSize: "10.5px", color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
+                  {t("zkCommitmentPreviewLabel")}
+                </div>
+                {zkBounties
+                  .filter((b) => b.isAttested)
+                  .map((b) => {
+                    const commHex = computeDonorWitnessCommitment(account, b.targetTraitId, zkWitnessSecret.trim());
+                    return (
+                      <div
+                        key={`comm-${b.bountyId}`}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          gap: "8px",
+                          padding: "4px 8px",
+                          borderRadius: "4px",
+                          background: "var(--bg-surface)",
+                          border: "1px solid var(--border-subtle)",
+                          fontFamily: "var(--font-mono)",
+                          fontSize: "11px"
+                        }}
+                      >
+                        <span
+                          id={`donor-zk-commitment-val-${b.bountyId}`}
+                          style={{ color: "var(--accent-cyan-light)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                          title={commHex}
+                        >
+                          #{b.bountyId}: {commHex}
+                        </span>
+                        <button
+                          id={`btn-copy-zk-commitment-${b.bountyId}`}
+                          type="button"
+                          className="btn-terminal btn-terminal-ghost"
+                          style={{ height: "24px", fontSize: "10.5px", padding: "0 8px", flexShrink: 0 }}
+                          onClick={() => {
+                            if (navigator.clipboard?.writeText) {
+                              Promise.resolve(navigator.clipboard.writeText(commHex))
+                                .then(() => showToast(t("copiedToast")))
+                                .catch(() => {});
+                            }
+                          }}
+                        >
+                          {t("zkCopyCommitmentBtn")}
+                        </button>
+                      </div>
+                    );
+                  })}
+              </div>
+            )}
+          </div>
+        )}
+        {zkBounties.length === 0 ? (
+          <div style={{ fontSize: "11.5px", color: "var(--text-secondary)", fontFamily: "var(--font-mono)" }}>
+            {t("zkNoBountiesOpen")}
+          </div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+            {zkBounties.map((b) => (
+              <div
+                key={b.bountyId}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  flexWrap: "wrap",
+                  gap: "10px",
+                  padding: "8px 12px",
+                  borderRadius: "var(--radius-sm)",
+                  border: "1px solid var(--border-subtle)",
+                  background: "var(--bg-input)"
+                }}
+              >
+                <div style={{ fontSize: "12px" }}>
+                  <div style={{ fontWeight: 700, color: "var(--text-primary)", display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
+                    <span>#{b.bountyId} {b.traitDescription}</span>
+                    {b.isAttested && (
+                      <span
+                        className="status-badge-chip badge-active"
+                        style={{ fontSize: "10px", padding: "2px 8px", borderRadius: "12px", fontFamily: "var(--font-mono)", fontWeight: 600 }}
+                      >
+                        {t("zkAttestedBadge")}
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ fontSize: "11px", color: "var(--text-muted)", fontFamily: "var(--font-mono)", marginTop: "2px" }}>
+                    +{b.rewardPerClaim} $GENO | {b.currentClaims}/{b.maxClaims} {t("adminClaimsUnit")} | TraitHash: {b.targetTraitId.slice(0, 12)}...
+                    {b.isAttested && b.requiredAttestor
+                      ? ` | ${t("zkAttestorPrefix")} ${b.requiredAttestor.slice(0, 8)}...${b.requiredAttestor.slice(-4)}`
+                      : ""}
+                  </div>
+                </div>
+                <button
+                  id={`btn-claim-zk-bounty-${b.bountyId}`}
+                  type="button"
+                  className={`btn-terminal ${b.claimed ? "btn-terminal-ghost" : "btn-terminal-success"}`}
+                  style={{ height: "30px", fontSize: "11.5px", padding: "0 12px" }}
+                  disabled={!b.isActive || b.claimed || claimingBountyId === b.bountyId}
+                  onClick={() => handleClaimZkBounty(b)}
+                >
+                  <CheckCircleIcon size={12} color="#10b981" />
+                  <span>
+                    {b.claimed
+                      ? t("zkBountyClaimedBtn")
+                      : claimingBountyId === b.bountyId
+                      ? "..."
+                      : `${t("zkProveAndClaimPrefix")} +${b.rewardPerClaim} $GENO`}
+                  </span>
+                </button>
+              </div>
+            ))}
           </div>
         )}
       </div>
@@ -358,9 +936,8 @@ export default function PatientSovereignVault({
                   {editingPriceDataId === d.dataId ? (
                     <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
                       <input
-                        type="number"
-                        min="1"
-                        step="1"
+                        type="text"
+                        inputMode="decimal"
                         value={newPriceInput}
                         placeholder="GENO"
                         aria-label={t("tableColPrice")}
@@ -377,16 +954,18 @@ export default function PatientSovereignVault({
                         }}
                       />
                       <button
+                        type="button"
                         className="btn-terminal btn-terminal-success"
-                        style={{ padding: "2px 6px", height: "24px" }}
+                        style={{ padding: "2px 6px", minWidth: "24px", minHeight: "24px", height: "24px" }}
                         onClick={() => handleSavePrice(d.dataId)}
                         title={t("confirm")}
                       >
                         <CheckCircleIcon size={12} color="#10b981" />
                       </button>
                       <button
+                        type="button"
                         className="btn-terminal btn-terminal-ghost"
-                        style={{ padding: "2px 6px", height: "24px" }}
+                        style={{ padding: "2px 6px", minWidth: "24px", minHeight: "24px", height: "24px" }}
                         onClick={() => setEditingPriceDataId(null)}
                         title={t("cancel")}
                       >
@@ -398,8 +977,9 @@ export default function PatientSovereignVault({
                       <span style={{ fontFamily: "var(--font-mono)", fontWeight: 700, color: "var(--text-primary)" }}>{d.price} $GENO</span>
                       {d.status === "Active" && (
                         <button
+                          type="button"
                           className="btn-terminal btn-terminal-ghost"
-                          style={{ padding: "2px 4px", height: "20px" }}
+                          style={{ padding: "2px 4px", minWidth: "24px", minHeight: "24px", height: "24px" }}
                           onClick={() => handleStartEditPrice(d)}
                           title={t("btnEditPrice")}
                         >
@@ -414,7 +994,7 @@ export default function PatientSovereignVault({
                     {d.accessCount} {t("purchasesCount")}
                   </div>
                   <div style={{ fontSize: "11px", color: "var(--accent-amber-text)" }}>
-                    +{d.accumulatedRoyalty.toFixed(1)} {t("earnedRoyalty")}
+                    +{d.accumulatedRoyalty.toFixed(1)} {t("earnedRoyalty")} ({Number(((d.royaltyBps ?? 1000) / 100).toFixed(2))}%)
                   </div>
                 </td>
                 <td>
@@ -460,8 +1040,25 @@ export default function PatientSovereignVault({
                           style={{ fontSize: "12px", height: "30px" }}
                           onClick={() => {
                             setTagsModalData(d);
+                            const persisted = savedTagsByDataId[d.dataId] || null;
+                            if (persisted && Array.isArray(persisted.entries)) {
+                              setTagEntries(persisted.entries);
+                              setTagSaltInput(persisted.salt || "GENOCHAIN_COHORT_SALT_V1");
+                            } else {
+                              const baseEntries = [
+                                { key: "gene", value: String(d.geneSymbol || d.gene || "ALDH2").split(/[\s(/,:]/)[0] },
+                                { key: "disease", value: String(d.disease || "") },
+                                { key: "trait", value: String(d.disease || d.traitEn || "") },
+                                ...(d.clinicalSignificance ? [{ key: "trait", value: String(d.clinicalSignificance) }] : []),
+                                { key: "hpo", value: String(d.hpoTerm || "").split(/\s/)[0] },
+                                { key: "ancestry", value: String(d.ancestry || d.region || "") },
+                                { key: "rsid", value: String(d.rsId && d.rsId !== "N/A" ? d.rsId : "") }
+                              ].filter((it) => it.value && it.value.trim().length > 0);
+                              setTagEntries(baseEntries);
+                              setTagSaltInput("GENOCHAIN_COHORT_SALT_V1");
+                            }
                             setTagKeyInput("gene");
-                            setTagValInput(d.geneSymbol || d.gene || "ALDH2");
+                            setTagValInput("");
                           }}
                         >
                           <span>{t("vaultBtnTags")}</span>
@@ -496,6 +1093,20 @@ export default function PatientSovereignVault({
                         </button>
                       </>
                     )}
+                    {d.status !== "Revoked" && (
+                      <button
+                        id={`btn-vault-dispatcher-${d.dataId}`}
+                        type="button"
+                        className={`btn-terminal ${dispatcherDisabledMap[d.dataId] ? "btn-terminal-danger" : "btn-terminal-ghost"}`}
+                        disabled={busyDispatcherId === d.dataId}
+                        title={t("vaultDispatcherToggleTitle")}
+                        style={{ fontSize: "12px", height: "30px" }}
+                        data-dispatcher-disabled={dispatcherDisabledMap[d.dataId] ? "true" : "false"}
+                        onClick={() => handleToggleDispatcherOptOut(d.dataId)}
+                      >
+                        <span>{dispatcherDisabledMap[d.dataId] ? t("vaultDispatcherOff") : t("vaultDispatcherOn")}</span>
+                      </button>
+                    )}
                     <button
                       id={`btn-vault-escrow-${d.dataId}`}
                       type="button"
@@ -503,37 +1114,81 @@ export default function PatientSovereignVault({
                       title={t("btnReleaseEscrow")}
                       style={{ fontSize: "12px", height: "30px" }}
                       onClick={async () => {
+                        const myModalSeq = ++escrowModalSeqRef.current;
                         setEscrowModalData(d);
                         setDetectedEscrows([]);
                         setEscrowBuyerInput("");
+                        setLoadingEscrows(true);
                         try {
                           if (contracts?.registry) {
-                            const evs = await contracts.registry.queryFilter(
+                            const evs = await queryFilterChunked(
+                              contracts.registry,
                               contracts.registry.filters.EscrowDeposited(d.dataId),
-                              0,
+                              getDeploymentStartBlock(),
                               "latest"
                             );
+                            if (escrowModalSeqRef.current !== myModalSeq) return;
+                            const rpcProvider =
+                              contracts.provider ||
+                              contracts.registry.runner?.provider ||
+                              contracts.registry.runner;
+                            const latestBlock =
+                              typeof rpcProvider?.getBlock === "function"
+                                ? await rpcProvider.getBlock("latest").catch(() => null)
+                                : null;
+                            if (escrowModalSeqRef.current !== myModalSeq) return;
+                            const modalChainNowSec = latestBlock?.timestamp ? Number(latestBlock.timestamp) : Math.floor(Date.now() / 1000);
+                            setEscrowModalNowSec(modalChainNowSec);
                             const seen = new Set();
-                            const found = [];
+                            const uniqueBuyers = [];
                             for (const ev of evs) {
                               const bAddr = ev.args?.buyer;
                               if (!bAddr || seen.has(bAddr.toLowerCase())) continue;
                               seen.add(bAddr.toLowerCase());
-                              const dep = await contracts.registry.escrowDeposits(d.dataId, bAddr);
-                              if (dep && dep.amount > 0n && !dep.released && !dep.refunded) {
-                                const disp = await contracts.registry.escrowDisputed(d.dataId, bAddr).catch(() => false);
-                                found.push({
-                                  buyer: bAddr,
-                                  delivered: Boolean(dep.capsuleDelivered),
-                                  disputed: Boolean(disp),
-                                  deadline: Number(dep.depositTime) + Number(dep.disputeWindow)
-                                });
-                              }
+                              uniqueBuyers.push(bAddr);
                             }
+                            const checked = await runWithConcurrency(
+                              uniqueBuyers,
+                              async (bAddr) => {
+                                if (escrowModalSeqRef.current !== myModalSeq) return null;
+                                const dep = await contracts.registry.escrowDeposits(d.dataId, bAddr);
+                                if (escrowModalSeqRef.current !== myModalSeq) return null;
+                                if (dep && dep.amount > 0n && !dep.released && !dep.refunded) {
+                                  const [disp, isManual, rawLockDeadline] = await Promise.all([
+                                    contracts.registry.escrowDisputed(d.dataId, bAddr).catch(() => false),
+                                    contracts.registry.manualEscrowRelease?.(d.dataId, bAddr).catch(() => false),
+                                    contracts.registry.getEscrowLockDeadline?.(d.dataId, bAddr).catch(() => null)
+                                  ]);
+                                  if (escrowModalSeqRef.current !== myModalSeq) return null;
+                                  const fallbackDeadline = Number(dep.depositTime) + Number(dep.disputeWindow) + (isManual ? 7 * 86400 : 0);
+                                  const resolvedDeadline =
+                                    rawLockDeadline !== null && rawLockDeadline !== undefined && BigInt(rawLockDeadline) > 0n
+                                      ? Number(rawLockDeadline)
+                                      : fallbackDeadline;
+                                  const delivered = Boolean(dep.capsuleDelivered);
+                                  const disputed = Boolean(disp);
+                                  return {
+                                    buyer: bAddr,
+                                    delivered,
+                                    disputed,
+                                    manualExtension: Boolean(isManual),
+                                    deadline: resolvedDeadline
+                                  };
+                                }
+                                return null;
+                              },
+                              6
+                            );
+                            const found = checked.filter(Boolean);
+                            if (escrowModalSeqRef.current !== myModalSeq) return;
                             setDetectedEscrows(found);
                             if (found.length > 0) setEscrowBuyerInput(found[0].buyer);
                           }
-                        } catch {}
+                        } catch {} finally {
+                          if (escrowModalSeqRef.current === myModalSeq) {
+                            setLoadingEscrows(false);
+                          }
+                        }
                       }}
                     >
                       <span>{t("vaultBtnEscrow")}</span>
@@ -590,14 +1245,22 @@ export default function PatientSovereignVault({
 
       {/* Modal: Grant Direct Access */}
       {grantModalData && (
-        <div className="terminal-modal-backdrop" role="dialog" aria-modal="true" aria-label={`${t("modalGrantTitle")}${grantModalData.dataId}`} onClick={() => setGrantModalData(null)}>
-          <div className="terminal-modal-window" onClick={(e) => e.stopPropagation()}>
+        <div className="terminal-modal-backdrop" onClick={() => setGrantModalData(null)}>
+          <div
+            ref={grantModalRef}
+            tabIndex={-1}
+            className="terminal-modal-window"
+            role="dialog"
+            aria-modal="true"
+            aria-label={`${t("modalGrantTitle")}${grantModalData.dataId}`}
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="modal-header-bar">
               <div className="modal-title-left">
                 <UserPlusIcon size={16} color="var(--accent-emerald)" />
                 <span>{t("modalGrantTitle")}{grantModalData.dataId}</span>
               </div>
-              <button className="modal-close-btn" onClick={() => setGrantModalData(null)} title={t("close")}>
+              <button type="button" className="modal-close-btn" onClick={() => setGrantModalData(null)} title={t("close")} aria-label={t("close")}>
                 <CloseCrossIcon size={16} />
               </button>
             </div>
@@ -619,7 +1282,7 @@ export default function PatientSovereignVault({
                   id="input-grant-recipient"
                   type="text"
                   className="field-input"
-                  placeholder="0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
+                  placeholder="0x0000000000000000000000000000000000000000"
                   value={grantRecipient}
                   onChange={(e) => setGrantRecipient(e.target.value)}
                 />
@@ -640,14 +1303,22 @@ export default function PatientSovereignVault({
 
       {/* Modal: Dispatch RSA-OAEP Capsule */}
       {dispatchModalData && (
-        <div className="terminal-modal-backdrop" role="dialog" aria-modal="true" aria-label={`${t("modalDispatchTitle")}${dispatchModalData.dataId}`} onClick={() => setDispatchModalData(null)}>
-          <div className="terminal-modal-window" onClick={(e) => e.stopPropagation()}>
+        <div className="terminal-modal-backdrop" onClick={() => setDispatchModalData(null)}>
+          <div
+            ref={dispatchModalRef}
+            tabIndex={-1}
+            className="terminal-modal-window"
+            role="dialog"
+            aria-modal="true"
+            aria-label={`${t("modalDispatchTitle")}${dispatchModalData.dataId}`}
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="modal-header-bar">
               <div className="modal-title-left">
                 <SendPaperIcon size={16} color="var(--accent-cyan)" />
                 <span>{t("modalDispatchTitle")}{dispatchModalData.dataId}</span>
               </div>
-              <button type="button" className="modal-close-btn" onClick={() => setDispatchModalData(null)} title={t("close")}>
+              <button type="button" className="modal-close-btn" onClick={() => setDispatchModalData(null)} title={t("close")} aria-label={t("close")}>
                 <CloseCrossIcon size={16} color="var(--text-muted)" />
               </button>
             </div>
@@ -669,7 +1340,7 @@ export default function PatientSovereignVault({
                   id="input-dispatch-recipient"
                   type="text"
                   className="field-input"
-                  placeholder="0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
+                  placeholder="0x0000000000000000000000000000000000000000"
                   value={dispatchRecipient}
                   onChange={(e) => setDispatchRecipient(e.target.value)}
                 />
@@ -690,8 +1361,16 @@ export default function PatientSovereignVault({
 
       {/* Modal: Authorize / Revoke Delegated Capsule Worker */}
       {workerModalData && (
-        <div className="terminal-modal-backdrop" role="dialog" aria-modal="true" aria-label={`${t("workerAuthLabel")} #${workerModalData.dataId}`} onClick={() => setWorkerModalData(null)}>
-          <div className="terminal-modal-window" onClick={(e) => e.stopPropagation()}>
+        <div className="terminal-modal-backdrop" onClick={() => setWorkerModalData(null)}>
+          <div
+            ref={workerModalRef}
+            tabIndex={-1}
+            className="terminal-modal-window"
+            role="dialog"
+            aria-modal="true"
+            aria-label={`${t("workerAuthLabel")} #${workerModalData.dataId}`}
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="modal-header-bar">
               <div className="modal-title-left">
                 <WalletKeyIcon size={16} color="#a855f7" />
@@ -701,6 +1380,7 @@ export default function PatientSovereignVault({
                 type="button"
                 className="modal-close-btn"
                 title={t("close")}
+                aria-label={t("close")}
                 onClick={() => setWorkerModalData(null)}
               >
                 <CloseCrossIcon size={16} color="var(--text-muted)" />
@@ -714,7 +1394,7 @@ export default function PatientSovereignVault({
                 id="input-vault-worker-addr"
                 type="text"
                 className="field-input"
-                placeholder="0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+                placeholder="0x0000000000000000000000000000000000000000"
                 aria-label={t("modalWorkerAddrLabel")}
                 value={workerAddressInput}
                 onChange={(e) => setWorkerAddressInput(e.target.value)}
@@ -727,8 +1407,13 @@ export default function PatientSovereignVault({
                 className="btn-terminal btn-terminal-ghost"
                 title={t("workerRevokeBtn")}
                 onClick={async () => {
-                  await onAuthorizeWorker?.(workerModalData.dataId, workerAddressInput, false);
-                  setWorkerModalData(null);
+                  const cleanWorker = String(workerAddressInput || "").trim();
+                  if (!ethers.isAddress(cleanWorker)) {
+                    showToast(t("vaultErrInvalidAddress"), "error");
+                    return;
+                  }
+                  const ok = await onAuthorizeWorker?.(workerModalData.dataId, cleanWorker, false);
+                  if (ok) setWorkerModalData(null);
                 }}
               >
                 <span>{t("workerRevokeBtn")}</span>
@@ -739,8 +1424,13 @@ export default function PatientSovereignVault({
                 className="btn-terminal btn-terminal-primary"
                 title={t("workerAuthBtn")}
                 onClick={async () => {
-                  await onAuthorizeWorker?.(workerModalData.dataId, workerAddressInput, true);
-                  setWorkerModalData(null);
+                  const cleanWorker = String(workerAddressInput || "").trim();
+                  if (!ethers.isAddress(cleanWorker)) {
+                    showToast(t("vaultErrInvalidAddress"), "error");
+                    return;
+                  }
+                  const ok = await onAuthorizeWorker?.(workerModalData.dataId, cleanWorker, true);
+                  if (ok) setWorkerModalData(null);
                 }}
               >
                 <span>{t("workerAuthBtn")}</span>
@@ -752,8 +1442,16 @@ export default function PatientSovereignVault({
 
       {/* Modal: Update On-Chain Blinded Search Tags */}
       {tagsModalData && (
-        <div className="terminal-modal-backdrop" role="dialog" aria-modal="true" aria-label={`${t("modalBlindTagsTitle")} #${tagsModalData.dataId}`} onClick={() => setTagsModalData(null)}>
-          <div className="terminal-modal-window" onClick={(e) => e.stopPropagation()}>
+        <div className="terminal-modal-backdrop" onClick={() => setTagsModalData(null)}>
+          <div
+            ref={tagsModalRef}
+            tabIndex={-1}
+            className="terminal-modal-window"
+            role="dialog"
+            aria-modal="true"
+            aria-label={`${t("modalBlindTagsTitle")} #${tagsModalData.dataId}`}
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="modal-header-bar">
               <div className="modal-title-left">
                 <SealedCipherIcon size={16} color="#818cf8" />
@@ -763,6 +1461,7 @@ export default function PatientSovereignVault({
                 type="button"
                 className="modal-close-btn"
                 title={t("close")}
+                aria-label={t("close")}
                 onClick={() => setTagsModalData(null)}
               >
                 <CloseCrossIcon size={16} color="var(--text-muted)" />
@@ -770,32 +1469,78 @@ export default function PatientSovereignVault({
             </div>
             <div className="modal-body" style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
               <div>
-                <label htmlFor="input-vault-tag-key" className="field-label">
-                  {t("blindSearchKey")}
-                </label>
-                <input
-                  id="input-vault-tag-key"
-                  type="text"
-                  className="field-input"
-                  placeholder="gene / disease / hpo / ancestry"
-                  aria-label={t("blindSearchKey")}
-                  value={tagKeyInput}
-                  onChange={(e) => setTagKeyInput(e.target.value)}
-                />
+                <div className="field-label" style={{ marginBottom: "6px" }}>
+                  {`${t("vaultBlindTagsQueued")} (${tagEntries.length}/16)`}
+                </div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", padding: "8px", borderRadius: "6px", border: "1px solid var(--border-subtle)", background: "var(--bg-input)", minHeight: "38px" }}>
+                  {tagEntries.map((entry, idx) => (
+                    <span
+                      key={`${entry.key}-${entry.value}-${idx}`}
+                      style={{ display: "inline-flex", alignItems: "center", gap: "6px", padding: "3px 8px", borderRadius: "4px", background: "var(--bg-surface)", border: "1px solid var(--border-strong)", fontSize: "11px", fontFamily: "var(--font-mono)" }}
+                    >
+                      <span>{entry.key}:{entry.value.length > 22 ? `${entry.value.slice(0, 22)}...` : entry.value}</span>
+                      <button
+                        type="button"
+                        className="icon-copy-btn"
+                        title={t("vaultRemoveTagTitle")}
+                        aria-label={t("vaultRemoveTagTitle")}
+                        onClick={() => setTagEntries((prev) => prev.filter((_, i) => i !== idx))}
+                      >
+                        <CloseCrossIcon size={10} />
+                      </button>
+                    </span>
+                  ))}
+                </div>
               </div>
-              <div>
-                <label htmlFor="input-vault-tag-val" className="field-label">
-                  {t("blindSearchVal")}
-                </label>
-                <input
-                  id="input-vault-tag-val"
-                  type="text"
-                  className="field-input"
-                  placeholder={t("blindSearchVal")}
-                  aria-label={t("blindSearchVal")}
-                  value={tagValInput}
-                  onChange={(e) => setTagValInput(e.target.value)}
-                />
+              <div style={{ display: "flex", gap: "8px", alignItems: "flex-end", flexWrap: "wrap" }}>
+                <div style={{ flex: "0 0 135px" }}>
+                  <label htmlFor="input-vault-tag-key" className="field-label">
+                    {t("blindSearchKey")}
+                  </label>
+                  <select
+                    id="input-vault-tag-key"
+                    className="field-select"
+                    aria-label={t("blindSearchKey")}
+                    value={tagKeyInput}
+                    onChange={(e) => setTagKeyInput(e.target.value)}
+                  >
+                    <option value="gene">gene</option>
+                    <option value="disease">disease</option>
+                    <option value="trait">trait</option>
+                    <option value="hpo">hpo</option>
+                    <option value="ancestry">ancestry</option>
+                    <option value="rsid">rsid</option>
+                  </select>
+                </div>
+                <div style={{ flex: 1, minWidth: "160px" }}>
+                  <label htmlFor="input-vault-tag-val" className="field-label">
+                    {t("blindSearchVal")}
+                  </label>
+                  <input
+                    id="input-vault-tag-val"
+                    type="text"
+                    className="field-input"
+                    placeholder={t("blindSearchVal")}
+                    aria-label={t("blindSearchVal")}
+                    value={tagValInput}
+                    onChange={(e) => setTagValInput(e.target.value)}
+                  />
+                </div>
+                <button
+                  id="btn-add-blind-tag-item"
+                  type="button"
+                  className="btn-terminal btn-terminal-ghost"
+                  style={{ height: "36px", padding: "0 12px", fontSize: "12px" }}
+                  title={t("vaultAddTagTitle")}
+                  onClick={() => {
+                    const v = tagValInput.trim();
+                    if (!v || tagEntries.length >= 16) return;
+                    setTagEntries((prev) => [...prev, { key: tagKeyInput.trim() || "gene", value: v }]);
+                    setTagValInput("");
+                  }}
+                >
+                  <span>{t("vaultAddTagBtn")}</span>
+                </button>
               </div>
               <div>
                 <label htmlFor="input-vault-tag-salt" className="field-label">
@@ -827,12 +1572,49 @@ export default function PatientSovereignVault({
                 className="btn-terminal btn-terminal-primary"
                 title={t("confirm")}
                 onClick={async () => {
-                  const tag = computeBlindTagHex(tagKeyInput, tagValInput, tagSaltInput);
-                  await onUpdateBlindTags?.(tagsModalData.dataId, [tag]);
-                  setTagsModalData(null);
+                  const finalEntries = [...tagEntries];
+                  if (tagValInput.trim() && finalEntries.length < 16) {
+                    finalEntries.push({ key: tagKeyInput.trim() || "gene", value: tagValInput.trim() });
+                  }
+                  const seenPair = new Set();
+                  const dedupedEntries = [];
+                  for (const it of finalEntries) {
+                    const k = String(it.key || "").trim();
+                    const v = String(it.value || "").trim();
+                    if (!k || !v) continue;
+                    const pairKey = `${k}\u0000${v}`;
+                    if (seenPair.has(pairKey)) continue;
+                    seenPair.add(pairKey);
+                    dedupedEntries.push({ key: k, value: v });
+                    if (dedupedEntries.length >= 16) break;
+                  }
+                  const submitAccount = account;
+                  const targetDataId = tagsModalData.dataId;
+                  const submitSalt = tagSaltInput;
+                  const uniqueHex = Array.from(
+                    new Set(dedupedEntries.map((it) => computeBlindTagHex(it.key, it.value, submitSalt)))
+                  );
+                  const ok = await onUpdateBlindTags?.(targetDataId, uniqueHex);
+                  if (ok) {
+                    const sessionSnapshot = loadBlindTagsFromSession(submitAccount);
+                    const nextSessionMap = {
+                      ...sessionSnapshot,
+                      [targetDataId]: { entries: dedupedEntries }
+                    };
+                    saveBlindTagsToSession(submitAccount, nextSessionMap);
+                    if (
+                      activeAccountRef.current &&
+                      submitAccount &&
+                      activeAccountRef.current.toLowerCase() === submitAccount.toLowerCase()
+                    ) {
+                      const savedRecord = { entries: dedupedEntries, salt: submitSalt };
+                      setSavedTagsByDataId((prev) => ({ ...prev, [targetDataId]: savedRecord }));
+                      setTagsModalData(null);
+                    }
+                  }
                 }}
               >
-                <span>{t("confirm")}</span>
+                <span>{t("confirm")} ({tagEntries.length + (tagValInput.trim() ? 1 : 0)})</span>
               </button>
             </div>
           </div>
@@ -841,8 +1623,16 @@ export default function PatientSovereignVault({
 
       {/* Modal: Seller Post-Window Release Escrow */}
       {escrowModalData && (
-        <div className="terminal-modal-backdrop" role="dialog" aria-modal="true" aria-label={`${t("modalReleaseEscrowTitle")}${escrowModalData.dataId}`} onClick={() => setEscrowModalData(null)}>
-          <div className="terminal-modal-window" onClick={(e) => e.stopPropagation()}>
+        <div className="terminal-modal-backdrop" onClick={() => setEscrowModalData(null)}>
+          <div
+            ref={escrowModalRef}
+            tabIndex={-1}
+            className="terminal-modal-window"
+            role="dialog"
+            aria-modal="true"
+            aria-label={`${t("modalReleaseEscrowTitle")}${escrowModalData.dataId}`}
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="modal-header-bar">
               <div className="modal-title-left">
                 <GenoTokenIcon size={16} color="var(--accent-emerald-text)" />
@@ -852,6 +1642,7 @@ export default function PatientSovereignVault({
                 type="button"
                 className="modal-close-btn"
                 title={t("close")}
+                aria-label={t("close")}
                 onClick={() => setEscrowModalData(null)}
               >
                 <CloseCrossIcon size={16} color="var(--text-secondary)" />
@@ -877,7 +1668,10 @@ export default function PatientSovereignVault({
                         style={{ justifyContent: "space-between", fontSize: "11px", height: "30px", width: "100%" }}
                         onClick={() => setEscrowBuyerInput(e.buyer)}
                       >
-                        <span style={{ fontFamily: "var(--font-mono)" }}>{e.buyer.slice(0, 10)}...{e.buyer.slice(-6)}</span>
+                        <span style={{ fontFamily: "var(--font-mono)" }}>
+                          {e.buyer.slice(0, 10)}...{e.buyer.slice(-6)}
+                          {e.deadline ? ` (${new Date(e.deadline * 1000).toLocaleString()}${e.manualExtension ? ` · ${t("escrowManualExtTag")}` : ""})` : ""}
+                        </span>
                         <span>
                           {e.disputed ? t("escrowDisputedActive") : e.delivered ? t("escrowStatusDelivered") : t("escrowPendingDelivery")}
                         </span>
@@ -894,7 +1688,7 @@ export default function PatientSovereignVault({
                   id="input-release-escrow-buyer"
                   type="text"
                   className="field-input"
-                  placeholder="0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
+                  placeholder="0x0000000000000000000000000000000000000000"
                   aria-label={t("modalReleaseBuyerLabel")}
                   value={escrowBuyerInput}
                   onChange={(e) => setEscrowBuyerInput(e.target.value)}
@@ -913,11 +1707,21 @@ export default function PatientSovereignVault({
                 id={`btn-release-escrow-${escrowModalData.dataId}`}
                 type="button"
                 className="btn-terminal btn-terminal-primary"
-                disabled={busyEscrowRelease}
+                disabled={
+                  busyEscrowRelease ||
+                  loadingEscrows ||
+                  Boolean(
+                    detectedEscrows.find(
+                      (e) =>
+                        e.buyer.toLowerCase() === escrowBuyerInput.trim().toLowerCase() &&
+                        !(e.delivered && !e.disputed && escrowModalNowSec >= e.deadline)
+                    )
+                  )
+                }
                 onClick={async () => {
                   const targetBuyer = escrowBuyerInput.trim();
-                  if (!targetBuyer || !targetBuyer.startsWith("0x") || targetBuyer.length !== 42) {
-                    showToast("Please enter a valid 42-character buyer EVM address (0x...).", "error");
+                  if (!ethers.isAddress(targetBuyer)) {
+                    showToast(t("vaultErrInvalidAddress"), "error");
                     return;
                   }
                   setBusyEscrowRelease(true);

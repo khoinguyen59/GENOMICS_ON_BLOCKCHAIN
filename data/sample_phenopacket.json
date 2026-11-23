@@ -1,34 +1,36 @@
 {
-  "schemaVersion": "2.0.0",
   "id": "phenopacket-SAMPLE_1000G_KHV01",
   "subject": {
     "id": "SAMPLE_1000G_KHV01",
+    "sex": "MALE",
+    "karyotypicSex": "XY",
     "taxonomy": {
       "id": "NCBITaxon:9606",
       "label": "Homo sapiens"
     },
-    "karyotypicSex": "46,XY",
-    "ancestry": "Vietnamese Kinh (KHV) / Southeast Asian"
+    "vitalStatus": {
+      "status": "ALIVE"
+    }
   },
   "phenotypicFeatures": [
     {
       "type": {
-        "id": "HP:0034608",
-        "label": "Alcohol flush reaction"
+        "id": "HP:0031284",
+        "label": "Flushing"
       },
       "excluded": false
     },
     {
       "type": {
-        "id": "HP:0000001",
-        "label": "Enhanced sprint performance"
+        "id": "SO:0001583",
+        "label": "missense_variant"
       },
       "excluded": false
     },
     {
       "type": {
-        "id": "HP:0012115",
-        "label": "Normal metabolic phenotype"
+        "id": "HANCESTRO:0021",
+        "label": "Vietnamese Kinh (KHV) / Southeast Asian"
       },
       "excluded": false
     }
@@ -36,8 +38,8 @@
   "diseases": [
     {
       "term": {
-        "id": "MONDO:0010001",
-        "label": "Alcohol flush reaction metabolic trait"
+        "id": "MONDO:0012454",
+        "label": "alcohol sensitivity, acute"
       }
     }
   ],
@@ -47,24 +49,31 @@
       "progressStatus": "COMPLETED",
       "diagnosis": {
         "disease": {
-          "id": "MONDO:0010001",
-          "label": "Alcohol flush reaction metabolic trait"
+          "id": "MONDO:0012454",
+          "label": "alcohol sensitivity, acute"
         },
         "genomicInterpretations": [
           {
-            "status": "CAUSATIVE",
+            "subjectOrBiosampleId": "SAMPLE_1000G_KHV01",
+            "interpretationStatus": "CONTRIBUTORY",
             "variantInterpretation": {
-              "acmgPathogenicityClassification": "FUNCTIONAL_POLYMORPHISM",
+              "acmgPathogenicityClassification": "BENIGN",
               "variationDescriptor": {
-                "id": "var-ALDH2-rs671",
+                "id": "rs671",
                 "geneContext": {
                   "valueId": "HGNC:404",
                   "symbol": "ALDH2"
                 },
+                "vcfRecord": {
+                  "genomeAssembly": "GRCh38",
+                  "chrom": "chr12",
+                  "pos": 111803962,
+                  "id": "rs671"
+                },
                 "expressions": [
                   {
                     "syntax": "hgvs",
-                    "value": "NM_000690.4:c.1510G>A"
+                    "value": "[REDACTED_PROTECTED_UNDER_ENCRYPTED_PAYLOAD]"
                   }
                 ],
                 "allelicState": {
@@ -80,14 +89,14 @@
   ],
   "metaData": {
     "created": "2026-10-29T20:00:00Z",
-    "createdBy": "GenomicsBlockchainAgent",
+    "createdBy": "GenoChain Phenopacket Builder v2.0",
     "submittedBy": "1000 Genomes Project & dbSNP Molecular Variation Portal",
     "resources": [
       {
         "id": "hp",
-        "name": "human phenotype ontology",
+        "name": "Human Phenotype Ontology",
         "url": "http://purl.obolibrary.org/obo/hp.owl",
-        "version": "2024-08",
+        "version": "2026-01-01",
         "namespacePrefix": "HP",
         "iriPrefix": "http://purl.obolibrary.org/obo/HP_"
       },
@@ -95,9 +104,49 @@
         "id": "mondo",
         "name": "Mondo Disease Ontology",
         "url": "http://purl.obolibrary.org/obo/mondo.owl",
-        "version": "2024-09",
+        "version": "2026-01-01",
         "namespacePrefix": "MONDO",
         "iriPrefix": "http://purl.obolibrary.org/obo/MONDO_"
+      },
+      {
+        "id": "hancestro",
+        "name": "Human Ancestry Ontology",
+        "url": "http://purl.obolibrary.org/obo/hancestro.owl",
+        "version": "2026-01-01",
+        "namespacePrefix": "HANCESTRO",
+        "iriPrefix": "http://purl.obolibrary.org/obo/HANCESTRO_"
+      },
+      {
+        "id": "so",
+        "name": "Sequence Ontology",
+        "url": "http://purl.obolibrary.org/obo/so.owl",
+        "version": "2026-01-01",
+        "namespacePrefix": "SO",
+        "iriPrefix": "http://purl.obolibrary.org/obo/SO_"
+      },
+      {
+        "id": "geno",
+        "name": "Genotype Ontology",
+        "url": "http://purl.obolibrary.org/obo/geno.owl",
+        "version": "2026-01-01",
+        "namespacePrefix": "GENO",
+        "iriPrefix": "http://purl.obolibrary.org/obo/GENO_"
+      },
+      {
+        "id": "ncbitaxon",
+        "name": "NCBI Organismal Classification",
+        "url": "http://purl.obolibrary.org/obo/ncbitaxon.owl",
+        "version": "2026-01-01",
+        "namespacePrefix": "NCBITaxon",
+        "iriPrefix": "http://purl.obolibrary.org/obo/NCBITaxon_"
+      },
+      {
+        "id": "hgnc",
+        "name": "HUGO Gene Nomenclature Committee",
+        "url": "https://www.genenames.org",
+        "version": "2026-01-01",
+        "namespacePrefix": "HGNC",
+        "iriPrefix": "https://www.genenames.org/data/gene-symbol-report/#!/hgnc_id/HGNC:"
       }
     ],
     "phenopacketSchemaVersion": "2.0.0"

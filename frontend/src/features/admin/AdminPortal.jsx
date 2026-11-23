@@ -1,11 +1,13 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { ethers } from "ethers";
-import { useWeb3 } from "../../context/Web3Context";
+import { useWeb3, CONFIGURED_CHAIN_ID, CONFIGURED_CHAIN_NAME } from "../../context/Web3Context";
 import { useLanguage } from "../../context/LanguageContext";
 import { useDatasets } from "../../context/DatasetContext";
 import contractAddresses from "../../contracts/contractAddresses.json";
 import GenomicZkVerifierABI from "../../contracts/GenomicZkVerifierABI.json";
-import { resolveEscrowDispute } from "../../services/datasetService";
+import GenomicTimelockABI from "../../contracts/GenomicTimelockABI.json";
+import { resolveEscrowDispute, queryFilterChunked, getDeploymentStartBlock } from "../../services/datasetService";
+import { executeSerializedTx, runWithConcurrency, formatConfiguredChainText } from "../../utils/asyncResilience";
 import {
   DataOwnerShieldIcon,
   GenoTokenIcon,
@@ -32,8 +34,10 @@ export default function AdminPortal() {
     setShowIpfsSettings,
     pinataJwt,
     kuboRpc,
+    kuboGateway,
     showToast,
-    refreshBalance
+    refreshBalance,
+    refreshFaucetPolicy
   } = useWeb3();
   const { fetchOnChainDatasets } = useDatasets();
   const { t, lang } = useLanguage();
@@ -51,19 +55,31 @@ export default function AdminPortal() {
     bountyCount: 0,
     reuseFeeBps: 500,
     maxBlindTags: 16,
-    chainNowSec: 0
+    commitRevealRequired: false,
+    faucetEnabled: true,
+    faucetVoucherRequired: false,
+    faucetSigner: "",
+    requireLabAttestation: false,
+    chainNowSec: 0,
+    isTimelockGoverned: false,
+    timelockMinDelay: 0
   });
   const [rpcError, setRpcError] = useState(null);
   const [bounties, setBounties] = useState([]);
+  const [timelockAction, setTimelockAction] = useState("setCapsuleDispatcher");
+  const [encodedTimelockProposal, setEncodedTimelockProposal] = useState(null);
 
   // Governance form states
   const [dispatcherInput, setDispatcherInput] = useState("");
   const [zkVerifierInput, setZkVerifierInput] = useState(contractAddresses.GenomicZkVerifier || "");
 
-  // Treasury form states
-  const [mintToInput, setMintToInput] = useState("0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC");
+  // Treasury & Faucet Config form states
+  const [mintToInput, setMintToInput] = useState("");
   const [mintAmountInput, setMintAmountInput] = useState("1000");
-  const [rescueTokenInput, setRescueTokenInput] = useState(contractAddresses.GenomicToken || "");
+  const [faucetEnabledInput, setFaucetEnabledInput] = useState(true);
+  const [faucetVoucherRequiredInput, setFaucetVoucherRequiredInput] = useState(false);
+  const [faucetSignerInput, setFaucetSignerInput] = useState("");
+  const [rescueTokenInput, setRescueTokenInput] = useState("");
   const [rescueToInput, setRescueToInput] = useState("");
   const [rescueAmountInput, setRescueAmountInput] = useState("10");
 
@@ -73,16 +89,30 @@ export default function AdminPortal() {
   const [bountyRewardInput, setBountyRewardInput] = useState("50");
   const [bountyMaxClaimsInput, setBountyMaxClaimsInput] = useState("5");
   const [bountyDurationInput, setBountyDurationInput] = useState("86400");
+  const defaultLocalDeployer = CONFIGURED_CHAIN_ID === 31337 ? (contractAddresses.Deployer || "") : "";
+  const [bountyAttestorInput, setBountyAttestorInput] = useState(
+    () => account || defaultLocalDeployer
+  );
+  const [labAttestorInput, setLabAttestorInput] = useState(
+    () => account || defaultLocalDeployer
+  );
+  const bountyAttestorTouchedRef = useRef(false);
+  const labAttestorTouchedRef = useRef(false);
 
   // Escrow Dispute Arbitration states
   const [disputes, setDisputes] = useState([]);
   const [disputeDataIdInput, setDisputeDataIdInput] = useState("1");
   const [disputeBuyerInput, setDisputeBuyerInput] = useState("");
+  const disputeBuyerInputRef = useRef(disputeBuyerInput);
+  disputeBuyerInputRef.current = disputeBuyerInput;
+  const telemetrySeqRef = useRef(0);
 
   const loadAdminTelemetry = useCallback(async () => {
+    const mySeq = ++telemetrySeqRef.current;
     setLoadingTelemetry(true);
     try {
       const { provider } = await getProviderAndSigner();
+      if (telemetrySeqRef.current !== mySeq) return;
       const activeContracts = contracts;
       if (!activeContracts?.registry || !activeContracts?.token) return;
 
@@ -98,7 +128,11 @@ export default function AdminPortal() {
         totSupply,
         regTokBal,
         reuseBps,
-        maxTags
+        maxTags,
+        commitRevReq,
+        fEnabled,
+        fVoucherReq,
+        fSigner
       ] = await Promise.all([
         activeContracts.registry.owner(),
         activeContracts.token.owner(),
@@ -108,38 +142,78 @@ export default function AdminPortal() {
         activeContracts.token.totalSupply(),
         activeContracts.token.balanceOf(contractAddresses.GenomicsRegistry),
         activeContracts.registry.REUSE_FEE_BPS(),
-        activeContracts.registry.MAX_BLIND_TAGS_PER_DATASET()
+        activeContracts.registry.MAX_BLIND_TAGS_PER_DATASET(),
+        activeContracts.registry.commitRevealRequired?.().catch(() => false),
+        activeContracts.token.faucetEnabled?.().catch(() => true),
+        activeContracts.token.faucetVoucherRequired?.().catch(() => false),
+        activeContracts.token.faucetSigner?.().catch(() => ethers.ZeroAddress)
       ]);
 
       const activeZkAddr =
         zkAddr && zkAddr !== ethers.ZeroAddress ? zkAddr : contractAddresses.GenomicZkVerifier;
 
+      let isTimelockGoverned = false;
+      let timelockMinDelay = 0;
+      if (regOwner && regOwner !== ethers.ZeroAddress && provider?.getCode) {
+        try {
+          const ownerCode = await provider.getCode(regOwner);
+          if (ownerCode && ownerCode !== "0x" && ownerCode !== "0x0") {
+            const tl = new ethers.Contract(regOwner, GenomicTimelockABI, provider);
+            const rawDelay = await tl.getMinDelay().catch(() => null);
+            if (rawDelay !== null && rawDelay !== undefined) {
+              isTimelockGoverned = true;
+              timelockMinDelay = Number(rawDelay);
+            }
+          }
+        } catch {}
+      }
+
       let bCount = 0;
+      let reqLabAtt = false;
       const bountyList = [];
       if (activeZkAddr && activeZkAddr !== ethers.ZeroAddress && provider) {
         const zk = new ethers.Contract(activeZkAddr, GenomicZkVerifierABI, provider);
-        bCount = Number(await zk.bountyCount());
-        for (let i = 1; i <= bCount; i++) {
-          try {
-            const b = await zk.bounties(i);
-            bountyList.push({
-              bountyId: Number(b.bountyId),
-              sponsor: b.sponsor,
-              targetTraitId: b.targetTraitId,
-              traitDescription: b.traitDescription,
-              rewardPerClaim: Number(ethers.formatUnits(b.rewardPerClaim, 18)),
-              maxClaims: Number(b.maxClaims),
-              currentClaims: Number(b.currentClaims),
-              remainingFunding: Number(ethers.formatUnits(b.remainingFunding, 18)),
-              expiresAt: Number(b.expiresAt),
-              isActive: Boolean(b.isActive),
-              isExpired: chainNowSec >= Number(b.expiresAt)
-            });
-          } catch {
-            // Skip malformed entry
-          }
+        const [rawBCount, rawReqLabAtt] = await Promise.all([
+          zk.bountyCount(),
+          zk.requireLabAttestation?.().catch(() => false)
+        ]);
+        bCount = Number(rawBCount);
+        reqLabAtt = Boolean(rawReqLabAtt);
+        const bountyIds = Array.from({ length: bCount }, (_, idx) => idx + 1);
+        const fetchedBounties = await runWithConcurrency(
+          bountyIds,
+          async (i) => {
+            try {
+              const [b, reqAtt] = await Promise.all([
+                zk.bounties(i),
+                zk.bountyRequiredAttestor?.(i).catch(() => ethers.ZeroAddress)
+              ]);
+              return {
+                bountyId: Number(b.bountyId),
+                sponsor: b.sponsor,
+                targetTraitId: b.targetTraitId,
+                traitDescription: b.traitDescription,
+                rewardPerClaim: Number(ethers.formatUnits(b.rewardPerClaim, 18)),
+                maxClaims: Number(b.maxClaims),
+                currentClaims: Number(b.currentClaims),
+                remainingFunding: Number(ethers.formatUnits(b.remainingFunding, 18)),
+                expiresAt: Number(b.expiresAt),
+                isActive: Boolean(b.isActive),
+                isExpired: chainNowSec >= Number(b.expiresAt),
+                requiredAttestor: reqAtt && reqAtt !== ethers.ZeroAddress ? reqAtt : null
+              };
+            } catch {
+              return null;
+            }
+          },
+          6
+        );
+        for (const item of fetchedBounties) {
+          if (item) bountyList.push(item);
         }
       }
+
+      if (telemetrySeqRef.current !== mySeq) return;
 
       setTelemetry({
         registryOwner: regOwner,
@@ -152,54 +226,88 @@ export default function AdminPortal() {
         bountyCount: bCount,
         reuseFeeBps: Number(reuseBps || 500n),
         maxBlindTags: Number(maxTags || 16n),
-        chainNowSec
+        commitRevealRequired: Boolean(commitRevReq),
+        faucetEnabled: Boolean(fEnabled),
+        faucetVoucherRequired: Boolean(fVoucherReq),
+        faucetSigner: fSigner && fSigner !== ethers.ZeroAddress ? fSigner : "",
+        requireLabAttestation: reqLabAtt,
+        chainNowSec,
+        isTimelockGoverned,
+        timelockMinDelay
       });
+      setFaucetEnabledInput(Boolean(fEnabled));
+      setFaucetVoucherRequiredInput(Boolean(fVoucherReq));
+      setFaucetSignerInput(fSigner && fSigner !== ethers.ZeroAddress ? fSigner : "");
       const disputeList = [];
       try {
-        const dispEvs = await activeContracts.registry.queryFilter(
+        const dispEvs = await queryFilterChunked(
+          activeContracts.registry,
           activeContracts.registry.filters.EscrowDisputed(),
-          0,
+          getDeploymentStartBlock(),
           "latest"
         );
         const seenDisp = new Set();
+        const uniqueDisputes = [];
         for (const ev of dispEvs) {
           const dId = Number(ev.args?.dataId || 0);
           const bAddr = ev.args?.buyer;
           const k = `${dId}:${(bAddr || "").toLowerCase()}`;
           if (!dId || !bAddr || seenDisp.has(k)) continue;
           seenDisp.add(k);
-          const [isDisp, dep] = await Promise.all([
-            activeContracts.registry.escrowDisputed(dId, bAddr).catch(() => false),
-            activeContracts.registry.escrowDeposits(dId, bAddr).catch(() => null)
-          ]);
-          if (isDisp && dep && dep.amount > 0n && !dep.released && !dep.refunded) {
-            disputeList.push({
-              dataId: dId,
-              buyer: bAddr,
-              seller: dep.seller,
-              amount: Number(ethers.formatUnits(dep.amount, 18))
-            });
-          }
+          uniqueDisputes.push({ dId, bAddr });
+        }
+        const hydratedDisputes = await runWithConcurrency(
+          uniqueDisputes,
+          async ({ dId, bAddr }) => {
+            const [isDisp, dep] = await Promise.all([
+              activeContracts.registry.escrowDisputed(dId, bAddr).catch(() => false),
+              activeContracts.registry.escrowDeposits(dId, bAddr).catch(() => null)
+            ]);
+            if (isDisp && dep && dep.amount > 0n && !dep.released && !dep.refunded) {
+              return {
+                dataId: dId,
+                buyer: bAddr,
+                seller: dep.seller,
+                amount: Number(ethers.formatUnits(dep.amount, 18))
+              };
+            }
+            return null;
+          },
+          6
+        );
+        for (const item of hydratedDisputes) {
+          if (item) disputeList.push(item);
         }
       } catch {}
 
+      if (telemetrySeqRef.current !== mySeq) return;
       setDisputes(disputeList);
-      if (disputeList.length > 0 && !disputeBuyerInput) {
+      if (disputeList.length > 0 && !disputeBuyerInputRef.current) {
         setDisputeDataIdInput(String(disputeList[0].dataId));
         setDisputeBuyerInput(disputeList[0].buyer);
       }
       setBounties(bountyList);
-      setDispatcherInput((prev) => prev || disp || regOwner || "");
+      const nonZeroDisp = disp && disp !== ethers.ZeroAddress ? disp : "";
+      setDispatcherInput((prev) => prev || nonZeroDisp || (!isTimelockGoverned ? regOwner : "") || "");
       setRescueToInput((prev) => prev || account || regOwner || "");
+      if (!bountyAttestorTouchedRef.current) {
+        setBountyAttestorInput(account || regOwner || defaultLocalDeployer);
+      }
+      if (!labAttestorTouchedRef.current) {
+        setLabAttestorInput(account || regOwner || defaultLocalDeployer);
+      }
       setRpcError(null);
     } catch (err) {
+      if (telemetrySeqRef.current !== mySeq) return;
       const errMsg = err.shortMessage || err.message;
       setRpcError(errMsg);
-      showToast("Admin telemetry warning: " + errMsg, "error");
+      showToast((lang === "vi" ? "Cảnh báo chỉ số Admin: " : "Admin telemetry warning: ") + errMsg, "error");
     } finally {
-      setLoadingTelemetry(false);
+      if (telemetrySeqRef.current === mySeq) {
+        setLoadingTelemetry(false);
+      }
     }
-  }, [account, contracts, getProviderAndSigner, showToast]);
+  }, [account, contracts, defaultLocalDeployer, getProviderAndSigner, lang, showToast]);
 
   useEffect(() => {
     loadAdminTelemetry();
@@ -207,23 +315,73 @@ export default function AdminPortal() {
 
   const requireActiveSigner = async () => {
     const { signer: s } = await getProviderAndSigner();
-    if (!s) throw new Error("Connect Hardhat #0 Admin or wallet signer first.");
+    if (!s) {
+      throw new Error(
+        lang === "vi"
+          ? "Vui lòng kết nối ví Quản Trị trước."
+          : formatConfiguredChainText(
+              "Connect Hardhat #0 Admin or wallet signer first.",
+              CONFIGURED_CHAIN_ID,
+              CONFIGURED_CHAIN_NAME
+            )
+      );
+    }
     return s;
   };
 
   const handleSetDispatcher = async () => {
     try {
       setBusyAction("dispatcher");
-      if (!ethers.isAddress(dispatcherInput)) throw new Error("Invalid dispatcher EVM address.");
+      const trimmedDisp = dispatcherInput.trim();
+      if (!ethers.isAddress(trimmedDisp) || trimmedDisp === ethers.ZeroAddress) {
+        throw new Error(
+          lang === "vi"
+            ? "Địa chỉ EVM Dispatcher phải hợp lệ và khác 0x0 (dùng disableCapsuleDispatcher() để vô hiệu hóa)."
+            : "Dispatcher EVM address must be valid and non-zero (use disableCapsuleDispatcher() to clear to 0x0)."
+        );
+      }
       const s = await requireActiveSigner();
+      const txAccount = account || (await s.getAddress());
       const reg = contracts.registry.connect(s);
-      showToast("Submitting setCapsuleDispatcher transaction...", "info");
-      const tx = await reg.setCapsuleDispatcher(dispatcherInput);
-      await tx.wait();
-      showToast("Capsule Dispatcher updated on-chain!");
+      showToast(lang === "vi" ? "Đang gửi giao dịch cập nhật Capsule Dispatcher..." : "Submitting setCapsuleDispatcher transaction...", "info");
+      await executeSerializedTx(txAccount, async () => {
+        const tx = await reg.setCapsuleDispatcher(trimmedDisp);
+        await tx.wait();
+      });
+      showToast(lang === "vi" ? "Đã cập nhật Capsule Dispatcher trên chuỗi!" : "Capsule Dispatcher updated on-chain!");
       await loadAdminTelemetry();
     } catch (err) {
-      showToast("setCapsuleDispatcher failed: " + (err.shortMessage || err.message), "error");
+      showToast((lang === "vi" ? "Cập nhật Dispatcher thất bại: " : "setCapsuleDispatcher failed: ") + (err.shortMessage || err.message), "error");
+    } finally {
+      setBusyAction("");
+    }
+  };
+
+  const handleToggleCommitReveal = async () => {
+    try {
+      setBusyAction("commitreveal");
+      const s = await requireActiveSigner();
+      const txAccount = account || (await s.getAddress());
+      const reg = contracts.registry.connect(s);
+      const nextVal = !telemetry.commitRevealRequired;
+      showToast(
+        lang === "vi"
+          ? `Đang cập nhật chế độ Commit-Reveal: ${nextVal ? "BẬT" : "TẮT"}...`
+          : `Updating Commit-Reveal front-running guard: ${nextVal ? "ENABLED" : "DISABLED"}...`,
+        "info"
+      );
+      await executeSerializedTx(txAccount, async () => {
+        const tx = await reg.setCommitRevealRequired(nextVal);
+        await tx.wait();
+      });
+      showToast(
+        lang === "vi"
+          ? `Chế độ Commit-Reveal đã chuyển sang: ${nextVal ? "BẬT" : "TẮT"}!`
+          : `Commit-Reveal mode updated to: ${nextVal ? "ENABLED" : "DISABLED"}!`
+      );
+      await loadAdminTelemetry();
+    } catch (err) {
+      showToast((lang === "vi" ? "Cập nhật Commit-Reveal thất bại: " : "setCommitRevealRequired failed: ") + (err.shortMessage || err.message), "error");
     } finally {
       setBusyAction("");
     }
@@ -232,16 +390,19 @@ export default function AdminPortal() {
   const handleSetZkVerifier = async () => {
     try {
       setBusyAction("zkverifier");
-      if (!ethers.isAddress(zkVerifierInput)) throw new Error("Invalid ZK Verifier EVM address.");
+      if (!ethers.isAddress(zkVerifierInput)) throw new Error(lang === "vi" ? "Địa chỉ EVM ZK Verifier không hợp lệ." : "Invalid ZK Verifier EVM address.");
       const s = await requireActiveSigner();
+      const txAccount = account || (await s.getAddress());
       const reg = contracts.registry.connect(s);
-      showToast("Submitting setZkVerifier transaction...", "info");
-      const tx = await reg.setZkVerifier(zkVerifierInput);
-      await tx.wait();
-      showToast("ZK Verifier linked on-chain!");
+      showToast(lang === "vi" ? "Đang gửi giao dịch liên kết ZK Verifier..." : "Submitting setZkVerifier transaction...", "info");
+      await executeSerializedTx(txAccount, async () => {
+        const tx = await reg.setZkVerifier(zkVerifierInput);
+        await tx.wait();
+      });
+      showToast(lang === "vi" ? "Đã liên kết hợp đồng ZK Verifier trên chuỗi!" : "ZK Verifier linked on-chain!");
       await loadAdminTelemetry();
     } catch (err) {
-      showToast("setZkVerifier failed: " + (err.shortMessage || err.message), "error");
+      showToast((lang === "vi" ? "Liên kết ZK Verifier thất bại: " : "setZkVerifier failed: ") + (err.shortMessage || err.message), "error");
     } finally {
       setBusyAction("");
     }
@@ -250,19 +411,30 @@ export default function AdminPortal() {
   const handleMintGeno = async () => {
     try {
       setBusyAction("mint");
-      if (!ethers.isAddress(mintToInput)) throw new Error("Invalid recipient EVM address.");
-      const amt = Number(mintAmountInput);
-      if (!Number.isFinite(amt) || amt <= 0) throw new Error("Mint amount must be > 0.");
+      if (!ethers.isAddress(mintToInput)) throw new Error(lang === "vi" ? "Địa chỉ ví nhận không hợp lệ." : "Invalid recipient EVM address.");
+      const trimmedAmt = String(mintAmountInput ?? "").trim();
+      if (!/^\d+(\.\d{1,18})?$/.test(trimmedAmt)) {
+        throw new Error(
+          lang === "vi"
+            ? "Số lượng Mint phải là số thập phân dương hợp lệ (tối đa 18 chữ số thập phân)."
+            : "Mint amount must be a valid positive decimal number (up to 18 decimals)."
+        );
+      }
+      const mintWei = ethers.parseUnits(trimmedAmt, 18);
+      if (mintWei <= 0n) throw new Error(lang === "vi" ? "Số lượng Mint phải lớn hơn 0." : "Mint amount must be > 0.");
       const s = await requireActiveSigner();
+      const txAccount = account || (await s.getAddress());
       const tok = contracts.token.connect(s);
-      showToast(`Minting ${amt} $GENO to ${mintToInput.slice(0, 8)}...`, "info");
-      const tx = await tok.mint(mintToInput, ethers.parseUnits(String(amt), 18));
-      await tx.wait();
-      showToast(`Minted ${amt} $GENO successfully!`);
+      showToast(lang === "vi" ? `Đang phát hành ${trimmedAmt} $GENO tới ${mintToInput.slice(0, 8)}...` : `Minting ${trimmedAmt} $GENO to ${mintToInput.slice(0, 8)}...`, "info");
+      await executeSerializedTx(txAccount, async () => {
+        const tx = await tok.mint(mintToInput, mintWei);
+        await tx.wait();
+      });
+      showToast(lang === "vi" ? `Đã phát hành ${trimmedAmt} $GENO thành công!` : `Minted ${trimmedAmt} $GENO successfully!`);
       await refreshBalance(account);
       await loadAdminTelemetry();
     } catch (err) {
-      showToast("Mint failed: " + (err.shortMessage || err.message), "error");
+      showToast((lang === "vi" ? "Phát hành thất bại: " : "Mint failed: ") + (err.shortMessage || err.message), "error");
     } finally {
       setBusyAction("");
     }
@@ -272,20 +444,49 @@ export default function AdminPortal() {
     try {
       setBusyAction("rescue");
       if (!ethers.isAddress(rescueTokenInput) || !ethers.isAddress(rescueToInput)) {
-        throw new Error("Invalid token or recipient EVM address.");
+        throw new Error(lang === "vi" ? "Địa chỉ token ngoại lai hoặc địa chỉ nhận không hợp lệ." : "Invalid token or recipient EVM address.");
       }
-      const amt = Number(rescueAmountInput);
-      if (!Number.isFinite(amt) || amt <= 0) throw new Error("Rescue amount must be > 0.");
+      const trimmedAmt = String(rescueAmountInput ?? "").trim();
+      if (!/^\d+(\.\d+)?$/.test(trimmedAmt)) {
+        throw new Error(
+          lang === "vi"
+            ? "Số lượng thu hồi phải là số thập phân dương hợp lệ."
+            : "Rescue amount must be a valid positive decimal number."
+        );
+      }
       const s = await requireActiveSigner();
+      const txAccount = account || (await s.getAddress());
+      const erc20 = new ethers.Contract(rescueTokenInput, ["function decimals() view returns (uint8)"], s);
+      let decimals = 18;
+      try {
+        const rawDec = Number(await erc20.decimals());
+        if (Number.isInteger(rawDec) && rawDec >= 0 && rawDec <= 36) {
+          decimals = rawDec;
+        }
+      } catch {
+        decimals = 18;
+      }
+      const fracPart = trimmedAmt.includes(".") ? trimmedAmt.split(".")[1] : "";
+      if (fracPart.length > decimals) {
+        throw new Error(
+          lang === "vi"
+            ? `Token này chỉ hỗ trợ tối đa ${decimals} chữ số thập phân.`
+            : `Target ERC-20 token supports at most ${decimals} decimal places.`
+        );
+      }
+      const rescueWei = ethers.parseUnits(trimmedAmt, decimals);
+      if (rescueWei <= 0n) throw new Error(lang === "vi" ? "Số lượng thu hồi phải lớn hơn 0." : "Rescue amount must be > 0.");
       const reg = contracts.registry.connect(s);
-      showToast(`Rescuing ${amt} tokens from Registry...`, "info");
-      const tx = await reg.rescueTokens(rescueTokenInput, rescueToInput, ethers.parseUnits(String(amt), 18));
-      await tx.wait();
-      showToast(`Rescued ${amt} tokens successfully!`);
+      showToast(lang === "vi" ? `Đang thu hồi ${trimmedAmt} token ngoại lai (decimals=${decimals})...` : `Rescuing ${trimmedAmt} tokens (decimals=${decimals}) from Registry...`, "info");
+      await executeSerializedTx(txAccount, async () => {
+        const tx = await reg.rescueTokens(rescueTokenInput, rescueToInput, rescueWei);
+        await tx.wait();
+      });
+      showToast(lang === "vi" ? `Đã thu hồi ${trimmedAmt} token thành công!` : `Rescued ${trimmedAmt} tokens successfully!`);
       await refreshBalance(account);
       await loadAdminTelemetry();
     } catch (err) {
-      showToast("rescueTokens failed: " + (err.shortMessage || err.message), "error");
+      showToast((lang === "vi" ? "Thu hồi token thất bại: " : "rescueTokens failed: ") + (err.shortMessage || err.message), "error");
     } finally {
       setBusyAction("");
     }
@@ -298,12 +499,38 @@ export default function AdminPortal() {
   const handleCreateZkBounty = async () => {
     try {
       setBusyAction("bounty-create");
-      const reward = Number(bountyRewardInput);
-      const maxClaims = parseInt(bountyMaxClaimsInput, 10);
-      const dur = parseInt(bountyDurationInput, 10);
-      if (!Number.isFinite(reward) || reward <= 0) throw new Error("Reward per claim must be > 0.");
-      if (!Number.isFinite(maxClaims) || maxClaims < 1) throw new Error("Max claims must be >= 1.");
-      if (!Number.isFinite(dur) || dur < 3600) throw new Error("Duration must be >= 3600 seconds.");
+      const trimmedReward = String(bountyRewardInput ?? "").trim();
+      const trimmedMaxClaims = String(bountyMaxClaimsInput ?? "").trim();
+      const trimmedDur = String(bountyDurationInput ?? "").trim();
+      const maxClaims = /^\d+$/.test(trimmedMaxClaims) ? Number(trimmedMaxClaims) : NaN;
+      const dur = /^\d+$/.test(trimmedDur) ? Number(trimmedDur) : NaN;
+      if (!/^\d+(\.\d{1,18})?$/.test(trimmedReward)) {
+        throw new Error(
+          lang === "vi"
+            ? "Mức thưởng mỗi lượt phải là số thập phân dương hợp lệ (tối đa 18 chữ số thập phân)."
+            : "Reward per claim must be a valid positive decimal number (up to 18 decimals)."
+        );
+      }
+      const rewardWei = ethers.parseUnits(trimmedReward, 18);
+      if (rewardWei < 10n ** 18n) {
+        throw new Error(lang === "vi" ? "Mức thưởng mỗi lượt phải >= 1 $GENO (MIN_BOUNTY_REWARD)." : "Reward per claim must be >= 1 $GENO (MIN_BOUNTY_REWARD).");
+      }
+      if (!Number.isSafeInteger(maxClaims) || maxClaims < 1) throw new Error(lang === "vi" ? "Số lượt tối đa phải là số nguyên >= 1." : "Max claims must be an integer >= 1.");
+      if (!Number.isSafeInteger(dur) || dur < 3600 || dur > 31536000) {
+        throw new Error(lang === "vi" ? "Thời hạn phải là số nguyên từ 3600 đến 31536000 giây (1 giờ - 365 ngày)." : "Duration must be an integer between 3600 and 31536000 seconds (1h - 365d).");
+      }
+
+      const trimmedAttestor = bountyAttestorInput.trim();
+      if (!trimmedAttestor && telemetry.requireLabAttestation) {
+        throw new Error(
+          lang === "vi"
+            ? "Chế độ bảo mật requireLabAttestation đang BẬT: bắt buộc nhập địa chỉ Phòng Lab xác thực được phê duyệt (0x...)."
+            : "Production requireLabAttestation policy is ENABLED: an approved sequencing-lab attestor address (0x...) is required."
+        );
+      }
+      if (trimmedAttestor && (!ethers.isAddress(trimmedAttestor) || trimmedAttestor === ethers.ZeroAddress)) {
+        throw new Error(lang === "vi" ? "Địa chỉ Phòng Lab xác thực (Attestor) không hợp lệ." : "Invalid lab attestor EVM address.");
+      }
 
       const s = await requireActiveSigner();
       const activeAddr = await s.getAddress();
@@ -311,33 +538,224 @@ export default function AdminPortal() {
         telemetry.zkVerifier && telemetry.zkVerifier !== ethers.ZeroAddress
           ? telemetry.zkVerifier
           : contractAddresses.GenomicZkVerifier;
+      const zk = new ethers.Contract(targetZkAddr, GenomicZkVerifierABI, s);
 
-      const rewardWei = ethers.parseUnits(String(reward), 18);
-      const totalFundingWei = rewardWei * BigInt(maxClaims);
-      const tok = contracts.token.connect(s);
-      const allowance = await tok.allowance(activeAddr, targetZkAddr);
-      if (allowance < totalFundingWei) {
-        showToast("1/2: Approving $GENO funding for GenomicZkVerifier...", "info");
-        const approveTx = await tok.approve(targetZkAddr, totalFundingWei);
-        await approveTx.wait();
+      const liveRequireLab = await zk.requireLabAttestation().catch(() => Boolean(telemetry.requireLabAttestation));
+      if (!trimmedAttestor && liveRequireLab) {
+        throw new Error(
+          lang === "vi"
+            ? "Chế độ bảo mật requireLabAttestation đang BẬT: bắt buộc nhập địa chỉ Phòng Lab xác thực được phê duyệt (0x...)."
+            : "Production requireLabAttestation policy is ENABLED: an approved sequencing-lab attestor address (0x...) is required."
+        );
+      }
+      if (trimmedAttestor && liveRequireLab) {
+        const isApproved = await zk.approvedLabAttestors(trimmedAttestor).catch(() => false);
+        if (!isApproved) {
+          throw new Error(
+            lang === "vi"
+              ? "Địa chỉ Phòng Lab xác thực (Attestor) chưa được phê duyệt trên GenomicZkVerifier."
+              : "Lab attestor address is not approved on GenomicZkVerifier."
+          );
+        }
       }
 
-      const zk = new ethers.Contract(targetZkAddr, GenomicZkVerifierABI, s);
-      showToast("2/2: Creating on-chain ZK Trait Verification Bounty...", "info");
-      const tx = await zk.createZkBounty(
-        computedTraitId,
-        bountyDescInput.trim() || "Verified Genomic Trait Cohort",
-        rewardWei,
-        maxClaims,
-        dur
-      );
-      await tx.wait();
-      showToast("ZK Trait Bounty created and funded on-chain!");
+      const totalFundingWei = rewardWei * BigInt(maxClaims);
+      const tok = contracts.token.connect(s);
+      await executeSerializedTx(account || activeAddr, async () => {
+        const allowance = await tok.allowance(activeAddr, targetZkAddr);
+        if (allowance < totalFundingWei) {
+          showToast(lang === "vi" ? "1/2: Đang phê duyệt ngân sách $GENO cho GenomicZkVerifier..." : "1/2: Approving $GENO funding for GenomicZkVerifier...", "info");
+          const approveTx = await tok.approve(targetZkAddr, totalFundingWei);
+          await approveTx.wait();
+        }
+
+        let tx;
+        if (trimmedAttestor) {
+          showToast(lang === "vi" ? "2/2: Đang khởi tạo Quỹ Thưởng ZK Xác Thực Phòng Lab trên chuỗi..." : "2/2: Creating Certified Lab-Attested ZK Bounty on-chain...", "info");
+          tx = await zk.createAttestedZkBounty(
+            computedTraitId,
+            bountyDescInput.trim() || "Certified Lab-Attested Genomic Trait Cohort",
+            rewardWei,
+            maxClaims,
+            dur,
+            trimmedAttestor
+          );
+        } else {
+          showToast(lang === "vi" ? "2/2: Đang khởi tạo Quỹ Thưởng Đặc Tính ZK trên chuỗi..." : "2/2: Creating on-chain ZK Trait Verification Bounty...", "info");
+          tx = await zk.createZkBounty(
+            computedTraitId,
+            bountyDescInput.trim() || "Verified Genomic Trait Cohort",
+            rewardWei,
+            maxClaims,
+            dur
+          );
+        }
+        await tx.wait();
+      });
+      showToast(lang === "vi" ? "Đã khởi tạo và nạp ngân sách Quỹ Thưởng ZK trên chuỗi!" : "ZK Trait Bounty created and funded on-chain!");
       await refreshBalance(account);
       await fetchOnChainDatasets(account);
       await loadAdminTelemetry();
     } catch (err) {
-      showToast("createZkBounty failed: " + (err.shortMessage || err.message), "error");
+      showToast((lang === "vi" ? "Tạo quỹ thưởng ZK thất bại: " : "createZkBounty failed: ") + (err.shortMessage || err.message), "error");
+    } finally {
+      setBusyAction("");
+    }
+  };
+
+  const handleSetFaucetConfig = async () => {
+    try {
+      setBusyAction("faucet-config");
+      const trimmedSigner = faucetSignerInput.trim();
+      if (trimmedSigner && !ethers.isAddress(trimmedSigner)) {
+        throw new Error(lang === "vi" ? "Địa chỉ EVM Faucet Signer không hợp lệ." : "Invalid faucet signer EVM address.");
+      }
+      if (faucetVoucherRequiredInput && (!trimmedSigner || trimmedSigner === ethers.ZeroAddress)) {
+        throw new Error(lang === "vi" ? "Chế độ Voucher ECDSA yêu cầu địa chỉ Signer hợp lệ khác 0x0." : "Voucher-gated mode requires a valid non-zero faucet signer EVM address.");
+      }
+      const targetSigner = trimmedSigner || ethers.ZeroAddress;
+      const s = await requireActiveSigner();
+      const txAccount = account || (await s.getAddress());
+      const tok = contracts.token.connect(s);
+      showToast(lang === "vi" ? "Đang cập nhật cấu hình Faucet trên chuỗi..." : "Updating on-chain Faucet policy...", "info");
+      await executeSerializedTx(txAccount, async () => {
+        const tx = await tok.setFaucetConfig(Boolean(faucetEnabledInput), Boolean(faucetVoucherRequiredInput), targetSigner);
+        await tx.wait();
+      });
+      showToast(lang === "vi" ? "Đã cập nhật chính sách Faucet thành công!" : "Faucet configuration updated on-chain!");
+      await refreshFaucetPolicy?.(contracts.token);
+      await loadAdminTelemetry();
+    } catch (err) {
+      showToast((lang === "vi" ? "Cập nhật Faucet thất bại: " : "setFaucetConfig failed: ") + (err.shortMessage || err.message), "error");
+    } finally {
+      setBusyAction("");
+    }
+  };
+
+  const handleToggleRequireLabAttestation = async () => {
+    try {
+      setBusyAction("zk-req-attest");
+      const s = await requireActiveSigner();
+      const txAccount = account || (await s.getAddress());
+      const targetZkAddr =
+        telemetry.zkVerifier && telemetry.zkVerifier !== ethers.ZeroAddress
+          ? telemetry.zkVerifier
+          : contractAddresses.GenomicZkVerifier;
+      const zk = new ethers.Contract(targetZkAddr, GenomicZkVerifierABI, s);
+      const nextVal = !telemetry.requireLabAttestation;
+      showToast(
+        lang === "vi"
+          ? `Đang cập nhật yêu cầu chứng thực phòng Lab ZK: ${nextVal ? "BẬT" : "TẮT"}...`
+          : `Updating ZK requireLabAttestation policy: ${nextVal ? "ENABLED" : "DISABLED"}...`,
+        "info"
+      );
+      await executeSerializedTx(txAccount, async () => {
+        const tx = await zk.setRequireLabAttestation(nextVal);
+        await tx.wait();
+      });
+      showToast(
+        lang === "vi"
+          ? `Chính sách chứng thực Lab ZK đã chuyển sang: ${nextVal ? "BẬT" : "TẮT"}!`
+          : `ZK requireLabAttestation policy updated to: ${nextVal ? "ENABLED" : "DISABLED"}!`
+      );
+      await loadAdminTelemetry();
+    } catch (err) {
+      showToast((lang === "vi" ? "Cập nhật chứng thực Lab thất bại: " : "setRequireLabAttestation failed: ") + (err.shortMessage || err.message), "error");
+    } finally {
+      setBusyAction("");
+    }
+  };
+
+  const handleSetApprovedLabAttestor = async (approved) => {
+    try {
+      setBusyAction(approved ? "zk-lab-approve" : "zk-lab-revoke");
+      const trimmedLab = labAttestorInput.trim();
+      if (!ethers.isAddress(trimmedLab) || trimmedLab === ethers.ZeroAddress) {
+        throw new Error(lang === "vi" ? "Địa chỉ Phòng Lab EVM không hợp lệ." : "Invalid clinical lab attestor EVM address.");
+      }
+      const s = await requireActiveSigner();
+      const txAccount = account || (await s.getAddress());
+      const targetZkAddr =
+        telemetry.zkVerifier && telemetry.zkVerifier !== ethers.ZeroAddress
+          ? telemetry.zkVerifier
+          : contractAddresses.GenomicZkVerifier;
+      const zk = new ethers.Contract(targetZkAddr, GenomicZkVerifierABI, s);
+      showToast(
+        lang === "vi"
+          ? `Đang ${approved ? "phê duyệt" : "thu hồi"} phòng Lab ${shortAddr(trimmedLab)}...`
+          : `${approved ? "Approving" : "Revoking"} clinical lab attestor ${shortAddr(trimmedLab)}...`,
+        "info"
+      );
+      await executeSerializedTx(txAccount, async () => {
+        const tx = await zk.setApprovedLabAttestor(trimmedLab, Boolean(approved));
+        await tx.wait();
+      });
+      showToast(
+        lang === "vi"
+          ? `Đã ${approved ? "phê duyệt" : "thu hồi"} phòng Lab ${shortAddr(trimmedLab)} trên chuỗi!`
+          : `Clinical lab attestor ${shortAddr(trimmedLab)} ${approved ? "approved" : "revoked"} on-chain!`
+      );
+      await loadAdminTelemetry();
+    } catch (err) {
+      showToast((lang === "vi" ? "Cập nhật phòng Lab thất bại: " : "setApprovedLabAttestor failed: ") + (err.shortMessage || err.message), "error");
+    } finally {
+      setBusyAction("");
+    }
+  };
+
+  const handlePruneExpiredBounties = async () => {
+    try {
+      setBusyAction("zk-prune");
+      const s = await requireActiveSigner();
+      const txAccount = account || (await s.getAddress());
+      const targetZkAddr =
+        telemetry.zkVerifier && telemetry.zkVerifier !== ethers.ZeroAddress
+          ? telemetry.zkVerifier
+          : contractAddresses.GenomicZkVerifier;
+      const zk = new ethers.Contract(targetZkAddr, GenomicZkVerifierABI, s);
+      showToast(
+        lang === "vi"
+          ? "Đang dọn tối đa 64 slot quỹ ZK hết hạn trên chuỗi..."
+          : "Pruning up to 64 expired ZK bounty slots on-chain...",
+        "info"
+      );
+      await executeSerializedTx(txAccount, async () => {
+        const tx = await zk.pruneExpiredBounties(64);
+        await tx.wait();
+      });
+      showToast(
+        lang === "vi"
+          ? "Đã hoàn tất dọn dẹp theo lô quỹ ZK hết hạn!"
+          : "Bounded expired ZK bounty cleanup completed!"
+      );
+      await loadAdminTelemetry();
+    } catch (err) {
+      showToast((lang === "vi" ? "Dọn quỹ ZK hết hạn thất bại: " : "pruneExpiredBounties failed: ") + (err.shortMessage || err.message), "error");
+    } finally {
+      setBusyAction("");
+    }
+  };
+
+  const handleEmergencyCancelBounty = async (bountyId) => {
+    try {
+      setBusyAction(`cancel-${bountyId}`);
+      const s = await requireActiveSigner();
+      const txAccount = account || (await s.getAddress());
+      const targetZkAddr =
+        telemetry.zkVerifier && telemetry.zkVerifier !== ethers.ZeroAddress
+          ? telemetry.zkVerifier
+          : contractAddresses.GenomicZkVerifier;
+      const zk = new ethers.Contract(targetZkAddr, GenomicZkVerifierABI, s);
+      showToast(lang === "vi" ? `Đang hủy khẩn cấp Quỹ ZK #${bountyId} & hoàn 100% ngân sách dư...` : `Emergency cancelling ZK Bounty #${bountyId}...`, "info");
+      await executeSerializedTx(txAccount, async () => {
+        const tx = await zk.emergencyCancelBounty(bountyId);
+        await tx.wait();
+      });
+      showToast(lang === "vi" ? `Đã hủy khẩn cấp Quỹ ZK #${bountyId} và hoàn trả ngân sách còn dư.` : `Emergency cancelled Bounty #${bountyId} and refunded remaining $GENO.`);
+      await refreshBalance(account);
+      await loadAdminTelemetry();
+    } catch (err) {
+      showToast((lang === "vi" ? "Hủy khẩn cấp quỹ ZK thất bại: " : "emergencyCancelBounty failed: ") + (err.shortMessage || err.message), "error");
     } finally {
       setBusyAction("");
     }
@@ -347,19 +765,22 @@ export default function AdminPortal() {
     try {
       setBusyAction(`close-${bountyId}`);
       const s = await requireActiveSigner();
+      const txAccount = account || (await s.getAddress());
       const targetZkAddr =
         telemetry.zkVerifier && telemetry.zkVerifier !== ethers.ZeroAddress
           ? telemetry.zkVerifier
           : contractAddresses.GenomicZkVerifier;
       const zk = new ethers.Contract(targetZkAddr, GenomicZkVerifierABI, s);
-      showToast(`Closing expired ZK Bounty #${bountyId}...`, "info");
-      const tx = await zk.closeExpiredBounty(bountyId);
-      await tx.wait();
-      showToast(`Closed Bounty #${bountyId} and refunded remaining $GENO.`);
+      showToast(lang === "vi" ? `Đang đóng Quỹ Thưởng ZK hết hạn #${bountyId}...` : `Closing expired ZK Bounty #${bountyId}...`, "info");
+      await executeSerializedTx(txAccount, async () => {
+        const tx = await zk.closeExpiredBounty(bountyId);
+        await tx.wait();
+      });
+      showToast(lang === "vi" ? `Đã đóng Quỹ ZK #${bountyId} và hoàn trả ngân sách còn dư.` : `Closed Bounty #${bountyId} and refunded remaining $GENO.`);
       await refreshBalance(account);
       await loadAdminTelemetry();
     } catch (err) {
-      showToast("closeExpiredBounty failed: " + (err.shortMessage || err.message), "error");
+      showToast((lang === "vi" ? "Đóng quỹ ZK thất bại: " : "closeExpiredBounty failed: ") + (err.shortMessage || err.message), "error");
     } finally {
       setBusyAction("");
     }
@@ -368,28 +789,38 @@ export default function AdminPortal() {
   const handleResolveDispute = async (targetDataId, targetBuyer, refundBuyer) => {
     try {
       setBusyAction(`dispute-${refundBuyer ? "refund" : "release"}`);
-      const dId = parseInt(targetDataId ?? disputeDataIdInput, 10);
+      const rawIdStr = String(targetDataId ?? disputeDataIdInput ?? "").trim();
+      if (!/^\d+$/.test(rawIdStr)) throw new Error(lang === "vi" ? "Mã dữ liệu không hợp lệ." : "Invalid Dataset ID.");
+      const dId = Number(rawIdStr);
       const buyerAddr = (targetBuyer ?? disputeBuyerInput).trim();
-      if (!Number.isFinite(dId) || dId <= 0) throw new Error("Invalid Dataset ID.");
-      if (!ethers.isAddress(buyerAddr)) throw new Error("Invalid disputing buyer EVM address.");
+      if (!Number.isSafeInteger(dId) || dId <= 0) throw new Error(lang === "vi" ? "Mã dữ liệu không hợp lệ." : "Invalid Dataset ID.");
+      if (!ethers.isAddress(buyerAddr)) throw new Error(lang === "vi" ? "Địa chỉ người mua khiếu nại không hợp lệ." : "Invalid disputing buyer EVM address.");
       const s = await requireActiveSigner();
       showToast(
-        refundBuyer
-          ? `Resolving dispute #${dId}: Refunding 100% to buyer...`
-          : `Resolving dispute #${dId}: Rejecting dispute & releasing funds to seller...`,
+        lang === "vi"
+          ? refundBuyer
+            ? `Đang phân xử tranh chấp #${dId}: Hoàn tiền 100% cho người mua...`
+            : `Đang phân xử tranh chấp #${dId}: Bác khiếu nại & giải ngân cho người bán...`
+          : refundBuyer
+            ? `Resolving dispute #${dId}: Refunding 100% to buyer...`
+            : `Resolving dispute #${dId}: Rejecting dispute & releasing funds to seller...`,
         "info"
       );
       await resolveEscrowDispute({ dataId: dId, buyer: buyerAddr, refundBuyer, signer: s });
       showToast(
-        refundBuyer
-          ? `Dispute #${dId} resolved: Buyer refunded 100%.`
-          : `Dispute #${dId} resolved: Escrow released to seller + EIP-2981 creator.`
+        lang === "vi"
+          ? refundBuyer
+            ? `Đã phân xử tranh chấp #${dId}: Hoàn tiền 100% cho người mua.`
+            : `Đã phân xử tranh chấp #${dId}: Giải ngân cho người bán & tác giả EIP-2981.`
+          : refundBuyer
+            ? `Dispute #${dId} resolved: Buyer refunded 100%.`
+            : `Dispute #${dId} resolved: Escrow released to seller + EIP-2981 creator.`
       );
       await refreshBalance(account);
       await fetchOnChainDatasets(account);
       await loadAdminTelemetry();
     } catch (err) {
-      showToast("resolveEscrowDispute failed: " + (err.shortMessage || err.message), "error");
+      showToast((lang === "vi" ? "Phân xử tranh chấp thất bại: " : "resolveEscrowDispute failed: ") + (err.shortMessage || err.message), "error");
     } finally {
       setBusyAction("");
     }
@@ -400,10 +831,117 @@ export default function AdminPortal() {
     telemetry.registryOwner &&
     account.toLowerCase() === telemetry.registryOwner.toLowerCase();
 
+  const handleEncodeTimelockProposal = () => {
+    try {
+      const timelockAddr = telemetry.registryOwner || contractAddresses.GenomicTimelock;
+      if (!ethers.isAddress(timelockAddr)) {
+        throw new Error(lang === "vi" ? "Không tìm thấy địa chỉ GenomicTimelock." : "GenomicTimelock address unavailable.");
+      }
+      const timelockIface = new ethers.Interface(GenomicTimelockABI);
+      const regIface = contracts?.registry?.interface || new ethers.Interface([
+        "function setCapsuleDispatcher(address newDispatcher)",
+        "function disableCapsuleDispatcher()",
+        "function setCommitRevealRequired(bool required)",
+        "function setZkVerifier(address newVerifier)"
+      ]);
+      const tokIface = contracts?.token?.interface || new ethers.Interface([
+        "function setFaucetConfig(bool enabled, bool voucherRequired, address signerAddr)"
+      ]);
+      const zkIface = new ethers.Interface(GenomicZkVerifierABI);
+
+      let target = contracts?.registry?.target || contractAddresses.GenomicsRegistry;
+      let innerCalldata = "0x";
+      if (timelockAction === "setCapsuleDispatcher") {
+        const trimmedDisp = dispatcherInput.trim();
+        if (!ethers.isAddress(trimmedDisp) || trimmedDisp === ethers.ZeroAddress) {
+          throw new Error(
+            lang === "vi"
+              ? "Địa chỉ EVM Dispatcher phải hợp lệ và khác 0x0 (chọn disableCapsuleDispatcher() để tắt về 0x0)."
+              : "Invalid or zero dispatcher EVM address (select disableCapsuleDispatcher() to clear to 0x0)."
+          );
+        }
+        innerCalldata = regIface.encodeFunctionData("setCapsuleDispatcher", [trimmedDisp]);
+      } else if (timelockAction === "disableCapsuleDispatcher") {
+        innerCalldata = regIface.encodeFunctionData("disableCapsuleDispatcher", []);
+      } else if (timelockAction === "setCommitRevealRequired") {
+        innerCalldata = regIface.encodeFunctionData("setCommitRevealRequired", [!telemetry.commitRevealRequired]);
+      } else if (timelockAction === "setZkVerifier") {
+        const trimmedZk = zkVerifierInput.trim();
+        if (!ethers.isAddress(trimmedZk) || trimmedZk === ethers.ZeroAddress) {
+          throw new Error(lang === "vi" ? "Địa chỉ EVM ZK Verifier phải hợp lệ và khác 0x0." : "Invalid or zero ZK Verifier EVM address.");
+        }
+        innerCalldata = regIface.encodeFunctionData("setZkVerifier", [trimmedZk]);
+      } else if (timelockAction === "setFaucetConfig") {
+        const trimmedSigner = faucetSignerInput.trim();
+        if (trimmedSigner && !ethers.isAddress(trimmedSigner)) {
+          throw new Error(lang === "vi" ? "Địa chỉ EVM signer voucher không hợp lệ." : "Invalid faucet voucher signer EVM address.");
+        }
+        if (faucetVoucherRequiredInput && (!trimmedSigner || trimmedSigner === ethers.ZeroAddress)) {
+          throw new Error(lang === "vi" ? "Cần địa chỉ signer voucher hợp lệ khác 0x0." : "Valid non-zero faucet voucher signer address required.");
+        }
+        target = contracts?.token?.target || contractAddresses.GenomicToken;
+        innerCalldata = tokIface.encodeFunctionData("setFaucetConfig", [
+          Boolean(faucetEnabledInput),
+          Boolean(faucetVoucherRequiredInput),
+          trimmedSigner || ethers.ZeroAddress
+        ]);
+      } else if (timelockAction === "setRequireLabAttestation") {
+        target =
+          telemetry.zkVerifier && telemetry.zkVerifier !== ethers.ZeroAddress
+            ? telemetry.zkVerifier
+            : contractAddresses.GenomicZkVerifier;
+        innerCalldata = zkIface.encodeFunctionData("setRequireLabAttestation", [!telemetry.requireLabAttestation]);
+      }
+      const salt = ethers.id(`GENOCHAIN_TIMELOCK_PROPOSAL_${timelockAction}_${Math.floor(Date.now() / 1000)}`);
+      const delayBig = BigInt(telemetry.timelockMinDelay || 0);
+      const scheduleCalldata = timelockIface.encodeFunctionData("schedule", [
+        target,
+        0n,
+        innerCalldata,
+        ethers.ZeroHash,
+        salt,
+        delayBig
+      ]);
+      const executeCalldata = timelockIface.encodeFunctionData("execute", [
+        target,
+        0n,
+        innerCalldata,
+        ethers.ZeroHash,
+        salt
+      ]);
+      setEncodedTimelockProposal({
+        timelock: timelockAddr,
+        target,
+        action: timelockAction,
+        delaySec: Number(delayBig),
+        salt,
+        scheduleCalldata,
+        executeCalldata
+      });
+      showToast(
+        lang === "vi"
+          ? "Đã tạo calldata GenomicTimelock.schedule(...)!"
+          : "Encoded GenomicTimelock.schedule(...) calldata!"
+      );
+    } catch (err) {
+      showToast((lang === "vi" ? "Mã hóa đề xuất thất bại: " : "Timelock encode failed: ") + (err.shortMessage || err.message), "error");
+    }
+  };
+
+  const isLocalDevHost =
+    import.meta.env.DEV ||
+    (typeof window !== "undefined" &&
+      (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"));
+
   const copyAddr = (val) => {
-    if (!val || !navigator.clipboard) return;
-    navigator.clipboard.writeText(val);
-    showToast(t("copiedToast") || (lang === "vi" ? "Đã sao chép!" : "Copied!"));
+    if (!val || !navigator.clipboard?.writeText) return;
+    Promise.resolve(navigator.clipboard.writeText(val))
+      .then(() => {
+        showToast(t("copiedToast") || (lang === "vi" ? "Đã sao chép!" : "Copied!"));
+      })
+      .catch(() => {
+        showToast(lang === "vi" ? "Không có quyền ghi bộ nhớ tạm." : "Clipboard permission denied.", "error");
+      });
   };
 
   return (
@@ -411,45 +949,49 @@ export default function AdminPortal() {
       {/* Top Admin Governance Header & Quick Role Switcher */}
       <div className="portal-subnav-bar" style={{ flexWrap: "wrap", gap: "12px" }}>
         <div className="admin-subnav-controls">
-          <span className="admin-subnav-label">
-            {t("adminQuickAccounts")}:
-          </span>
-          <span className="admin-acct-group">
-            <button
-              id="admin-switch-acct-0"
-              type="button"
-              className={`btn-terminal ${localAccountIndex === 0 ? "btn-terminal-primary" : ""}`}
-              style={{ padding: "5px 10px", fontSize: "12px" }}
-              title={t("adminAcct0")}
-              onClick={() => connectLocalAccount(0)}
-            >
-              <WalletKeyIcon size={13} />
-              <span>{t("adminAcct0")}</span>
-            </button>
-            <button
-              id="admin-switch-acct-1"
-              type="button"
-              className={`btn-terminal ${localAccountIndex === 1 ? "btn-terminal-primary" : ""}`}
-              style={{ padding: "5px 10px", fontSize: "12px" }}
-              title={t("adminAcct1")}
-              onClick={() => connectLocalAccount(1)}
-            >
-              <DataOwnerShieldIcon size={13} />
-              <span>{t("adminAcct1")}</span>
-            </button>
-            <button
-              id="admin-switch-acct-2"
-              type="button"
-              className={`btn-terminal ${localAccountIndex === 2 ? "btn-terminal-primary" : ""}`}
-              style={{ padding: "5px 10px", fontSize: "12px" }}
-              title={t("adminAcct2")}
-              onClick={() => connectLocalAccount(2)}
-            >
-              <CpuChipIcon size={13} />
-              <span>{t("adminAcct2")}</span>
-            </button>
-          </span>
-          <span className="admin-subnav-sep" aria-hidden="true" />
+          {isLocalDevHost && CONFIGURED_CHAIN_ID === 31337 && (
+            <>
+              <span className="admin-subnav-label">
+                {formatConfiguredChainText(t("adminQuickAccounts"), CONFIGURED_CHAIN_ID, CONFIGURED_CHAIN_NAME)}:
+              </span>
+              <span className="admin-acct-group">
+                <button
+                  id="admin-switch-acct-0"
+                  type="button"
+                  className={`btn-terminal ${localAccountIndex === 0 ? "btn-terminal-primary" : ""}`}
+                  style={{ padding: "5px 10px", fontSize: "12px" }}
+                  title={t("adminAcct0")}
+                  onClick={() => connectLocalAccount(0)}
+                >
+                  <WalletKeyIcon size={13} />
+                  <span>{t("adminAcct0")}</span>
+                </button>
+                <button
+                  id="admin-switch-acct-1"
+                  type="button"
+                  className={`btn-terminal ${localAccountIndex === 1 ? "btn-terminal-primary" : ""}`}
+                  style={{ padding: "5px 10px", fontSize: "12px" }}
+                  title={t("adminAcct1")}
+                  onClick={() => connectLocalAccount(1)}
+                >
+                  <DataOwnerShieldIcon size={13} />
+                  <span>{t("adminAcct1")}</span>
+                </button>
+                <button
+                  id="admin-switch-acct-2"
+                  type="button"
+                  className={`btn-terminal ${localAccountIndex === 2 ? "btn-terminal-primary" : ""}`}
+                  style={{ padding: "5px 10px", fontSize: "12px" }}
+                  title={t("adminAcct2")}
+                  onClick={() => connectLocalAccount(2)}
+                >
+                  <CpuChipIcon size={13} />
+                  <span>{t("adminAcct2")}</span>
+                </button>
+              </span>
+              <span className="admin-subnav-sep" aria-hidden="true" />
+            </>
+          )}
           <button
             id="admin-open-ipfs-btn"
             type="button"
@@ -511,10 +1053,14 @@ export default function AdminPortal() {
             <AlertTriangleIcon size={20} color="var(--accent-rose-text)" />
             <div>
               <div style={{ fontWeight: 700, fontSize: "13px", color: "var(--accent-rose-text)" }}>
-                {t("rpcOfflineTitle") || "Mất kết nối Node RPC Blockchain (Hardhat 31337)"}
+                {t("rpcOfflineTitle") || "Mất kết nối Node RPC Blockchain"}
               </div>
               <div style={{ fontSize: "12px", color: "var(--text-secondary)", marginTop: "2px" }}>
-                {t("rpcOfflineDesc") || "Chỉ số hệ thống hiển thị trạng thái ngắt kết nối. Vui lòng kiểm tra Hardhat Node."} ({rpcError})
+                {formatConfiguredChainText(
+                  t("rpcOfflineDesc") || "Chỉ số hệ thống hiển thị trạng thái ngắt kết nối. Vui lòng kiểm tra kết nối RPC.",
+                  CONFIGURED_CHAIN_ID,
+                  CONFIGURED_CHAIN_NAME
+                )} ({rpcError})
               </div>
             </div>
           </div>
@@ -530,6 +1076,99 @@ export default function AdminPortal() {
         </div>
       )}
 
+      {/* Timelock Governance Mode Banner & Proposal Calldata Encoder */}
+      {telemetry.isTimelockGoverned && (
+        <section
+          id="admin-timelock-mode-banner"
+          className="studio-panel"
+          style={{ marginBottom: "18px", borderColor: "var(--accent-cyan)" }}
+        >
+          <div className="panel-title-bar" style={{ marginBottom: "10px" }}>
+            <h2 className="panel-title">
+              <span className="panel-title-icon-wrap">
+                <ShieldCheckIcon size={16} color="var(--accent-cyan)" />
+              </span>
+              {t("adminTimelockBannerTitle")}
+            </h2>
+            <span className="admin-owner-pill is-match">
+              <CheckCircleIcon size={12} />
+              <span>
+                {t("adminTimelockMinDelayLabel")}: {telemetry.timelockMinDelay}s
+              </span>
+            </span>
+          </div>
+          <p style={{ fontSize: "12.5px", color: "var(--text-secondary)", margin: "0 0 12px 0" }}>
+            {t("adminTimelockBannerDesc")} ({shortAddr(telemetry.registryOwner)})
+          </p>
+          <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", alignItems: "center" }}>
+            <select
+              id="admin-timelock-action-select"
+              aria-label={t("adminTimelockActionLabel")}
+              className="field-input"
+              style={{ flex: "1 1 220px", maxWidth: "340px" }}
+              value={timelockAction}
+              onChange={(e) => setTimelockAction(e.target.value)}
+            >
+              <option value="setCapsuleDispatcher">setCapsuleDispatcher(address)</option>
+              <option value="disableCapsuleDispatcher">disableCapsuleDispatcher()</option>
+              <option value="setCommitRevealRequired">setCommitRevealRequired(bool)</option>
+              <option value="setZkVerifier">setZkVerifier(address)</option>
+              <option value="setFaucetConfig">setFaucetConfig(bool,bool,address)</option>
+              <option value="setRequireLabAttestation">setRequireLabAttestation(bool)</option>
+            </select>
+            <button
+              id="admin-timelock-encode-btn"
+              type="button"
+              className="btn-terminal btn-terminal-primary"
+              title={t("adminTimelockEncodeBtn")}
+              onClick={handleEncodeTimelockProposal}
+            >
+              <span>{t("adminTimelockEncodeBtn")}</span>
+            </button>
+            {encodedTimelockProposal && (
+              <>
+                <button
+                  id="admin-timelock-copy-btn"
+                  type="button"
+                  className="btn-terminal btn-terminal-success"
+                  title={t("adminTimelockCopyBtn")}
+                  onClick={() => copyAddr(encodedTimelockProposal.scheduleCalldata)}
+                >
+                  <CopyIcon size={12} />
+                  <span>{t("adminTimelockCopyBtn")}</span>
+                </button>
+                <button
+                  id="admin-timelock-copy-exec-btn"
+                  type="button"
+                  className="btn-terminal"
+                  title={t("adminTimelockCopyExecBtn")}
+                  onClick={() => copyAddr(encodedTimelockProposal.executeCalldata)}
+                >
+                  <CopyIcon size={12} />
+                  <span>{t("adminTimelockCopyExecBtn")}</span>
+                </button>
+              </>
+            )}
+          </div>
+          {encodedTimelockProposal && (
+            <div style={{ marginTop: "10px", fontFamily: "var(--font-mono)", fontSize: "11.5px" }}>
+              <div style={{ color: "var(--text-secondary)", marginBottom: "4px" }}>
+                <strong>{t("adminTimelockEncodedLabel")}</strong> | target: {shortAddr(encodedTimelockProposal.target)} | delay: {encodedTimelockProposal.delaySec}s | salt: {shortAddr(encodedTimelockProposal.salt)}
+              </div>
+              <textarea
+                id="admin-timelock-calldata-output"
+                aria-label={t("adminTimelockEncodedLabel")}
+                readOnly
+                rows={2}
+                className="field-input"
+                style={{ width: "100%", fontFamily: "var(--font-mono)", fontSize: "11px" }}
+                value={encodedTimelockProposal.scheduleCalldata}
+              />
+            </div>
+          )}
+        </section>
+      )}
+
       {/* 2x2 Admin Governance Studio Grid */}
       <div className="admin-governance-grid">
         {/* CARD 1: Protocol Telemetry & IPFS Configuration */}
@@ -541,9 +1180,15 @@ export default function AdminPortal() {
               </span>
               {t("adminTelemetryTitle")}
             </h2>
-            <span className={`admin-owner-pill ${isOwnerMatch ? "is-match" : "is-mismatch"}`}>
-              {isOwnerMatch ? <CheckCircleIcon size={12} /> : <AlertTriangleIcon size={12} />}
-              <span>{isOwnerMatch ? t("adminOwnerMatch") : t("adminOwnerMismatch")}</span>
+            <span className={`admin-owner-pill ${isOwnerMatch || telemetry.isTimelockGoverned ? "is-match" : "is-mismatch"}`}>
+              {isOwnerMatch || telemetry.isTimelockGoverned ? <CheckCircleIcon size={12} /> : <AlertTriangleIcon size={12} />}
+              <span>
+                {telemetry.isTimelockGoverned
+                  ? t("adminOwnerTimelock")
+                  : isOwnerMatch
+                    ? t("adminOwnerMatch")
+                    : t("adminOwnerMismatch")}
+              </span>
             </span>
           </div>
 
@@ -589,7 +1234,7 @@ export default function AdminPortal() {
             <div className="admin-kv-row">
               <span className="admin-kv-key">{t("adminConnectedSigner")}</span>
               <span className="admin-kv-val" title={account || ""}>
-                <span>{account ? shortAddr(account) : (lang === "vi" ? "Chưa kết nối" : "Disconnected")}</span>
+                <span>{account ? shortAddr(account) : t("adminSignerDisconnected")}</span>
                 {account && (
                   <button type="button" className="admin-copy-btn" title={account} onClick={() => copyAddr(account)}>
                     <CopyIcon size={11} />
@@ -618,7 +1263,7 @@ export default function AdminPortal() {
             <div className="admin-kv-row">
               <span className="admin-kv-key">{t("adminLabelIpfs")}</span>
               <span className="admin-kv-val">
-                {pinataJwt ? "Pinata JWT" : (lang === "vi" ? "Chưa cấu hình Pinata" : "Pinata Unset")} | {kuboRpc}
+                {pinataJwt ? "Pinata JWT" : t("adminPinataUnset")} | {kuboRpc || kuboGateway}
               </span>
             </div>
           </div>
@@ -700,6 +1345,25 @@ export default function AdminPortal() {
               {busyAction === "zkverifier" ? "..." : t("adminSetZkVerifierBtn")}
             </button>
           </div>
+
+          <div className="form-field" style={{ marginTop: "12px", marginBottom: 0 }}>
+            <button
+              id="admin-toggle-commitreveal-btn"
+              type="button"
+              className={`btn-terminal ${telemetry.commitRevealRequired ? "btn-terminal-success" : "btn-terminal-ghost"} admin-full-btn`}
+              title={t("adminCommitRevealTooltip")}
+              disabled={busyAction === "commitreveal"}
+              onClick={handleToggleCommitReveal}
+            >
+              <span>
+                {busyAction === "commitreveal"
+                  ? "..."
+                  : telemetry.commitRevealRequired
+                  ? t("adminCommitRevealOn")
+                  : t("adminCommitRevealOff")}
+              </span>
+            </button>
+          </div>
         </section>
 
         {/* CARD 3: $GENO Treasury Mint & Registry Token Rescue */}
@@ -765,7 +1429,7 @@ export default function AdminPortal() {
               className="field-input"
               value={rescueTokenInput}
               onChange={(e) => setRescueTokenInput(e.target.value)}
-              placeholder="0x..."
+              placeholder={t("adminRescueTokenPlaceholder")}
             />
           </div>
           <div className="form-group-row">
@@ -804,6 +1468,71 @@ export default function AdminPortal() {
             onClick={handleRescueTokens}
           >
             {busyAction === "rescue" ? "..." : t("adminRescueBtn")}
+          </button>
+
+          <div className="admin-section-divider">
+            <span>{t("adminFaucetDivider")}</span>
+          </div>
+
+          <div style={{ display: "flex", gap: "12px", flexWrap: "wrap", marginBottom: "10px" }}>
+            <label
+              htmlFor="admin-faucet-enabled-toggle"
+              style={{ display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "12px", color: "var(--text-primary)", cursor: "pointer", minHeight: "24px" }}
+            >
+              <input
+                id="admin-faucet-enabled-toggle"
+                type="checkbox"
+                checked={faucetEnabledInput}
+                onChange={(e) => setFaucetEnabledInput(e.target.checked)}
+                style={{ width: "16px", height: "16px" }}
+              />
+              <span>{t("adminFaucetEnabledLabel")}</span>
+            </label>
+            <label
+              htmlFor="admin-faucet-voucher-toggle"
+              style={{ display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "12px", color: "var(--text-primary)", cursor: "pointer", minHeight: "24px" }}
+            >
+              <input
+                id="admin-faucet-voucher-toggle"
+                type="checkbox"
+                checked={faucetVoucherRequiredInput}
+                onChange={(e) => setFaucetVoucherRequiredInput(e.target.checked)}
+                style={{ width: "16px", height: "16px" }}
+              />
+              <span>{t("adminFaucetVoucherLabel")}</span>
+            </label>
+          </div>
+          <div className="form-field" style={{ marginBottom: "8px" }}>
+            <label className="field-label" htmlFor="admin-faucet-signer-input">
+              <span>{t("adminFaucetSignerLabel")}</span>
+              <button
+                id="admin-fill-faucet-signer-btn"
+                type="button"
+                className="admin-inline-fill-btn"
+                title={t("adminBtnUseConnected")}
+                onClick={() => setFaucetSignerInput(account || telemetry.tokenOwner || "")}
+              >
+                {t("adminBtnUseConnected")}
+              </button>
+            </label>
+            <input
+              id="admin-faucet-signer-input"
+              type="text"
+              className="field-input"
+              value={faucetSignerInput}
+              onChange={(e) => setFaucetSignerInput(e.target.value)}
+              placeholder="0x..."
+            />
+          </div>
+          <button
+            id="admin-set-faucet-config-btn"
+            type="button"
+            className="btn-terminal btn-terminal-primary admin-full-btn"
+            title={t("adminFaucetConfigBtn")}
+            disabled={busyAction === "faucet-config"}
+            onClick={handleSetFaucetConfig}
+          >
+            {busyAction === "faucet-config" ? "..." : t("adminFaucetConfigBtn")}
           </button>
         </section>
 
@@ -885,6 +1614,36 @@ export default function AdminPortal() {
             </div>
           </div>
 
+          <div className="form-field" style={{ marginTop: "10px", marginBottom: "10px" }}>
+            <label className="field-label" htmlFor="admin-bounty-attestor-input">
+              <span>{t("adminBountyAttestorLabel")}</span>
+              <button
+                id="admin-fill-bounty-attestor-btn"
+                type="button"
+                className="admin-inline-fill-btn"
+                title={t("adminBtnUseConnected")}
+                onClick={() => {
+                  bountyAttestorTouchedRef.current = true;
+                  setBountyAttestorInput(account || telemetry.registryOwner || "");
+                }}
+              >
+                {t("adminBtnUseConnected")}
+              </button>
+            </label>
+            <input
+              id="admin-bounty-attestor-input"
+              type="text"
+              className="field-input"
+              value={bountyAttestorInput}
+              onChange={(e) => {
+                bountyAttestorTouchedRef.current = true;
+                setBountyAttestorInput(e.target.value);
+              }}
+              required={telemetry.requireLabAttestation}
+              placeholder={t("adminBountyAttestorPlaceholder")}
+            />
+          </div>
+
           <div className="admin-trait-hash-bar">
             <span>
               <strong>{t("adminTraitHashLabel")}:</strong> {computedTraitId.slice(0, 14)}...{computedTraitId.slice(-8)}
@@ -911,6 +1670,97 @@ export default function AdminPortal() {
             {busyAction === "bounty-create" ? "..." : t("adminBountyCreateBtn")}
           </button>
 
+          {/* Compact ZK Lab Attestation Policy & Bounded Cleanup Controls */}
+          <div className="admin-section-divider">
+            <span>{t("adminZkPolicyDivider")}</span>
+          </div>
+
+          <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginBottom: "10px" }}>
+            <button
+              id="admin-zk-require-attestation-toggle"
+              type="button"
+              role="switch"
+              aria-checked={telemetry.requireLabAttestation}
+              className={`btn-terminal ${telemetry.requireLabAttestation ? "btn-terminal-success" : "btn-terminal-ghost"}`}
+              style={{ flex: "1 1 200px", justifyContent: "center", fontSize: "11.5px", minHeight: "32px" }}
+              title={t("adminZkRequireAttestationLabel")}
+              disabled={busyAction === "zk-req-attest"}
+              onClick={handleToggleRequireLabAttestation}
+            >
+              <span>
+                {busyAction === "zk-req-attest"
+                  ? "..."
+                  : telemetry.requireLabAttestation
+                    ? t("adminZkRequireAttestationOn")
+                    : t("adminZkRequireAttestationOff")}
+              </span>
+            </button>
+            <button
+              id="admin-zk-prune-bounties-btn"
+              type="button"
+              className="btn-terminal btn-terminal-ghost"
+              style={{ flex: "0 1 auto", justifyContent: "center", fontSize: "11.5px", minHeight: "32px", padding: "0 12px" }}
+              title={t("adminZkPruneBountiesBtn")}
+              disabled={busyAction === "zk-prune"}
+              onClick={handlePruneExpiredBounties}
+            >
+              <span>{busyAction === "zk-prune" ? "..." : t("adminZkPruneBountiesBtn")}</span>
+            </button>
+          </div>
+
+          <div className="form-field" style={{ marginBottom: "10px" }}>
+            <label className="field-label" htmlFor="admin-zk-lab-attestor-input">
+              <span>{t("adminZkLabAttestorLabel")}</span>
+              <button
+                id="admin-fill-zk-lab-btn"
+                type="button"
+                className="admin-inline-fill-btn"
+                title={t("adminBtnUseConnected")}
+                onClick={() => {
+                  labAttestorTouchedRef.current = true;
+                  setLabAttestorInput(account || telemetry.registryOwner || "");
+                }}
+              >
+                {t("adminBtnUseConnected")}
+              </button>
+            </label>
+            <input
+              id="admin-zk-lab-attestor-input"
+              type="text"
+              className="field-input"
+              value={labAttestorInput}
+              onChange={(e) => {
+                labAttestorTouchedRef.current = true;
+                setLabAttestorInput(e.target.value);
+              }}
+              placeholder="0x..."
+            />
+            <div style={{ display: "flex", gap: "8px", marginTop: "8px" }}>
+              <button
+                id="admin-zk-approve-lab-btn"
+                type="button"
+                className="btn-terminal btn-terminal-success"
+                style={{ flex: 1, justifyContent: "center", fontSize: "11.5px", minHeight: "32px" }}
+                title={t("adminZkApproveLabBtn")}
+                disabled={busyAction.startsWith("zk-lab-")}
+                onClick={() => handleSetApprovedLabAttestor(true)}
+              >
+                <span>{busyAction === "zk-lab-approve" ? "..." : t("adminZkApproveLabBtn")}</span>
+              </button>
+              <button
+                id="admin-zk-revoke-lab-btn"
+                type="button"
+                className="btn-terminal btn-terminal-danger"
+                style={{ flex: 1, justifyContent: "center", fontSize: "11.5px", minHeight: "32px", background: "#991b1b", color: "#ffffff", borderColor: "#991b1b" }}
+                title={t("adminZkRevokeLabBtn")}
+                disabled={busyAction.startsWith("zk-lab-")}
+                onClick={() => handleSetApprovedLabAttestor(false)}
+              >
+                <span>{busyAction === "zk-lab-revoke" ? "..." : t("adminZkRevokeLabBtn")}</span>
+              </button>
+            </div>
+          </div>
+
           {/* Active Bounties List */}
           <div className="admin-bounty-list">
             {bounties.map((b) => {
@@ -926,23 +1776,41 @@ export default function AdminPortal() {
                     <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap", fontWeight: 700, color: "var(--text-primary)" }}>
                       <span>#{b.bountyId} {b.traitDescription}</span>
                       <span className={`admin-bounty-badge ${badgeCls}`}>{badgeText}</span>
+                      {b.requiredAttestor && (
+                        <span className="status-badge-chip badge-active" style={{ fontSize: "10.5px", padding: "1px 7px" }}>
+                          {t("adminBountyAttestedBadge")} ({shortAddr(b.requiredAttestor)})
+                        </span>
+                      )}
                     </div>
                     <div style={{ color: "var(--text-muted)", fontFamily: "var(--font-mono)", fontSize: "11px", marginTop: "3px" }}>
                       {b.rewardPerClaim} $GENO | {b.currentClaims}/{b.maxClaims} {t("adminClaimsUnit")} | {b.remainingFunding} $GENO
                     </div>
                   </div>
                   {b.isActive && (
-                    <button
-                      id={`admin-close-bounty-${b.bountyId}`}
-                      type="button"
-                      className="btn-terminal"
-                      style={{ padding: "5px 10px", fontSize: "11.5px", flexShrink: 0 }}
-                      title={t("adminBountyCloseBtn")}
-                      disabled={busyAction === `close-${b.bountyId}`}
-                      onClick={() => handleCloseBounty(b.bountyId)}
-                    >
-                      {t("adminBountyCloseBtn")}
-                    </button>
+                    <div style={{ display: "flex", gap: "6px", flexShrink: 0, flexWrap: "wrap" }}>
+                      <button
+                        id={`admin-close-bounty-${b.bountyId}`}
+                        type="button"
+                        className="btn-terminal"
+                        style={{ padding: "5px 10px", fontSize: "11.5px", minHeight: "28px" }}
+                        title={t("adminBountyCloseBtn")}
+                        disabled={busyAction === `close-${b.bountyId}`}
+                        onClick={() => handleCloseBounty(b.bountyId)}
+                      >
+                        {t("adminBountyCloseBtn")}
+                      </button>
+                      <button
+                        id={`admin-emergency-cancel-bounty-${b.bountyId}`}
+                        type="button"
+                        className="btn-terminal btn-terminal-danger"
+                        style={{ padding: "5px 10px", fontSize: "11.5px", minHeight: "28px", background: "#991b1b", color: "#ffffff", borderColor: "#991b1b" }}
+                        title={t("adminBountyEmergencyCancelBtn")}
+                        disabled={busyAction === `cancel-${b.bountyId}`}
+                        onClick={() => handleEmergencyCancelBounty(b.bountyId)}
+                      >
+                        {busyAction === `cancel-${b.bountyId}` ? "..." : t("adminBountyEmergencyCancelBtn")}
+                      </button>
+                    </div>
                   )}
                 </div>
               );
@@ -1027,7 +1895,7 @@ export default function AdminPortal() {
                         #{d.dataId} • {d.amount} $GENO
                       </div>
                       <div style={{ color: "var(--text-secondary)", fontFamily: "var(--font-mono)", fontSize: "11px" }}>
-                        Buyer: {shortAddr(d.buyer)} | Seller: {shortAddr(d.seller)}
+                        {lang === "vi" ? "Người mua" : "Buyer"}: {shortAddr(d.buyer)} | {lang === "vi" ? "Người bán" : "Seller"}: {shortAddr(d.seller)}
                       </div>
                     </div>
                     <div style={{ display: "flex", gap: "6px", flexShrink: 0 }}>
@@ -1035,6 +1903,7 @@ export default function AdminPortal() {
                         type="button"
                         className="btn-terminal btn-terminal-danger"
                         style={{ padding: "5px 10px", fontSize: "11px", background: "#b91c1c", color: "#ffffff" }}
+                        disabled={Boolean(busyAction)}
                         onClick={() => handleResolveDispute(d.dataId, d.buyer, true)}
                       >
                         {t("adminResolveRefundBtn")}
@@ -1043,6 +1912,7 @@ export default function AdminPortal() {
                         type="button"
                         className="btn-terminal btn-terminal-success"
                         style={{ padding: "5px 10px", fontSize: "11px" }}
+                        disabled={Boolean(busyAction)}
                         onClick={() => handleResolveDispute(d.dataId, d.buyer, false)}
                       >
                         {t("adminResolveReleaseBtn")}

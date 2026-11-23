@@ -419,6 +419,8 @@
 }
 
 .os2-lang-btn {
+  min-width: 26px;
+  min-height: 26px;
   height: 28px;
   padding: 0 8px;
   border: none;
@@ -990,7 +992,8 @@
 }
 
 .os2-hero-contract-chip {
-  height: 22px;
+  min-height: 24px;
+  height: 24px;
   padding: 0 8px;
   border-radius: 5px;
   border: 1px solid rgba(255, 255, 255, 0.2);
@@ -1050,6 +1053,8 @@
 
 .os2-hero-btn-ghost,
 .os2-hero-btn-licensed,
+.os2-hero-btn-disputed,
+.os2-hero-btn-pending,
 .os2-hero-btn-buy {
   height: 30px;
   padding: 0 12px;
@@ -1064,6 +1069,31 @@
   background: rgba(255, 255, 255, 0.1);
   color: #ffffff;
   transition: background 140ms ease;
+}
+
+.os2-hero-btn-disputed {
+  background: rgba(239, 68, 68, 0.22);
+  border-color: rgba(248, 113, 113, 0.5);
+  color: #fecaca;
+}
+
+.os2-hero-btn-pending {
+  background: rgba(245, 158, 11, 0.22);
+  border-color: rgba(251, 191, 36, 0.5);
+  color: #fde68a;
+}
+
+.os2-marketplace-wrapper {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-width: 0;
+}
+
+.os2-sparkline-svg {
+  display: block;
+  flex-shrink: 0;
+  overflow: visible;
 }
 
 .os2-hero-btn-ghost:hover {
@@ -1154,24 +1184,41 @@
 
 .os2-page-dash {
   width: 26px;
-  height: 4px;
-  border-radius: 999px;
+  min-width: 26px;
+  height: 24px;
+  min-height: 24px;
+  padding: 0;
   border: none;
-  background: var(--border-medium);
+  background: transparent;
   cursor: pointer;
-  transition: width 180ms ease, background 180ms ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: width 180ms ease;
 }
 
-[data-theme="light"] .os2-page-dash {
+.os2-page-dash::after {
+  content: "";
+  width: 100%;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--border-medium);
+  transition: background 180ms ease;
+}
+
+[data-theme="light"] .os2-page-dash::after {
   background: #d1d5db;
 }
 
 .os2-page-dash.active {
   width: 38px;
+}
+
+.os2-page-dash.active::after {
   background: var(--text-primary);
 }
 
-[data-theme="light"] .os2-page-dash.active {
+[data-theme="light"] .os2-page-dash.active::after {
   background: #111827;
 }
 
@@ -1728,8 +1775,9 @@
   cursor: pointer;
   display: inline-flex;
   align-items: center;
+  min-height: 24px;
   gap: 4px;
-  padding: 2px 5px;
+  padding: 2px 6px;
   border-radius: 4px;
   white-space: nowrap;
 }
@@ -1778,8 +1826,10 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 20px;
-  height: 20px;
+  width: 24px;
+  height: 24px;
+  min-width: 24px;
+  min-height: 24px;
   border-radius: 4px;
   cursor: pointer;
 }
@@ -1805,8 +1855,10 @@
 }
 
 .os2-pill-icon-btn {
-  width: 22px;
-  height: 20px;
+  width: 24px;
+  height: 24px;
+  min-width: 24px;
+  min-height: 24px;
   border: none;
   border-radius: 4px;
   background: transparent;
@@ -1833,7 +1885,9 @@
 }
 
 .os2-pill-txt-btn {
-  height: 20px;
+  min-width: 24px;
+  min-height: 24px;
+  height: 24px;
   padding: 0 7px;
   border: none;
   border-radius: 4px;
@@ -1966,6 +2020,7 @@
     font-size: 11px;
   }
   .os2-lang-btn {
+    min-width: 26px;
     padding: 0 6px;
     font-size: 11px;
   }

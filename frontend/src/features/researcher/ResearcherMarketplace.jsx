@@ -22,7 +22,10 @@ export default function ResearcherMarketplace({
   onDownload,
   onDownloadPdf,
   onClaimRefund,
-  onRecordStudyReuse
+  onRecordStudyReuse,
+  onConfirmEscrow,
+  onDisputeCapsule,
+  onSetManualRelease
 }) {
   const {
     researcherTab,
@@ -79,6 +82,7 @@ export default function ResearcherMarketplace({
             <div className="opensea-collection-nav-bar" style={{ marginBottom: 0, borderBottom: "none" }}>
               <div className="collection-subtabs-group">
                 <button
+                  id="btn-tab-items"
                   type="button"
                   className={`collection-subtab-btn ${collectionTab === "items" ? "active" : ""}`}
                   onClick={() => setCollectionTab("items")}
@@ -136,6 +140,7 @@ export default function ResearcherMarketplace({
           <div className="portal-subnav-bar" style={{ marginBottom: "18px" }}>
             <div className="subnav-tabs">
               <button
+                id="btn-back-to-catalog"
                 className="subnav-tab-item"
                 onClick={() => setResearcherTab("catalog")}
                 type="button"
@@ -160,6 +165,10 @@ export default function ResearcherMarketplace({
             onDownloadPdf={onDownloadPdf}
             onClaimRefund={onClaimRefund}
             onRecordStudyReuse={onRecordStudyReuse}
+            onConfirmEscrow={onConfirmEscrow}
+            onDisputeCapsule={onDisputeCapsule}
+            onSetManualRelease={onSetManualRelease}
+            onSetManualEscrow={onSetManualRelease}
           />
         </section>
       )}

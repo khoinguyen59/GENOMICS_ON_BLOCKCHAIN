@@ -22,7 +22,8 @@ async function capture(send) {
 }
 
 const toB58 = (s) => String(s).replace(/0/g, "x").replace(/O/g, "o").replace(/I/g, "i").replace(/l/g, "1").replace(/[^1-9A-HJ-NP-Za-km-z]/g, "");
-const CID = (n) => (`QmAgent2Boundary${toB58(n)}11111111111111111111111111111`).slice(0, 46);
+const CID_POOL = ["QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG", "QmZ4tDuvesekSs4qM5ZBKpXiZGun7S2CYtEZRB3DYXkjGx", "QmPZ9qBzzyAtRaQQQUZr6xHS6wVfETRR249s63UME18znJ"];
+const CID = (n) => CID_POOL[Math.abs([...String(n)].reduce((a, c) => a + c.charCodeAt(0), 0)) % CID_POOL.length];
 
 describe("AGENT2 :: dataId Boundary & Cross-Function State Symmetry (INV-16)", function () {
   this.timeout(180000);

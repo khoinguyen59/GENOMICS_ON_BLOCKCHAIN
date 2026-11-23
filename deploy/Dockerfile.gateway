@@ -1,0 +1,28 @@
+# GenoChain Protocol - Immutable Non-Root Private IPFS Access-Control & GDPR Gateway Image
+FROM python:3.11-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+RUN groupadd --gid 10001 genochain \
+    && useradd --uid 10001 --gid 10001 --shell /usr/sbin/nologin --create-home genochain \
+    && mkdir -p /app/deploy /app/frontend/src/contracts /var/lib/genochain/spool \
+    && chown -R genochain:genochain /app /var/lib/genochain
+
+WORKDIR /app
+
+COPY deploy/requirements.gateway.txt /app/deploy/requirements.gateway.txt
+RUN pip install --no-cache-dir -r /app/deploy/requirements.gateway.txt
+
+# Copy ONLY minimal gateway code and public contract ABI/address metadata (zero secrets or .local/)
+COPY --chown=genochain:genochain deploy/ipfs_access_gateway.py /app/deploy/ipfs_access_gateway.py
+COPY --chown=genochain:genochain frontend/src/contracts/contractAddresses.json /app/frontend/src/contracts/contractAddresses.json
+COPY --chown=genochain:genochain frontend/src/contracts/GenomicsRegistryABI.json /app/frontend/src/contracts/GenomicsRegistryABI.json
+
+USER genochain
+
+EXPOSE 8090
+
+ENTRYPOINT ["python", "/app/deploy/ipfs_access_gateway.py"]

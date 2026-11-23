@@ -96,9 +96,13 @@ export default function GenomicFilterBar({ children, onPurchase }) {
       });
       setBlindMatchIds(res.matchingIds);
       setBlindTagHex(res.blindTag);
-      showToast(`On-Chain Blind Search: ${res.matchingIds.length} dataset(s) matched (${res.blindTag.slice(0, 12)}...)`);
+      showToast(
+        lang === "vi"
+          ? `Tìm kiếm ẩn danh On-Chain: Khớp ${res.matchingIds.length} bộ dữ liệu (${res.blindTag.slice(0, 12)}...)`
+          : `On-Chain Blind Search: ${res.matchingIds.length} dataset(s) matched (${res.blindTag.slice(0, 12)}...)`
+      );
     } catch (err) {
-      showToast("Blind tag query failed: " + (err.shortMessage || err.message), "error");
+      showToast((lang === "vi" ? "Truy vấn Blind Tag thất bại: " : "Blind tag query failed: ") + (err.shortMessage || err.message), "error");
     } finally {
       setSearchingBlind(false);
     }
@@ -182,9 +186,15 @@ export default function GenomicFilterBar({ children, onPurchase }) {
     });
   }
   if (filterStatus !== "All") {
+    const localizedSt =
+      filterStatus === "Active"
+        ? t("filterActiveStatus")
+        : filterStatus === "Paused"
+          ? t("statusPaused")
+          : t("statusRevoked");
     activeChips.push({
       id: "status",
-      label: `${t("filterStatusLabel") || "Status"}: ${filterStatus}`,
+      label: `${t("filterStatusLabel") || "Status"}: ${localizedSt}`,
       clear: () => setFilterStatus("All")
     });
   }
@@ -380,8 +390,10 @@ export default function GenomicFilterBar({ children, onPurchase }) {
         >
           <option value="gene">{t("filterSearchKeyGene")}</option>
           <option value="disease">{t("filterSearchKeyDisease")}</option>
+          <option value="trait">{t("filterSearchKeyTrait") || (lang === "vi" ? "Tính trạng (trait)" : "Trait (trait)")}</option>
           <option value="hpo">{t("filterSearchKeyHpo")}</option>
           <option value="ancestry">{t("filterSearchKeyAncestry")}</option>
+          <option value="rsid">{t("filterSearchKeyRsid") || "dbSNP rsID (rsid)"}</option>
         </select>
         <input
           id="blind-search-val"
@@ -487,14 +499,20 @@ export default function GenomicFilterBar({ children, onPurchase }) {
                 {openSections.status && (
                   <div className="sidebar-accordion-body">
                     <div className="sidebar-chip-cluster">
-                      {["All", "Active", "Paused"].map((st) => (
+                      {["All", "Active", "Paused", "Revoked"].map((st) => (
                         <button
                           key={st}
                           type="button"
                           className={`sidebar-chip ${filterStatus === st ? "active" : ""}`}
                           onClick={() => setFilterStatus(st)}
                         >
-                          {st === "All" ? (t("filterAllStatus") || "All Status") : st === "Active" ? (t("filterActiveStatus") || "Buy Now / Active") : (t("statusPaused") || st)}
+                          {st === "All"
+                            ? (t("filterAllStatus") || "All Status")
+                            : st === "Active"
+                            ? (t("filterActiveStatus") || "Active")
+                            : st === "Paused"
+                            ? (t("statusPaused") || st)
+                            : (t("statusRevoked") || st)}
                         </button>
                       ))}
                     </div>
@@ -634,7 +652,7 @@ export default function GenomicFilterBar({ children, onPurchase }) {
                 {openSections.chromosome && (
                   <div className="sidebar-accordion-body">
                     <div className="sidebar-chip-cluster">
-                      {["All", "chr1", "chr2", "chr11", "chr12", "chr15", "chr16", "chr20", "MT"].map((ch) => (
+                      {["All", "chr1", "chr2", "chr7", "chr11", "chr12", "chr15", "chr16", "chr20", "chrM"].map((ch) => (
                         <button
                           key={ch}
                           type="button"
@@ -665,7 +683,7 @@ export default function GenomicFilterBar({ children, onPurchase }) {
                 {openSections.format && (
                   <div className="sidebar-accordion-body">
                     <div className="sidebar-chip-cluster">
-                      {["All", "VCF", "FASTQ", "FASTA"].map((fmt) => (
+                      {["All", "VCF", "VCF.GZ", "FASTQ", "FASTA", "BAM", "Crypt4GH"].map((fmt) => (
                         <button
                           key={fmt}
                           type="button"
@@ -699,7 +717,8 @@ export default function GenomicFilterBar({ children, onPurchase }) {
                       {[
                         { id: "All", label: t("filterAllCalls") || "All Calls" },
                         { id: "0/1", label: "0/1 (Het)" },
-                        { id: "1/1", label: "1/1 (Hom Alt)" }
+                        { id: "1/1", label: "1/1 (Hom Alt)" },
+                        { id: "0/0", label: "0/0 (Hom Ref)" }
                       ].map((zg) => (
                         <button
                           key={zg.id}
@@ -735,6 +754,7 @@ export default function GenomicFilterBar({ children, onPurchase }) {
                         { id: "All", label: t("filterAllPopulations") || "All Populations" },
                         { id: "Vietnamese", label: "Vietnamese (KHV)" },
                         { id: "Asian", label: "East Asian" },
+                        { id: "European", label: "European (CEU)" },
                         { id: "Global", label: "Global / Reference" }
                       ].map((reg) => (
                         <button

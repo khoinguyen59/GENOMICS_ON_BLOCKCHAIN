@@ -51,9 +51,9 @@ describe("AGENT2 :: Escrow guarantee: capsule validity, counterparty binding, re
 
     const reg = await registry.connect(seller).registerGenomicData(
       ethers.keccak256(ethers.toUtf8Bytes("ESC-DS")),
-      "QmEscRaw11111111111111111111111111111111111",
-      "QmEscSum11111111111111111111111111111111111",
-      "QmEscMeta1111111111111111111111111111111111",
+      "QmUCEWhx7iDvCzunq5dLkdEaq5e3Fi7TWbfRZrrtQaPEpb",
+      "QmQYv9hZUHqDQiZ4k3Q4qxV7UsZSdwmXuqSEzriZoPwJ3K",
+      "QmWDsDTPewqWWk1TYndLwex33bpUjbb26P6wtW7iQ8pUeH",
       "ipfs://esc", price, 86400 * 30, 1000
     );
     expect((await reg.wait()).status).to.equal(1);

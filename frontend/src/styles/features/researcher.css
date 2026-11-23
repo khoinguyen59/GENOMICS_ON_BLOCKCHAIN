@@ -935,13 +935,28 @@
   background: transparent;
   border: none;
   color: var(--text-muted);
-  display: flex;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
+  min-width: 24px;
+  min-height: 24px;
   cursor: pointer;
-  padding: 2px;
+  padding: 3px;
   border-radius: 50%;
   transition: all var(--transition-fast);
+}
+
+.nft-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.opensea-catalog-main.full-width {
+  width: 100%;
+  max-width: 100%;
+  flex: 1 1 100%;
 }
 
 .tag-remove-btn:hover {

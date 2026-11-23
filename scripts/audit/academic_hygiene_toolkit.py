@@ -127,8 +127,8 @@ def check_script_hex_integrity(directory_path: str = None) -> tuple[bool, list[s
     if not os.path.exists(directory_path):
         return True, []
 
-    # Mau kiem tra nghi van: hash.hex() thay vi Web3.to_hex(hash)
-    pattern_tx_hash_hex = re.compile(r'tx_hash\.hex\(\)')
+    # Mau kiem tra nghi van: tx_hash.hex() / transactionHash.hex() thay vi Web3.to_hex(...)
+    pattern_tx_hash_hex = re.compile(r'(?:tx_hash|transactionHash|transaction_hash|txHash)\.hex\(\)')
 
     for root, _, files in os.walk(directory_path):
         for f in files:
@@ -233,12 +233,20 @@ def run_selftest() -> int:
         assert ok, f"Test failed: valid zip with archive syllabus should pass: {viols}"
     print("[2/3] Kiem tra ve sinh Tep Zip: PASSED (Nhan dien chinh xac tep cam)")
 
-    # 3. Test check_script_hex_integrity
+    # 3. Test check_script_hex_integrity (bao gom regression check cho transactionHash.hex())
+    with tempfile.TemporaryDirectory() as tmp_script_dir:
+        bad_py = os.path.join(tmp_script_dir, "bad_hash.py")
+        with open(bad_py, "w", encoding="utf-8") as bf:
+            bf.write('print(f"0x{receipt.transactionHash.hex()}")\n')
+        ok_bad, viols_bad = check_script_hex_integrity(tmp_script_dir)
+        assert not ok_bad and len(viols_bad) == 1, "Test failed: transactionHash.hex() must be flagged"
+
     ok, viols = check_script_hex_integrity("scripts")
     print(f"[3/3] Kiem tra chuoi tx_hash trong scripts/: {'PASSED' if ok else 'CANH BAO'}")
     if not ok:
         for v in viols:
             print(f"  {v}")
+        return 1
 
     print("=== TAT CA KIEM THU TOOLKIT DA VUOT QUA THANH CONG (100%) ===")
     return 0

@@ -1,0 +1,223 @@
+# GenoChain Protocol - Self-Hosted Production Docker Compose (Oracle VPS / ARM64 & x86_64)
+# Topology & Zero-Trust Network Isolation:
+#   - genochain_private (internal: true): ZERO internet egress! Only kubo + ipfs-access-gateway attach here.
+#   - genochain_egress (bridge): Outbound RPC/KMS + inbound Caddy TLS only. kubo is NEVER attached here.
+#   - kubo (ipfs/kubo:v0.32.1): True private IPFS node (LIBP2P_FORCE_PNET=1, swarm.key PSK, Routing.Type=none,
+#     bootstrap/mDNS/Relay/AutoNAT disabled via kubo-private-init.sh, ports 5001/8080 NEVER published).
+#   - ipfs-access-gateway: Immutable non-root container enforcing public Active metadataCid reads, EIP-191 SIWE
+#     + on-chain license checks for private ciphertext, SIWE-authenticated /api/v0/upload, SQLite state persistence,
+#     and ref-counted GDPR Art. 17 pin/rm + repo/gc.
+#   - capsule-dispatcher (opt-in profile: custodial-dispatcher): Immutable non-root worker watching on-chain
+#     orders for custodial vault datasets (sovereign donors deliver capsules directly from their browser vault).
+#   - caddy: Automatic HTTPS TLS termination (Let's Encrypt), reverse-proxies /ipfs/* & /api/v0/upload.
+#
+# Usage:
+#   python deploy/generate_swarm_key.py
+#   cp deploy/.env.production.example deploy/.env.production
+#   cp deploy/Caddyfile.example deploy/Caddyfile
+#   docker compose -f deploy/docker-compose.vps.yml --env-file deploy/.env.production up -d --build
+#   # Optional custodial seed/vault dispatcher profile:
+#   docker compose -f deploy/docker-compose.vps.yml --env-file deploy/.env.production --profile custodial-dispatcher up -d --build
+
+services:
+  kubo:
+    image: ipfs/kubo:v0.32.1
+    container_name: genochain-kubo
+    restart: unless-stopped
+    environment:
+      - IPFS_PROFILE=server
+      - LIBP2P_FORCE_PNET=1
+    volumes:
+      - kubo_data:/data/ipfs
+      - ./kubo-private-init.sh:/container-init.d/001-private-network.sh:ro
+      - ${KUBO_SWARM_KEY_FILE:-./secrets/swarm.key}:/data/ipfs/swarm.key:ro
+    networks:
+      - genochain_private
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 2g
+    cpus: "2.0"
+    # Ports 5001 (RPC) and 8080 (Gateway) are intentionally NOT published to 0.0.0.0.
+    # genochain_private has internal: true so Kubo has zero public internet egress.
+    healthcheck:
+      test: ["CMD-SHELL", "ipfs --api=/ip4/127.0.0.1/tcp/5001 id >/dev/null 2>&1"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 5
+
+  ipfs-access-gateway:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.gateway
+    image: genochain-ipfs-gateway:local
+    container_name: genochain-ipfs-gateway
+    restart: unless-stopped
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    mem_limit: 512m
+    cpus: "1.0"
+    command:
+      - --host
+      - "0.0.0.0"
+      - --port
+      - "8090"
+      - --rpc-url
+      - "${RPC_URL}"
+      - --kubo-rpc
+      - "http://kubo:5001"
+      - --cors-origin
+      - "${CORS_ALLOWED_ORIGIN:-https://genochain.example.com}"
+      - --gdpr-poll-sec
+      - "${GDPR_POLL_SEC:-30}"
+      - --gc-timeout
+      - "${KUBO_GC_TIMEOUT_SEC:-180}"
+      - --state-db
+      - "/var/lib/genochain/gateway_state.sqlite"
+      - --upload-policy
+      - "${GATEWAY_UPLOAD_POLICY:-onchain-eligible}"
+    environment:
+      - RPC_URL=${RPC_URL}
+      - REGISTRY_ADDRESS=${REGISTRY_ADDRESS:-}
+      - DEPLOYED_BLOCK=${DEPLOYED_BLOCK:-}
+      - KUBO_RPC_URL=http://kubo:5001
+      - GATEWAY_BIND_HOST=0.0.0.0
+      - GATEWAY_PORT=8090
+      - CORS_ALLOWED_ORIGIN=${CORS_ALLOWED_ORIGIN:-https://genochain.example.com}
+      - GDPR_POLL_SEC=${GDPR_POLL_SEC:-30}
+      - KUBO_GC_TIMEOUT_SEC=${KUBO_GC_TIMEOUT_SEC:-180}
+      - GATEWAY_MAX_UPLOADS_PER_HOUR=${GATEWAY_MAX_UPLOADS_PER_HOUR:-60}
+      - GATEWAY_MAX_UPLOAD_BYTES_PER_HOUR=${GATEWAY_MAX_UPLOAD_BYTES_PER_HOUR:-2147483648}
+      - GATEWAY_MAX_GLOBAL_UPLOAD_BYTES_PER_HOUR=${GATEWAY_MAX_GLOBAL_UPLOAD_BYTES_PER_HOUR:-10737418240}
+      - GATEWAY_MAX_TOTAL_PINNED_BYTES=${GATEWAY_MAX_TOTAL_PINNED_BYTES:-53687091200}
+      - GATEWAY_UPLOAD_POLICY=${GATEWAY_UPLOAD_POLICY:-onchain-eligible}
+      - GATEWAY_UPLOAD_ALLOWLIST=${GATEWAY_UPLOAD_ALLOWLIST:-}
+      - GATEWAY_MIN_UPLOAD_WEI=${GATEWAY_MIN_UPLOAD_WEI:-1000000000000000}
+      - GATEWAY_MIN_UPLOAD_GENO=${GATEWAY_MIN_UPLOAD_GENO:-1000000000000000000}
+      - GATEWAY_ORPHAN_PIN_TTL_SEC=${GATEWAY_ORPHAN_PIN_TTL_SEC:-3600}
+    ports:
+      # Loopback-only binding for host-local Prometheus / Uptime Kuma scraping (never exposed publicly)
+      - "127.0.0.1:8090:8090"
+    volumes:
+      - gateway_state:/var/lib/genochain
+    depends_on:
+      kubo:
+        condition: service_healthy
+    networks:
+      - genochain_private
+      - genochain_egress
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8090/healthz', timeout=5)\""]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 5
+
+  capsule-dispatcher:
+    profiles:
+      - custodial-dispatcher
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.dispatcher
+      args:
+        INSTALL_BOTO3: ${INSTALL_BOTO3_FLAG:-}
+    image: genochain-capsule-dispatcher:local
+    container_name: genochain-capsule-dispatcher
+    restart: unless-stopped
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    mem_limit: 512m
+    cpus: "1.0"
+    command:
+      - --watch
+      - --interval
+      - "${DISPATCHER_POLL_INTERVAL:-6}"
+      - --rpc-url
+      - "${RPC_URL}"
+      - --vault-file
+      - "/run/secrets/vault/dispatcher_seed_vault.json"
+      - --checkpoint
+      - "/var/lib/genochain/dispatcher_checkpoint.json"
+      - --max-rotations-per-hour
+      - "${MAX_ROTATIONS_PER_HOUR:-20}"
+      - --json-logs
+      - --health-host
+      - "0.0.0.0"
+      - --health-port
+      - "8091"
+    environment:
+      - RPC_URL=${RPC_URL}
+      - REGISTRY_ADDRESS=${REGISTRY_ADDRESS:-}
+      - DEPLOYED_BLOCK=${DEPLOYED_BLOCK:-}
+      - DISPATCHER_PRIVATE_KEY=${DISPATCHER_PRIVATE_KEY:-${WORKER_PRIVATE_KEY:-}}
+      - WORKER_PRIVATE_KEY=${WORKER_PRIVATE_KEY:-}
+      - DISPATCHER_POLL_INTERVAL=${DISPATCHER_POLL_INTERVAL:-6}
+      - MAX_ROTATIONS_PER_HOUR=${MAX_ROTATIONS_PER_HOUR:-20}
+      - GENOCHAIN_SEED_VAULT_SECRET=${GENOCHAIN_SEED_VAULT_SECRET:-}
+      - AWS_REGION=${AWS_REGION:-}
+      - AWS_KMS_KEY_ID=${AWS_KMS_KEY_ID:-}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
+    ports:
+      # Loopback-only binding for host-local Prometheus scraping (never exposed publicly)
+      - "127.0.0.1:8091:8091"
+    volumes:
+      - dispatcher_state:/var/lib/genochain
+      # Directory mount (NOT single-file bind mount) so atomic mv hot-reload works across Linux inodes without exposing swarm.key
+      - ${DISPATCHER_VAULT_DIR:-./secrets/vault}:/run/secrets/vault:ro
+    networks:
+      - genochain_egress
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8091/healthz', timeout=5)\""]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 5
+
+  caddy:
+    image: caddy:2.8-alpine
+    container_name: genochain-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - GATEWAY_DOMAIN=${GATEWAY_DOMAIN:-ipfs.genochain.example.com}
+      - ACME_EMAIL=${ACME_EMAIL:-ops@genochain.example.com}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      ipfs-access-gateway:
+        condition: service_healthy
+    networks:
+      - genochain_egress
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 256m
+    cpus: "0.5"
+
+networks:
+  genochain_private:
+    driver: bridge
+    internal: true
+  genochain_egress:
+    driver: bridge
+
+volumes:
+  kubo_data:
+  gateway_state:
+  dispatcher_state:
+  caddy_data:
+  caddy_config:

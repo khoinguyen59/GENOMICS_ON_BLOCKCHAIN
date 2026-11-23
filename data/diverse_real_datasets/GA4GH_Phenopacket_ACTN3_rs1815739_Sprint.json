@@ -1,0 +1,187 @@
+{
+  "id": "phenopacket-ANON_MULTI_ACTN3_R577X",
+  "files": [],
+  "subject": {
+    "id": "ANON_MULTI_ACTN3_R577X",
+    "sex": "FEMALE",
+    "karyotypicSex": "XX",
+    "taxonomy": {
+      "id": "NCBITaxon:9606",
+      "label": "Homo sapiens"
+    },
+    "vitalStatus": {
+      "status": "ALIVE"
+    }
+  },
+  "measurements": [
+    {
+      "assay": {
+        "id": "LOINC:882-1",
+        "label": "ABO and Rh group [Type] in Blood"
+      },
+      "value": {
+        "ontologyClass": {
+          "id": "SNOMED:278149003",
+          "label": "O+"
+        }
+      }
+    }
+  ],
+  "phenotypicFeatures": [
+    {
+      "type": {
+        "id": "SO:0001587",
+        "label": "stop_gained"
+      },
+      "excluded": false
+    },
+    {
+      "type": {
+        "id": "HANCESTRO:0004",
+        "label": "Global Multi-ethnic Reference Panel"
+      },
+      "excluded": false
+    }
+  ],
+  "diseases": [
+    {
+      "term": {
+        "id": "SO:0001587",
+        "label": "Fast-Twitch Skeletal Muscle Fiber Polymorphism (ACTN3 rs1815739)"
+      }
+    }
+  ],
+  "interpretations": [
+    {
+      "id": "interpretation-ANON_MULTI_ACTN3_R577X",
+      "progressStatus": "COMPLETED",
+      "diagnosis": {
+        "disease": {
+          "id": "SO:0001587",
+          "label": "Fast-Twitch Skeletal Muscle Fiber Polymorphism (ACTN3 rs1815739)"
+        },
+        "genomicInterpretations": [
+          {
+            "subjectOrBiosampleId": "ANON_MULTI_ACTN3_R577X",
+            "interpretationStatus": "CONTRIBUTORY",
+            "variantInterpretation": {
+              "acmgPathogenicityClassification": "BENIGN",
+              "variationDescriptor": {
+                "id": "rs1815739",
+                "geneContext": {
+                  "valueId": "HGNC:166",
+                  "symbol": "ACTN3"
+                },
+                "vcfRecord": {
+                  "genomeAssembly": "GRCh38",
+                  "chrom": "chr11",
+                  "pos": 66560624,
+                  "id": "rs1815739"
+                },
+                "expressions": [
+                  {
+                    "syntax": "hgvs",
+                    "value": "[REDACTED_PROTECTED_UNDER_ENCRYPTED_PAYLOAD]"
+                  }
+                ],
+                "allelicState": {
+                  "id": "GENO:0000135",
+                  "label": "0/1 Heterozygous"
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "metaData": {
+    "created": "2026-01-01T00:00:00.000Z",
+    "createdBy": "GenomicsBlockchainRegistry_v2",
+    "resources": [
+      {
+        "id": "hp",
+        "name": "Human Phenotype Ontology",
+        "url": "http://purl.obolibrary.org/obo/hp.owl",
+        "version": "2026-01-01",
+        "namespacePrefix": "HP",
+        "iriPrefix": "http://purl.obolibrary.org/obo/HP_"
+      },
+      {
+        "id": "mondo",
+        "name": "Mondo Disease Ontology",
+        "url": "http://purl.obolibrary.org/obo/mondo.owl",
+        "version": "2026-01-01",
+        "namespacePrefix": "MONDO",
+        "iriPrefix": "http://purl.obolibrary.org/obo/MONDO_"
+      },
+      {
+        "id": "hancestro",
+        "name": "Human Ancestry Ontology",
+        "url": "http://purl.obolibrary.org/obo/hancestro.owl",
+        "version": "2026-01-01",
+        "namespacePrefix": "HANCESTRO",
+        "iriPrefix": "http://purl.obolibrary.org/obo/HANCESTRO_"
+      },
+      {
+        "id": "loinc",
+        "name": "Logical Observation Identifiers Names and Codes",
+        "url": "https://loinc.org",
+        "version": "2.77",
+        "namespacePrefix": "LOINC",
+        "iriPrefix": "https://loinc.org/"
+      },
+      {
+        "id": "snomed",
+        "name": "SNOMED Clinical Terms",
+        "url": "https://www.snomed.org",
+        "version": "2026-01-01",
+        "namespacePrefix": "SNOMED",
+        "iriPrefix": "http://snomed.info/id/"
+      },
+      {
+        "id": "ncbitaxon",
+        "name": "NCBI Organismal Classification",
+        "url": "http://purl.obolibrary.org/obo/ncbitaxon.owl",
+        "version": "2026-01-01",
+        "namespacePrefix": "NCBITaxon",
+        "iriPrefix": "http://purl.obolibrary.org/obo/NCBITaxon_"
+      },
+      {
+        "id": "hgnc",
+        "name": "HUGO Gene Nomenclature Committee",
+        "url": "https://www.genenames.org",
+        "version": "2026-01-01",
+        "namespacePrefix": "HGNC",
+        "iriPrefix": "https://www.genenames.org/data/gene-symbol-report/#!/hgnc_id/HGNC:"
+      },
+      {
+        "id": "so",
+        "name": "Sequence Ontology",
+        "url": "http://purl.obolibrary.org/obo/so.owl",
+        "version": "2026-01-01",
+        "namespacePrefix": "SO",
+        "iriPrefix": "http://purl.obolibrary.org/obo/SO_"
+      },
+      {
+        "id": "geno",
+        "name": "Genotype Ontology",
+        "url": "http://purl.obolibrary.org/obo/geno.owl",
+        "version": "2026-01-01",
+        "namespacePrefix": "GENO",
+        "iriPrefix": "http://purl.obolibrary.org/obo/GENO_"
+      }
+    ],
+    "phenopacketSchemaVersion": "2.0.0",
+    "externalReferences": [
+      {
+        "id": "GENOMICS_BLOCKCHAIN_INTEGRITY",
+        "description": "SHA-256 rawDataHash: 0x00"
+      },
+      {
+        "id": "GENOCHAIN_CLINICAL_SIGNIFICANCE",
+        "description": "BENIGN"
+      }
+    ]
+  }
+}

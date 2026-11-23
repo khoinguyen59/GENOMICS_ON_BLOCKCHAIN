@@ -286,7 +286,7 @@ describe("AGENT6 :: GenomicsRegistry boundary, lifecycle symmetry & revocation",
       ).to.be.revertedWithCustomError(registry, "ConsentPermanentlyRevoked");
       await expect(
         registry.connect(owner).grantDirectAccess(1, buyer.address)
-      ).to.be.revertedWithCustomError(registry, "DataNotActive");
+      ).to.be.revertedWithCustomError(registry, "ConsentPermanentlyRevoked");
     });
 
     it("capsule material must NOT remain retrievable after consent revocation (key custody gap)", async function () {

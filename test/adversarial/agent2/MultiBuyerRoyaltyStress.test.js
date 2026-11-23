@@ -35,9 +35,9 @@ describe("AGENT2 :: Concurrent Multi-Buyer Stress & Royalty Split Conservation (
     const cleanSeed = String(dataSeed).replace(/0/g, "x").replace(/O/g, "o").replace(/I/g, "i").replace(/l/g, "1").replace(/[^1-9A-HJ-NP-Za-km-z]/g, "");
     const tx = await registry.connect(creator).registerGenomicData(
       ethers.keccak256(ethers.toUtf8Bytes(dataSeed)),
-      `QmAgent2Roya1ty${cleanSeed}111111111111111111111`,
-      `QmAgent2Sum${cleanSeed}111111111111111111111111`,
-      `QmAgent2Meta${cleanSeed}11111111111111111111111`,
+      "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG",
+      "QmZ4tDuvesekSs4qM5ZBKpXiZGun7S2CYtEZRB3DYXkjGx",
+      "QmPZ9qBzzyAtRaQQQUZr6xHS6wVfETRR249s63UME18znJ",
       `ipfs://${dataSeed}`, price, 86400 * 30, royaltyBps
     );
     const r = await tx.wait();
@@ -211,23 +211,23 @@ describe("AGENT2 :: Concurrent Multi-Buyer Stress & Royalty Split Conservation (
     }
   });
 
-  it("A2-R05 royalty basis-point ceiling is enforced by EIP-2981 (no underflow / no >100% royalty)", async function () {
+  it("A2-R05 royalty basis-point ceiling is enforced by MAX_ROYALTY_BPS (5000 bps = 50%; >50% reverts)", async function () {
     const over = await capture(() => registry.connect(creator).registerGenomicData(
-      ethers.keccak256(ethers.toUtf8Bytes("ROY-OVER")), "Qmover11111111111111111111111111111111111",
-      "Qmover21111111111111111111111111111111111", "Qmover31111111111111111111111111111111111",
-      "ipfs://over", price, 86400, 10001
+      ethers.keccak256(ethers.toUtf8Bytes("ROY-OVER")), "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG",
+      "QmZ4tDuvesekSs4qM5ZBKpXiZGun7S2CYtEZRB3DYXkjGx", "QmPZ9qBzzyAtRaQQQUZr6xHS6wVfETRR249s63UME18znJ",
+      "ipfs://over", price, 86400, 5001
     ));
     expect(over.ok).to.equal(false);
     expect(over.error).to.contain("ERC2981InvalidTokenRoyalty");
 
     const maxOk = await capture(() => registry.connect(creator).registerGenomicData(
-      ethers.keccak256(ethers.toUtf8Bytes("ROY-MAX")), "QmMax111111111111111111111111111111111111",
-      "QmMax211111111111111111111111111111111111", "QmMax311111111111111111111111111111111111",
-      "ipfs://max", price, 86400, 10000
+      ethers.keccak256(ethers.toUtf8Bytes("ROY-MAX")), "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG",
+      "QmZ4tDuvesekSs4qM5ZBKpXiZGun7S2CYtEZRB3DYXkjGx", "QmPZ9qBzzyAtRaQQQUZr6xHS6wVfETRR249s63UME18znJ",
+      "ipfs://max", price, 86400, 5000
     ));
     expect(maxOk.ok, maxOk.error).to.equal(true);
 
-    // 100% royalty: the whole price routes to the creator, seller proceeds are 0
+    // 50% max royalty: half routes to creator, half routes to secondary reseller (zero dust loss)
     const registryAddr = await registry.getAddress();
     expect(await registry.dataCount()).to.equal(1n); // the invalid registration rolled back fully
     await (await token.connect(buyers[0]).approve(registryAddr, price * 2n)).wait();
@@ -238,8 +238,9 @@ describe("AGENT2 :: Concurrent Multi-Buyer Stress & Royalty Split Conservation (
     const preBuyer = await token.balanceOf(buyers[0].address);
     const r = await capture(() => registry.connect(buyers[0])["grantAccess(uint256,uint256)"](1n, price));
     expect(r.ok, r.error).to.equal(true);
-    expect(await token.balanceOf(creator.address) - preCreator).to.equal(price);
-    expect(await token.balanceOf(reseller.address)).to.equal(preReseller);
+    const expectedHalf = price / 2n;
+    expect(await token.balanceOf(creator.address) - preCreator).to.equal(expectedHalf);
+    expect(await token.balanceOf(reseller.address) - preReseller).to.equal(price - expectedHalf);
     expect(preBuyer - (await token.balanceOf(buyers[0].address))).to.equal(price);
     expect(await token.balanceOf(registryAddr)).to.equal(0n);
   });

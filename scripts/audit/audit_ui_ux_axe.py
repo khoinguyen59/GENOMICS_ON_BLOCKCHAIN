@@ -1,9 +1,11 @@
+import argparse
 import asyncio
 import json
 import os
 import subprocess
 import sys
 import time
+import urllib.parse
 import urllib.request
 from pathlib import Path
 from playwright.async_api import async_playwright
@@ -11,22 +13,32 @@ from playwright.async_api import async_playwright
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-AXE_PATH = os.path.join(os.getcwd(), "research_repos", "axe-core", "axe.min.js")
-BASE_URL = "http://localhost:3000"
+_AXE_CANDIDATES = [
+    os.path.join(os.getcwd(), "research_repos", "axe-core", "axe.min.js"),
+    os.path.join(os.getcwd(), "node_modules", "axe-core", "axe.min.js"),
+]
+AXE_PATH = next((p for p in _AXE_CANDIDATES if os.path.exists(p)), _AXE_CANDIDATES[0])
+BASE_URL = os.environ.get("GENO_AUDIT_BASE_URL", "http://127.0.0.1:3000").rstrip("/")
 THEME_CHECKS_DIR = Path(__file__).resolve().parents[2] / "docs" / "reports" / "theme_checks"
 
 
-def ensure_server():
+def ensure_server(base_url: str):
     try:
-        urllib.request.urlopen("http://localhost:3000", timeout=1)
+        urllib.request.urlopen(base_url, timeout=2)
         return None
     except Exception:
-        print("[*] Starting Vite dev server on port 3000...")
-        frontend_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "frontend")
+        parsed = urllib.parse.urlparse(base_url)
+        is_local_dev = parsed.hostname in ("127.0.0.1", "localhost") and (parsed.port in (None, 3000))
+        if not is_local_dev:
+            raise RuntimeError(f"Target audit server is not reachable at {base_url}")
+        host = parsed.hostname or "127.0.0.1"
+        port = parsed.port or 3000
+        print(f"[*] Starting Vite dev server on {host}:{port}...")
+        frontend_dir = str(Path(__file__).resolve().parents[2] / "frontend")
         if not os.path.exists(frontend_dir):
             frontend_dir = os.path.join(os.getcwd(), "frontend")
         proc = subprocess.Popen(
-            "cmd /c npm run dev",
+            f"cmd /c npm run dev -- --host {host} --port {port}",
             cwd=frontend_dir,
             shell=True,
             stdout=subprocess.DEVNULL,
@@ -35,7 +47,7 @@ def ensure_server():
         for _ in range(30):
             time.sleep(1)
             try:
-                urllib.request.urlopen("http://localhost:3000", timeout=1)
+                urllib.request.urlopen(base_url, timeout=1)
                 print("[*] Vite dev server is ready!")
                 return proc
             except Exception:
@@ -107,7 +119,9 @@ async def switch_view(page, view_name: str):
 
 async def audit_scenario(page, axe_js: str, scenario_tag: str, save_shot: bool):
     await page.evaluate(axe_js)
-    results = await page.evaluate("() => axe.run()")
+    results = await page.evaluate(
+        "() => axe.run({ runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa', 'best-practice'] } })"
+    )
     overflow_info = await page.evaluate(
         """() => ({
             scrollWidth: document.documentElement.scrollWidth,
@@ -181,11 +195,34 @@ async def audit_scenario(page, axe_js: str, scenario_tag: str, save_shot: bool):
         }"""
     )
 
+    computed_target_size_failures = await page.evaluate(
+        """() => {
+            const failures = [];
+            for (const el of document.querySelectorAll('button:not(:disabled), [role="button"]')) {
+                const rect = el.getBoundingClientRect();
+                if (rect.width <= 0 || rect.height <= 0) continue;
+                const st = getComputedStyle(el);
+                if (st.visibility === 'hidden' || st.display === 'none' || parseFloat(st.opacity) < 0.1) continue;
+                if (rect.width < 23.5 || rect.height < 23.5) {
+                    failures.push({
+                        tag: el.tagName,
+                        id: el.id || '',
+                        cls: String(el.className || '').slice(0, 60),
+                        text: (el.innerText || el.getAttribute('aria-label') || el.getAttribute('title') || '').trim().slice(0, 40),
+                        w: Number(rect.width.toFixed(1)),
+                        h: Number(rect.height.toFixed(1))
+                    });
+                }
+            }
+            return failures;
+        }"""
+    )
+
     violations = results.get("violations", [])
     # Task 4: verify ALL axe-core impacts (critical, serious, moderate, minor) without suppression
-    blocking = violations
+    blocking = list(violations)
     if computed_contrast_failures:
-        blocking = list(violations) + [{
+        blocking.append({
             "id": "computed-color-contrast",
             "impact": "serious",
             "description": f"{len(computed_contrast_failures)} visible interactive/badge element(s) below WCAG contrast minimum",
@@ -193,7 +230,17 @@ async def audit_scenario(page, axe_js: str, scenario_tag: str, save_shot: bool):
                 {"target": [f"#{f['id']}" if f["id"] else f["cls"]], "failureSummary": f"{f['text']!r} ratio={f['ratio']} < {f['minRatio']}"}
                 for f in computed_contrast_failures[:4]
             ],
-        }]
+        })
+    if computed_target_size_failures:
+        blocking.append({
+            "id": "wcag22-sc258-target-size",
+            "impact": "serious",
+            "description": f"{len(computed_target_size_failures)} visible interactive button(s) smaller than 24x24px (WCAG 2.2 SC 2.5.8)",
+            "nodes": [
+                {"target": [f"#{f['id']}" if f["id"] else f["cls"]], "failureSummary": f"{f['text']!r} size={f['w']}x{f['h']}px < 24x24px"}
+                for f in computed_target_size_failures[:6]
+            ],
+        })
     minor_or_mod = [v for v in violations if v.get("impact") not in ("critical", "serious")]
 
     if save_shot:
@@ -304,6 +351,42 @@ async def run_audit():
             # Test Escape dismissal
             await page.keyboard.press("Escape")
             await page.wait_for_timeout(350)
+
+        # Audit PatientSovereignVault Blind Tags Modal (tests .icon-copy-btn target-size under wcag22aa)
+        await ensure_theme(page, "light")
+        await ensure_lang(page, "vi")
+        await switch_view(page, "provider_vault")
+        tags_btn = page.locator("[id^='btn-vault-tags-']").first
+        if await tags_btn.count() > 0:
+            await tags_btn.click()
+            await page.wait_for_selector(".terminal-modal-window", timeout=5000)
+            await page.wait_for_timeout(350)
+            tag = "desktop_light_vi_vault_tags_modal"
+            res = await audit_scenario(page, axe_js, tag, False)
+            all_scenarios.append(res)
+            blocking_failures += res["blocking_count"]
+            if res["overflow_px"] > 0:
+                overflow_failures += 1
+            await page.keyboard.press("Escape")
+            await page.wait_for_timeout(300)
+
+        # Audit PatientSovereignVault Worker Auth & Escrow Release Modals
+        for prefix, modal_tag in [
+            ("btn-vault-worker-", "desktop_light_vi_vault_worker_modal"),
+            ("btn-vault-escrow-", "desktop_light_vi_vault_escrow_modal"),
+        ]:
+            m_btn = page.locator(f"[id^='{prefix}']").first
+            if await m_btn.count() > 0:
+                await m_btn.click()
+                await page.wait_for_selector(".terminal-modal-window", timeout=5000)
+                await page.wait_for_timeout(350)
+                res = await audit_scenario(page, axe_js, modal_tag, False)
+                all_scenarios.append(res)
+                blocking_failures += res["blocking_count"]
+                if res["overflow_px"] > 0:
+                    overflow_failures += 1
+                await page.keyboard.press("Escape")
+                await page.wait_for_timeout(300)
 
         # Audit IpfsSettingsModal in Desktop Light & Dark
         for theme in ("light", "dark"):
@@ -520,7 +603,16 @@ async def run_audit():
 
 
 def main():
-    proc = ensure_server()
+    global BASE_URL
+    parser = argparse.ArgumentParser(description="Multi-viewport WCAG 2.2 AA axe-core UI/UX audit")
+    parser.add_argument(
+        "--base-url",
+        default=os.environ.get("GENO_AUDIT_BASE_URL", "http://127.0.0.1:3000"),
+        help="Target frontend base URL (default: GENO_AUDIT_BASE_URL or http://127.0.0.1:3000)",
+    )
+    args = parser.parse_args()
+    BASE_URL = args.base_url.rstrip("/")
+    proc = ensure_server(BASE_URL)
     try:
         asyncio.run(run_audit())
     finally:

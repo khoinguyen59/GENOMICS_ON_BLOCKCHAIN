@@ -201,22 +201,35 @@ assert(
 );
 
 console.log('\n' + '-'.repeat(80));
-console.log('MODULE 4: DOM Hygiene, XSS Neutralization & Memory Leak Prevention (DOMPurify / Memlab)');
+console.log('MODULE 4: DOM Hygiene, XSS Neutralization & Memory Leak Prevention (React Auto-Escaping / Strict CSP)');
 console.log('-'.repeat(80));
 
-// Test 11: DOMPurify Sanitization on dynamic or markdown render
-let sanitizationGuards = 0;
+// Test 11: Zero raw HTML injection sinks (dangerouslySetInnerHTML, innerHTML, eval, new Function)
+const unsafeSinkHits = [];
 for (const file of jsxFiles) {
+  const rel = path.relative(rootDir, file);
   const content = fs.readFileSync(file, 'utf8');
-  if (content.includes('DOMPurify') || content.includes('sanitize')) {
-    sanitizationGuards++;
+  if (
+    /\bdangerouslySetInnerHTML\b/.test(content) ||
+    /\.innerHTML\s*=/.test(content) ||
+    /\.outerHTML\s*=/.test(content) ||
+    /\bdocument\.write\s*\(/.test(content) ||
+    /\beval\s*\(/.test(content)
+  ) {
+    unsafeSinkHits.push(rel);
   }
 }
+const hasSafeTextSanitizer = jsxFiles.some((file) => {
+  const content = fs.readFileSync(file, 'utf8');
+  return content.includes('sanitizeGenomicMetadata') || content.includes('sanitizeMetadataTree');
+});
 assert(
-  sanitizationGuards > 0,
+  unsafeSinkHits.length === 0 && hasSafeTextSanitizer,
   'SEC-01',
-  'External IPFS metadata rendering is strictly sanitized via DOMPurify before HTML injection',
-  `Verified DOMPurify integration across frontend components.`
+  'Zero raw HTML injection sinks (dangerouslySetInnerHTML/innerHTML/eval) and React text auto-escaping + URL/text guards enforced',
+  unsafeSinkHits.length === 0
+    ? `Scanned ${jsxFiles.length} frontend source files: 0 raw HTML injection sinks, explicit safe text/URL guards=${hasSafeTextSanitizer}.`
+    : `Unsafe DOM injection sink detected in: ${unsafeSinkHits.join(', ')}`
 );
 
 // Test 12: Memory Leak Cleanup: useEffect Hook Dependency and Cleanup Symmetry

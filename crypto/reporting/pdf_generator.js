@@ -4,8 +4,6 @@
  * @module crypto/reporting/pdf_generator
  */
 
-import { computeDataHash } from "../core/symmetric.js";
-
 /**
  * Cleanly normalize Vietnamese diacritics and special characters to their
  * clean Latin equivalents for standard PDF-1.4 Type1 / Helvetica font rendering,
@@ -29,12 +27,31 @@ export function normalizeVietnameseText(str) {
  */
 export function escapePdfLiteral(str) {
   if (!str) return "";
-  const dashRegex = new RegExp("[" + String.fromCharCode(0x2014, 0x2013) + "]", "g");
-  const normalized = normalizeVietnameseText(String(str).replace(dashRegex, "-"));
+  const emDashReplaced = String(str)
+    .replace(/\u2014/g, "--")
+    .replace(/\u2013/g, "-");
+  const normalized = normalizeVietnameseText(emDashReplaced);
   return normalized
     .replace(/\\/g, "\\\\")
     .replace(/\(/g, "\\(")
     .replace(/\)/g, "\\)");
+}
+
+/**
+ * Encode a normalized PDF string directly into single-byte /WinAnsiEncoding bytes
+ * (code points 0x00..0xFF map 1:1 to single bytes; any code point > 0xFF maps to 0x20),
+ * avoiding 2-byte UTF-8 mojibake for \xA0-\xFF characters inside PDF-1.4 Type1 streams.
+ * @param {string} str
+ * @returns {Uint8Array}
+ */
+export function encodeWinAnsiBytes(str) {
+  const text = String(str ?? "");
+  const bytes = new Uint8Array(text.length);
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i);
+    bytes[i] = code <= 0xff ? code : 0x20;
+  }
+  return bytes;
 }
 
 /**
@@ -61,6 +78,7 @@ export function generateClinicalPdfReport({
   const safeGene = escapePdfLiteral(gene);
   const safeVariant = escapePdfLiteral(variant);
   const safeDate = escapePdfLiteral(date);
+  const safeFontName = String(fontName || "Helvetica").replace(/[^A-Za-z0-9-]/g, "") || "Helvetica";
 
   const content = [
     "BT",
@@ -94,17 +112,15 @@ export function generateClinicalPdfReport({
     "ET",
   ].join("\n");
 
-  const encoder = new TextEncoder();
-  const getByteLen = (str) => encoder.encode(str).length;
-
-  const streamBytes = encoder.encode(content);
+  const getByteLen = (str) => encodeWinAnsiBytes(str).length;
+  const streamBytes = encodeWinAnsiBytes(content);
 
   const obj1 = "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n";
   const obj2 = "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n";
   const obj3 =
     "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>\nendobj\n";
   const obj4 = `4 0 obj\n<< /Length ${streamBytes.length} >>\nstream\n${content}\nendstream\nendobj\n`;
-  const obj5 = `5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /${fontName} /Encoding /WinAnsiEncoding >>\nendobj\n`;
+  const obj5 = `5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /${safeFontName} /Encoding /WinAnsiEncoding >>\nendobj\n`;
 
   const header = "%PDF-1.4\n";
   const offset1 = getByteLen(header);
@@ -128,5 +144,5 @@ export function generateClinicalPdfReport({
 
   const trailer = `\ntrailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`;
   const fullPdf = header + obj1 + obj2 + obj3 + obj4 + obj5 + xref + trailer;
-  return new TextEncoder().encode(fullPdf);
+  return encodeWinAnsiBytes(fullPdf);
 }

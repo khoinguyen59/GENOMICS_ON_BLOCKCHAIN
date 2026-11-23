@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from "react";
 import { useDatasets } from "../../context/DatasetContext";
 import { useLanguage } from "../../context/LanguageContext";
-import { useWeb3 } from "../../context/Web3Context";
+import { useWeb3, CONFIGURED_CHAIN_ID, CONFIGURED_CHAIN_NAME } from "../../context/Web3Context";
 import {
   VerifiedBadgeIcon,
   EyeInspectIcon,
@@ -16,35 +16,26 @@ import {
   SequencingIcon,
   BenchmarkIcon,
   LayersIcon,
-  ShieldCheckIcon
+  ShieldCheckIcon,
+  AlertTriangleIcon,
+  RefreshSpinIcon
 } from "../../components/icons/GenoIcons";
 import GenomicVisualCover, { getDatasetCoverUrl } from "../../components/common/GenomicVisualCover";
 import contractAddresses from "../../contracts/contractAddresses.json";
 
 /**
- * Generates a deterministic SVG sparkline path from a dataset's rawDataHash
+ * Renders truthful on-chain dataset telemetry bars (Access Grants, Verified Artifacts, Blind Tags)
  */
-function renderDeterministicSparkline(hashStr = "0x1234567890abcdef", isPositive = true) {
-  const clean = (hashStr || "").replace(/^0x/, "").padEnd(16, "a");
-  const pts = [];
-  for (let i = 0; i < 8; i++) {
-    const byteVal = parseInt(clean.slice(i * 2, i * 2 + 2), 16) || 128;
-    const x = Math.round((i / 7) * 60) + 2;
-    const trendOffset = isPositive ? (7 - i) * 1.8 : i * 1.5;
-    const y = Math.max(4, Math.min(24, Math.round(6 + (byteVal % 12) + trendOffset * 0.6)));
-    pts.push(`${x},${y}`);
-  }
-  const strokeColor = isPositive ? "#10b981" : "#ef4444";
+function renderOnChainMetricBars(ds) {
+  const accessBar = Math.min(22, 5 + (Number(ds?.accessCount || 0) * 4));
+  const hashBar = Math.min(22, 6 + (Number(ds?.artifactHashCount || 1) * 5));
+  const tagBar = Math.min(22, 5 + Math.round((Number(ds?.blindTagCount || 0) / 16) * 17));
+  const activeColor = ds?.status === "Active" ? "#10b981" : "#94a3b8";
   return (
-    <svg width="64" height="28" viewBox="0 0 64 28" fill="none" className="os2-sparkline-svg">
-      <polyline
-        fill="none"
-        stroke={strokeColor}
-        strokeWidth="1.75"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        points={pts.join(" ")}
-      />
+    <svg width="64" height="28" viewBox="0 0 64 28" fill="none" className="os2-sparkline-svg" aria-hidden="true">
+      <rect x="10" y={25 - accessBar} width="10" height={accessBar} rx="2" fill={activeColor} opacity="0.85" />
+      <rect x="27" y={25 - hashBar} width="10" height={hashBar} rx="2" fill="#38bdf8" opacity="0.85" />
+      <rect x="44" y={25 - tagBar} width="10" height={tagBar} rx="2" fill="#818cf8" opacity="0.85" />
     </svg>
   );
 }
@@ -80,7 +71,7 @@ export default function OpenSeaSpotlightShowcase({ onPurchase }) {
 
   const [slideIdx, setSlideIdx] = useState(0);
   const [rightTab, setRightTab] = useState("nfts");
-  const [timeframe, setTimeframe] = useState("1d");
+  const [sortMode, setSortMode] = useState("access");
   const [activeChain, setActiveChain] = useState("all");
   const [copiedContract, setCopiedContract] = useState(false);
 
@@ -101,34 +92,42 @@ export default function OpenSeaSpotlightShowcase({ onPurchase }) {
     return ordered;
   }, [datasets]);
 
-  // Filter datasets by Top Category Pill + Chain Selector + Timeframe so every top bar button visibly updates the UI
+  const targetChainKey = `evm${CONFIGURED_CHAIN_ID}`;
+
+  // Filter datasets by Top Category Pill + Chain Selector + Sort Mode so every top bar button visibly updates the UI
   const showcaseDatasets = useMemo(() => {
     let list = [...diverseOrderedDatasets];
     if (filterSignificance && filterSignificance !== "All") {
-      const catFiltered = list.filter((d) => d.clinicalSignificance === filterSignificance);
-      if (catFiltered.length > 0) list = catFiltered;
+      list = list.filter((d) => d.clinicalSignificance === filterSignificance);
     }
     if (activeChain !== "all") {
       list = list.filter((d) => {
-        if (activeChain === "evm31337") {
-          return !d.chainId || d.chainId === 31337 || d.network === "Hardhat" || d.network === "Localhost";
+        if (activeChain === targetChainKey) {
+          return (
+            !d.chainId ||
+            Number(d.chainId) === CONFIGURED_CHAIN_ID ||
+            (CONFIGURED_CHAIN_ID === 31337 && (d.network === "Hardhat" || d.network === "Localhost"))
+          );
         }
         return String(d.chainId) === String(activeChain);
       });
     }
-    if (timeframe === "1h") {
-      list.sort((a, b) => Number(a.price || 0) - Number(b.price || 0));
-    } else if (timeframe === "6h") {
-      list.sort((a, b) => (Number(b.durationDays || 0) - Number(a.durationDays || 0)) || (b.dataId - a.dataId));
-    } else if (timeframe === "1d") {
-      list.sort((a, b) => ((Number(b.price) || 0) * (Number(b.accessCount) || 1)) - ((Number(a.price) || 0) * (Number(a.accessCount) || 1)));
-    } else if (timeframe === "7d") {
-      list.sort((a, b) => (Number(b.accessCount || 0) - Number(a.accessCount || 0)) || (b.dataId - a.dataId));
-    } else if (timeframe === "30d") {
-      list.sort((a, b) => b.dataId - a.dataId);
+    if (sortMode === "access") {
+      list.sort((a, b) => (Number(b.accessCount || 0) - Number(a.accessCount || 0)) || (Number(b.dataId) - Number(a.dataId)));
+    } else if (sortMode === "price") {
+      list.sort((a, b) => (Number(b.price || 0) - Number(a.price || 0)) || (Number(b.dataId) - Number(a.dataId)));
+    } else if (sortMode === "royalty") {
+      list.sort(
+        (a, b) =>
+          (Number(b.accumulatedRoyalty || 0) - Number(a.accumulatedRoyalty || 0)) ||
+          (Number(b.royaltyBps || 0) - Number(a.royaltyBps || 0)) ||
+          (Number(b.dataId) - Number(a.dataId))
+      );
+    } else if (sortMode === "newest") {
+      list.sort((a, b) => Number(b.dataId) - Number(a.dataId));
     }
     return list;
-  }, [diverseOrderedDatasets, filterSignificance, activeChain, timeframe]);
+  }, [diverseOrderedDatasets, filterSignificance, activeChain, sortMode]);
 
   if (!datasets || datasets.length === 0) {
     if (!loadingChain) return null;
@@ -154,9 +153,15 @@ export default function OpenSeaSpotlightShowcase({ onPurchase }) {
 
   const slides = showcaseDatasets.slice(0, Math.min(8, showcaseDatasets.length));
   const safeSlideIdx = slides.length > 0 ? slideIdx % slides.length : 0;
-  const featured = slides[safeSlideIdx] || showcaseDatasets[0] || datasets[0];
-  const isFeaturedPurchased = purchasedData.some((p) => p.dataId === featured.dataId);
-  const isFeaturedOwner = account && featured.owner?.toLowerCase() === account.toLowerCase();
+  const featured = slides[safeSlideIdx] || showcaseDatasets[0] || null;
+  const featuredPurchasedItem = featured ? purchasedData.find((p) => p.dataId === featured.dataId) : null;
+  const isFeaturedPurchased = Boolean(featuredPurchasedItem);
+  const isFeaturedEscrowDisputed = Boolean(featuredPurchasedItem?.escrowInfo?.isDisputed);
+  const isFeaturedEscrowPendingDelivery = Boolean(
+    featuredPurchasedItem?.isEscrowPending &&
+    !(featuredPurchasedItem?.capsuleDelivered ?? featuredPurchasedItem?.escrowInfo?.capsuleDelivered)
+  );
+  const isFeaturedOwner = Boolean(featured && account && featured.owner?.toLowerCase() === account.toLowerCase());
 
   // Strictly truthful on-chain statistics (Zero artificial inflation)
   const totalVolume = datasets.reduce(
@@ -165,15 +170,20 @@ export default function OpenSeaSpotlightShowcase({ onPurchase }) {
   );
   const activeCount = datasets.filter((d) => d.status === "Active").length;
   const listedPct = datasets.length > 0 ? Math.round((activeCount / datasets.length) * 100) : 100;
-  const contractAddr = contractAddresses.GenomicsRegistry || "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0";
+  const contractAddr = contractAddresses.GenomicsRegistry || "";
 
   const handleCopyContract = (e) => {
     e.stopPropagation();
-    if (navigator.clipboard) {
-      navigator.clipboard.writeText(contractAddr);
-      setCopiedContract(true);
-      showToast(t("copiedToast") || "Copied contract address!");
-      setTimeout(() => setCopiedContract(false), 2000);
+    if (navigator.clipboard?.writeText) {
+      Promise.resolve(navigator.clipboard.writeText(contractAddr))
+        .then(() => {
+          setCopiedContract(true);
+          showToast(t("copiedToast") || "Copied contract address!");
+          setTimeout(() => setCopiedContract(false), 2000);
+        })
+        .catch(() => {
+          showToast(lang === "vi" ? "Không có quyền ghi bộ nhớ tạm." : "Clipboard permission denied.", "error");
+        });
     }
   };
 
@@ -187,17 +197,54 @@ export default function OpenSeaSpotlightShowcase({ onPurchase }) {
     { id: "Population Genetics", label: lang === "vi" ? "Di truyền Quần thể" : "Population WGS", icon: <PopulationGlobeIcon size={14} /> }
   ];
 
-  // Truthful Network Filter (Single Deployed EVM Chain: 31337)
+  // Truthful Network Filter (Single Deployed EVM Chain)
   const chains = [
     { id: "all", label: lang === "vi" ? "Tất cả" : "All", color: "#111827" },
-    { id: "evm31337", label: "Local EVM (31337)", color: "#627EEA", symbol: <DnaHelixIcon size={12} color="#ffffff" /> }
+    {
+      id: targetChainKey,
+      label: CONFIGURED_CHAIN_ID === 31337 ? `Local EVM (${CONFIGURED_CHAIN_ID})` : CONFIGURED_CHAIN_NAME,
+      color: "#627EEA",
+      symbol: <DnaHelixIcon size={12} color="#ffffff" />
+    }
   ];
 
-  const timeframes = ["1h", "6h", "1d", "7d", "30d"];
-  const handleCycleTimeframe = () => {
-    const nextIdx = (timeframes.indexOf(timeframe) + 1) % timeframes.length;
-    const nextTf = timeframes[nextIdx];
-    setTimeframe(nextTf);
+  const sortModes = ["access", "price", "royalty", "newest"];
+  const sortModeLabels = {
+    access: t("spotlightSortTopAccess") || "Top Access",
+    price: t("spotlightSortTopPrice") || "Top Price",
+    royalty: t("spotlightSortTopRoyalty") || "Top Royalty",
+    newest: t("spotlightSortNewest") || "Newest"
+  };
+  const currentSortLabel = sortModeLabels[sortMode] || sortModeLabels.access;
+  const handleCycleSortMode = () => {
+    const nextIdx = (sortModes.indexOf(sortMode) + 1) % sortModes.length;
+    setSortMode(sortModes[nextIdx]);
+  };
+
+  const renderVerificationBadge = (ds, size = 13, verifiedColor = "#0086FF") => {
+    if (ds?.metadataVerificationStatus === "verified" && !ds?.metadataTampered) {
+      return (
+        <span data-verification-badge="verified" title={t("evmSha256Match") || "EVM SHA-256 MATCH"} style={{ display: "inline-flex", alignItems: "center" }}>
+          <VerifiedBadgeIcon size={size} color={verifiedColor} />
+        </span>
+      );
+    }
+    if (ds?.metadataTampered || ds?.metadataVerificationStatus === "tampered") {
+      return (
+        <span data-verification-badge="tampered" title={t("evmMetadataTamperWarn")} style={{ display: "inline-flex", alignItems: "center" }}>
+          <AlertTriangleIcon size={size} color="var(--accent-rose)" />
+        </span>
+      );
+    }
+    return (
+      <span
+        data-verification-badge={ds?.metadataVerificationStatus || "unverified"}
+        title={ds?.metadataVerificationStatus === "unanchored" ? t("evmMetadataUnanchoredBadge") : t("evmMetadataUnverifiedBadge")}
+        style={{ display: "inline-flex", alignItems: "center" }}
+      >
+        <AlertTriangleIcon size={size} color="var(--accent-amber)" />
+      </span>
+    );
   };
 
   // Trending Tokens for the 4x2 Sparkline Grid
@@ -206,16 +253,12 @@ export default function OpenSeaSpotlightShowcase({ onPurchase }) {
   // Featured Collections (4-Card Row matching OpenSea second viewport)
   const featuredCollections = showcaseDatasets.slice(0, 4);
 
-  // Right Leaderboard Datasets sorted dynamically by timeframe & tab mode
-  const leaderboardDatasets = [...showcaseDatasets].sort((a, b) => {
-    if (timeframe === "1h") return Number(a.price || 0) - Number(b.price || 0);
-    if (timeframe === "6h") return Number(b.durationDays || 0) - Number(a.durationDays || 0);
-    if (timeframe === "7d") return Number(a.dataId) - Number(b.dataId);
-    if (timeframe === "30d") return Number(b.dataId) - Number(a.dataId);
-    return Number(b.price || 0) - Number(a.price || 0);
-  });
+  // Right Leaderboard Datasets sorted dynamically by static catalog sort mode
+  const leaderboardDatasets = [...showcaseDatasets];
 
-  const featuredGeneKey = featured.geneSymbol?.split(" ")?.[0] || featured.gene?.split(" ")?.[0] || "ACTN3";
+  const featuredGeneKey = featured
+    ? (featured.geneSymbol?.split(" ")?.[0] || featured.gene?.split(" ")?.[0] || "ACTN3")
+    : "";
   const featuredConsortium = CONSORTIUM_BY_GENE[featuredGeneKey] || "OpenGenomics DeSci Consortium";
 
   // 3 Square Thumbnails on the bottom-right of the Hero Banner
@@ -311,11 +354,12 @@ export default function OpenSeaSpotlightShowcase({ onPurchase }) {
           <button
             type="button"
             className="os2-timeframe-btn"
-            onClick={handleCycleTimeframe}
-            title={lang === "vi" ? "Chuyển mốc thời gian bảng xếp hạng (1h / 6h / 1d / 7d / 30d)" : "Switch Leaderboard Timeframe (1h / 6h / 1d / 7d / 30d)"}
-            aria-label={lang === "vi" ? `Mốc thời gian: ${timeframe === "1d" ? "1 ngày" : timeframe === "7d" ? "7 ngày" : timeframe === "30d" ? "30 ngày" : timeframe === "1h" ? "1 giờ" : "6 giờ"}` : `Timeframe: ${timeframe}`}
+            data-sort-mode={sortMode}
+            onClick={handleCycleSortMode}
+            title={t("spotlightSortCycleHint")}
+            aria-label={`${t("spotlightSortCycleHint")}: ${currentSortLabel}`}
           >
-            <span>{lang === "vi" ? (timeframe === "1d" ? "1 ngày" : timeframe === "7d" ? "7 ngày" : timeframe === "30d" ? "30 ngày" : timeframe === "1h" ? "1 giờ" : timeframe === "6h" ? "6 giờ" : timeframe) : timeframe}</span>
+            <span>{currentSortLabel}</span>
             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
               <polyline points="6 9 12 15 18 9" />
             </svg>
@@ -324,6 +368,43 @@ export default function OpenSeaSpotlightShowcase({ onPurchase }) {
       </div>
 
       {/* ─── 2. MAIN 2-COLUMN SPLIT LAYOUT (Left: Hero + Trending Tokens + Featured Collections | Right: Leaderboard) ─── */}
+      {showcaseDatasets.length === 0 || !featured ? (
+        <div
+          data-spotlight-empty="true"
+          style={{
+            padding: "40px 24px",
+            marginTop: "12px",
+            borderRadius: "var(--radius-lg, 14px)",
+            border: "1px solid var(--border-subtle)",
+            background: "var(--bg-surface-elevated)",
+            textAlign: "center",
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            gap: "10px"
+          }}
+        >
+          <DnaHelixIcon size={28} color="var(--accent-cyan)" />
+          <div style={{ fontSize: "15px", fontWeight: 700, color: "var(--text-primary)" }}>
+            {t("spotlightEmptyTitle")}
+          </div>
+          <div style={{ fontSize: "13px", color: "var(--text-secondary)", maxWidth: "460px" }}>
+            {t("spotlightEmptyDesc")}
+          </div>
+          <button
+            type="button"
+            className="btn-terminal btn-terminal-primary"
+            style={{ marginTop: "6px", height: "34px", padding: "0 16px", fontSize: "12.5px", fontWeight: 700 }}
+            onClick={() => {
+              setFilterSignificance("All");
+              setActiveChain("all");
+              setSlideIdx(0);
+            }}
+          >
+            {t("spotlightResetFilterBtn")}
+          </button>
+        </div>
+      ) : (
       <div className="os2-discover-split-grid">
         {/* LEFT COLUMN */}
         <div className="os2-discover-left-col">
@@ -369,20 +450,30 @@ export default function OpenSeaSpotlightShowcase({ onPurchase }) {
 
               {/* Bottom-Left Overlay: Title + Author + Dark Frosted Glass Stats Box */}
               <div className="os2-hero-overlay-left" onClick={(e) => e.stopPropagation()}>
-                <div className="os2-hero-title-line">
-                  <h2
-                    className="os2-hero-title"
-                    onClick={() => setSelectedAssetModal(featured)}
-                  >
+                <div
+                  className="os2-hero-title-line"
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setSelectedAssetModal(featured)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      setSelectedAssetModal(featured);
+                    }
+                  }}
+                >
+                  <h2 className="os2-hero-title">
                     {featuredGeneKey} -{" "}
                     {getLocalizedTitle ? getLocalizedTitle(featured, lang) : featured.disease}
                   </h2>
-                  <VerifiedBadgeIcon size={20} color="#0086FF" />
+                  {renderVerificationBadge(featured, 20, "#0086FF")}
                 </div>
 
                 <div className="os2-hero-author-line">
                   <span>{lang === "vi" ? "Đơn vị:" : "By"} {featuredConsortium}</span>
-                  <VerifiedBadgeIcon size={13} color="#9ca3af" />
+                  {featured.metadataVerificationStatus === "verified" && !featured.metadataTampered && (
+                    <VerifiedBadgeIcon size={13} color="#9ca3af" />
+                  )}
                   <span className="os2-hero-dot">•</span>
                   <span className="os2-hero-locus-pill">
                     {featured.chromosome}:{featured.rsId}
@@ -394,7 +485,7 @@ export default function OpenSeaSpotlightShowcase({ onPurchase }) {
                     onClick={handleCopyContract}
                     title="Copy GenomicsRegistry Contract Address"
                   >
-                    <span>{contractAddr.slice(0, 6)}...{contractAddr.slice(38)}</span>
+                    <span>{contractAddr.length >= 42 ? `${contractAddr.slice(0, 6)}...${contractAddr.slice(38)}` : (contractAddr || "N/A")}</span>
                     {copiedContract ? <CheckCircleIcon size={11} color="#10b981" /> : <CopyIcon size={11} />}
                   </button>
                 </div>
@@ -409,8 +500,8 @@ export default function OpenSeaSpotlightShowcase({ onPurchase }) {
                     <span className="os2-hero-stat-label">{t("statItemsCount").toUpperCase()}</span>
                     <span className="os2-hero-stat-val">{datasets.length}</span>
                   </div>
-                  <div className="os2-hero-stat-col">
-                    <span className="os2-hero-stat-label">{t("statVolume").toUpperCase()}</span>
+                  <div className="os2-hero-stat-col" title={t("spotlightEstVolumeTooltip")}>
+                    <span className="os2-hero-stat-label">{(t("spotlightEstVolume") || "Est. License Value").toUpperCase()}</span>
                     <span className="os2-hero-stat-val">{totalVolume.toLocaleString()} $GENO</span>
                   </div>
                   <div className="os2-hero-stat-col">
@@ -436,24 +527,47 @@ export default function OpenSeaSpotlightShowcase({ onPurchase }) {
                     ) : isFeaturedPurchased ? (
                       <button
                         type="button"
-                        className="os2-hero-btn-licensed"
+                        className={
+                          isFeaturedEscrowDisputed
+                            ? "os2-hero-btn-disputed"
+                            : isFeaturedEscrowPendingDelivery
+                              ? "os2-hero-btn-pending"
+                              : "os2-hero-btn-licensed"
+                        }
                         onClick={() => setResearcherTab("licensed")}
                       >
-                        <LockOpenIcon size={13} />
-                        <span>{t("btnPurchased")}</span>
+                        {isFeaturedEscrowDisputed ? (
+                          <>
+                            <AlertTriangleIcon size={13} />
+                            <span>{t("escrowStatusDisputed")}</span>
+                          </>
+                        ) : isFeaturedEscrowPendingDelivery ? (
+                          <>
+                            <RefreshSpinIcon size={13} />
+                            <span>{t("escrowPendingDelivery")}</span>
+                          </>
+                        ) : (
+                          <>
+                            <LockOpenIcon size={13} />
+                            <span>{t("btnPurchased")}</span>
+                          </>
+                        )}
                       </button>
                     ) : (
                       <button
                         type="button"
                         className="os2-hero-btn-buy"
-                        disabled={featured.status !== "Active"}
+                        disabled={featured.status !== "Active" || Boolean(featured.metadataTampered)}
+                        title={featured.metadataTampered ? t("evmMetadataTamperWarn") : undefined}
                         onClick={() => onPurchase?.(featured)}
                       >
                         <LockClosedIcon size={13} />
                         <span>
-                          {featured.status !== "Active"
-                            ? t("statusPaused") || "Paused"
-                            : t("btnPurchase")}
+                          {featured.metadataTampered
+                            ? t("btnMetadataTampered")
+                            : featured.status !== "Active"
+                              ? (featured.status === "Revoked" ? t("statusRevoked") : t("statusPaused"))
+                              : t("btnPurchase")}
                         </span>
                       </button>
                     )}
@@ -520,7 +634,10 @@ export default function OpenSeaSpotlightShowcase({ onPurchase }) {
                     role="button"
                     tabIndex={0}
                     onKeyDown={(e) => {
-                      if (e.key === "Enter") setSelectedAssetModal(ds);
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        setSelectedAssetModal(ds);
+                      }
                     }}
                   >
                     <div className="os2-token-card-left">
@@ -534,7 +651,7 @@ export default function OpenSeaSpotlightShowcase({ onPurchase }) {
                       <div className="os2-token-info">
                         <div className="os2-token-name-row">
                           <span className="os2-token-name">{geneName}</span>
-                          <VerifiedBadgeIcon size={12} color="#0086FF" />
+                          {renderVerificationBadge(ds, 12, "#0086FF")}
                         </div>
                         <div className="os2-token-price-row">
                           <span className="os2-token-price">{ds.price} $GENO</span>
@@ -546,7 +663,7 @@ export default function OpenSeaSpotlightShowcase({ onPurchase }) {
                     </div>
 
                     <div className="os2-token-card-right">
-                      {renderDeterministicSparkline(ds.rawDataHash, true)}
+                      {renderOnChainMetricBars(ds)}
                     </div>
                   </div>
                 );
@@ -575,7 +692,10 @@ export default function OpenSeaSpotlightShowcase({ onPurchase }) {
                     role="button"
                     tabIndex={0}
                     onKeyDown={(e) => {
-                      if (e.key === "Enter") setSelectedAssetModal(ds);
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        setSelectedAssetModal(ds);
+                      }
                     }}
                   >
                     <img
@@ -589,7 +709,7 @@ export default function OpenSeaSpotlightShowcase({ onPurchase }) {
                         <span className="os2-featured-strip-title">
                           {geneName} - {displayTitle}
                         </span>
-                        <VerifiedBadgeIcon size={14} color="#0086FF" />
+                        {renderVerificationBadge(ds, 14, "#0086FF")}
                       </div>
                       <div className="os2-featured-strip-meta">
                         <span>{t("showcaseColFloor")}: {ds.price} $GENO</span>
@@ -611,7 +731,7 @@ export default function OpenSeaSpotlightShowcase({ onPurchase }) {
                 ? (lang === "vi" ? "LOCUS BIẾN THỂ" : "VARIANT LOCUS")
                 : rightTab === "perps"
                   ? (lang === "vi" ? "KÝ QUỸ ESCROW" : "ESCROW LEASE")
-                  : `${t("showcaseColCohort").toUpperCase()} (${timeframe.toUpperCase()})`}
+                  : `${t("showcaseColCohort").toUpperCase()} (${currentSortLabel.toUpperCase()})`}
             </span>
             <span>
               {rightTab === "tokens"
@@ -635,7 +755,10 @@ export default function OpenSeaSpotlightShowcase({ onPurchase }) {
                   role="button"
                   tabIndex={0}
                   onKeyDown={(e) => {
-                    if (e.key === "Enter") setSelectedAssetModal(ds);
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      setSelectedAssetModal(ds);
+                    }
                   }}
                 >
                   <div className="os2-lb-left">
@@ -652,7 +775,7 @@ export default function OpenSeaSpotlightShowcase({ onPurchase }) {
                           ? `${geneSym} (${ds.chromosome})`
                           : `${geneSym} - ${displayTitle}`}
                       </span>
-                      <VerifiedBadgeIcon size={13} color="#0086FF" />
+                      {renderVerificationBadge(ds, 13, "#0086FF")}
                     </div>
                   </div>
 
@@ -665,7 +788,7 @@ export default function OpenSeaSpotlightShowcase({ onPurchase }) {
                     ) : rightTab === "perps" ? (
                       <>
                         <span className="os2-lb-floor">{ds.durationDays} {t("durationDays")}</span>
-                        <span className="os2-lb-sub pos">{lang === "vi" ? "Ký quỹ 24h" : "24h Escrow"}</span>
+                        <span className="os2-lb-sub pos">{t("escrow24hBadge")}</span>
                       </>
                     ) : (
                       <>
@@ -674,7 +797,7 @@ export default function OpenSeaSpotlightShowcase({ onPurchase }) {
                           {ds.status === "Active"
                             ? salesCount > 0
                               ? `${salesCount} ${lang === "vi" ? "lượt" : "sales"}`
-                              : "+10% EIP-2981"
+                              : `+${Number(((ds.royaltyBps ?? 1000) / 100).toFixed(2))}% EIP-2981`
                             : ds.status}
                         </span>
                       </>
@@ -686,6 +809,7 @@ export default function OpenSeaSpotlightShowcase({ onPurchase }) {
           </div>
         </aside>
       </div>
+      )}
     </div>
   );
 }

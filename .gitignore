@@ -1,6 +1,7 @@
 # Dependencies
 node_modules/
 **/node_modules/
+.venv/
 
 # Build & Hardhat Cache
 dist/
@@ -59,9 +60,18 @@ scripts/scan_extracted_docx.py
 scripts/scan_lab_structure.py
 scripts/summarize_labs.py
 
+# Python Bytecode
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
 # Secret Seed Keys & Local Vault Runtime State
 .local/
+deploy/.env.production
+deploy/Caddyfile
+deploy/secrets/
 BTL_extracted/
 scripts/deploy/seed_keys.json
 **/seed_keys.json
-

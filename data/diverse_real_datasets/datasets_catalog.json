@@ -1,24 +1,24 @@
 [
   {
-    "name": "GA4GH_Phenopacket_ABCA4_PMID_10874631_II_2.json",
-    "size": 6092,
-    "category": "GA4GH Phenopacket v2 (Clinical Case)",
-    "gene": "ABCA4",
-    "url": "/datasets/GA4GH_Phenopacket_ABCA4_PMID_10874631_II_2.json"
+    "name": "GA4GH_Phenopacket_ALDH2_rs671_KHV.json",
+    "size": 5386,
+    "category": "GA4GH Phenopacket v2 (Molecular Trait)",
+    "gene": "ALDH2",
+    "url": "/datasets/GA4GH_Phenopacket_ALDH2_rs671_KHV.json"
   },
   {
-    "name": "GA4GH_Phenopacket_ADA_PMID_1680289_patient.json",
-    "size": 4978,
-    "category": "GA4GH Phenopacket v2 (Clinical Case)",
-    "gene": "ADA",
-    "url": "/datasets/GA4GH_Phenopacket_ADA_PMID_1680289_patient.json"
+    "name": "GA4GH_Phenopacket_ACTN3_rs1815739_Sprint.json",
+    "size": 5245,
+    "category": "GA4GH Phenopacket v2 (Molecular Trait)",
+    "gene": "ACTN3",
+    "url": "/datasets/GA4GH_Phenopacket_ACTN3_rs1815739_Sprint.json"
   },
   {
-    "name": "GA4GH_Phenopacket_FBN1_PMID_10756346_Patient_B13.json",
-    "size": 6157,
-    "category": "GA4GH Phenopacket v2 (Clinical Case)",
-    "gene": "FBN1",
-    "url": "/datasets/GA4GH_Phenopacket_FBN1_PMID_10756346_Patient_B13.json"
+    "name": "GA4GH_Phenopacket_TAS2R38_rs713598_Taste.json",
+    "size": 5386,
+    "category": "GA4GH Phenopacket v2 (Molecular Trait)",
+    "gene": "TAS2R38",
+    "url": "/datasets/GA4GH_Phenopacket_TAS2R38_rs713598_Taste.json"
   },
   {
     "name": "BCFtools_annotate_multi.vcf",

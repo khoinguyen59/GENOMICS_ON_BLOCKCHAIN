@@ -386,8 +386,9 @@ async function runIndependentStressSuite() {
   // Test 2.7 (VULN-BLIND-02 Fixed): Single transfer gas optimization verified
   const registryContractCode = fs.readFileSync(path.resolve("contracts/GenomicsRegistry.sol"), "utf8");
   const hasSingleTransferOptimization =
-    registryContractCode.includes("if (royaltyReceiver == seller)") &&
-    registryContractCode.includes("paymentToken.safeTransferFrom(msg.sender, seller, totalPrice)");
+    registryContractCode.includes("if (royaltyReceiver == seller || royaltyAmount == 0)") &&
+    registryContractCode.includes("_transferToken(from, seller, totalPrice)") &&
+    registryContractCode.includes("PAYMENT_TOKEN.safeTransferFrom(from, to, amount)");
   assertTest(
     "Gas Optimization (VULN-BLIND-02 Fixed): Single transfer path executed when seller is original creator",
     hasSingleTransferOptimization,

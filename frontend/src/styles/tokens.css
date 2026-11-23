@@ -2,11 +2,12 @@
    GENOCHAIN LUXURY DESCI BIOTECH DESIGN TOKENS
    Default: OpenSea OS2 / Lovable Crisp Light Mode
    Override: Deep Space Obsidian Dark Mode
+   Self-hosted / system font stack (zero third-party CDN leaks under strict CSP)
    ========================================================================== */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
 
 :root,
-[data-theme="light"] {
+[data-theme="light"],
+.theme-light {
   /* ─── Default OpenSea OS2 / Lovable Light Mode (Slate Scale) ─── */
   --bg-app: #f8fafc;
   --bg-mesh-1: rgba(2, 132, 199, 0.03);
@@ -100,7 +101,8 @@
 }
 
 /* ─── Dark Mode Theme Override (Deep Space Obsidian) ─── */
-[data-theme="dark"] {
+[data-theme="dark"],
+.theme-dark {
   --bg-app: #040711;
   --bg-mesh-1: rgba(56, 189, 248, 0.07);
   --bg-mesh-2: rgba(139, 92, 246, 0.06);

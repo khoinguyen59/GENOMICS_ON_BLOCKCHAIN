@@ -3,11 +3,11 @@
   "version": "1.0.0",
   "type": "module",
   "description": "Genomics on Blockchain System",
-  "main": "index.js",
   "scripts": {
     "test": "hardhat test",
     "test:stress": "hardhat run scripts/audit/independent_stress_suite.mjs",
     "build": "hardhat build",
+    "lint:sol": "npx solhint \"contracts/**/*.sol\" -f unix --max-warnings 0",
     "deploy:localhost": "hardhat run scripts/deploy/deploy.js --network localhost",
     "demo:web3": "python scripts/demo/web3_demo.py --offline-demo",
     "audit:hygiene": "python scripts/audit/academic_hygiene_toolkit.py --selftest",
@@ -16,18 +16,23 @@
   },
   "keywords": [],
   "author": "",
-  "license": "ISC",
+  "license": "MIT",
   "devDependencies": {
     "@nomicfoundation/hardhat-toolbox-mocha-ethers": "^3.0.7",
     "@openzeppelin/contracts": "^5.6.1",
+    "axe-core": "^4.10.3",
     "chai": "^5.1.2",
     "ethers": "^6.13.0",
+    "ffjavascript": "^0.3.0",
     "hardhat": "^3.16.0",
     "p-queue": "^10.0.0",
-    "p-retry": "^8.0.1"
+    "p-retry": "^8.0.1",
+    "snarkjs": "^0.7.6",
+    "solhint": "6.2.5"
   },
   "overrides": {
     "serialize-javascript": "^7.0.5",
-    "diff": "^8.0.3"
+    "diff": "^8.0.3",
+    "underscore": "^1.13.8"
   }
 }

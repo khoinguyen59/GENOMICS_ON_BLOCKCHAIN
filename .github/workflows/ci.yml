@@ -1,0 +1,94 @@
+name: GenoChain CI Verification Gate
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: genochain-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Smart Contracts, Crypto, Static Analysis, Python & Frontend Gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Root & Frontend Dependencies
+        run: |
+          npm ci
+          npm --prefix frontend ci
+
+      - name: Install Pinned Python Security & Verification Tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install slither-analyzer==0.11.6 solc-select==1.2.0 web3==7.16.0 cryptography==46.0.3 eth-account==0.14.0
+          solc-select install 0.8.24
+          solc-select use 0.8.24
+
+      - name: Compile Contracts & Enforce EIP-170 / EIP-3860 Bytecode Ceilings
+        run: |
+          npx hardhat compile
+          python scripts/audit/check_eip170.py
+
+      - name: Solhint Static Lint Gate (0 Errors, 0 Warnings)
+        run: npm run lint:sol
+
+      - name: Run Full Hardhat / Mocha Test Suite
+        run: npm test
+
+      - name: Run Independent Adversarial Stress Suite
+        run: npm run test:stress
+
+      - name: Slither Security Scan (0 High / 0 Medium - Runs After Hardhat Tests)
+        run: npm run audit:slither
+
+      - name: Frontend i18n Parity, Dictionary Budget & UI/UX Adversarial Suite
+        run: |
+          node scripts/audit/i18n_parity.mjs
+          node scripts/audit/verify_frontend_dictionaries.mjs
+          node scripts/audit/ui_ux_adversarial_suite.mjs
+
+      - name: Production Dependency Audit (Root & Frontend)
+        run: |
+          npm audit --omit=dev
+          npm --prefix frontend audit --omit=dev
+
+      - name: Academic Hygiene, Web3.py Offline Demo, Python/Shell Syntax & Docker Compose Validation
+        run: |
+          bash -n deploy/kubo-private-init.sh
+          python -m py_compile scripts/demo/capsule_dispatcher.py deploy/ipfs_access_gateway.py deploy/generate_swarm_key.py
+          docker compose -f deploy/docker-compose.vps.yml --env-file deploy/.env.production.example config --quiet
+          docker compose -f deploy/docker-compose.vps.yml --env-file deploy/.env.production.example --profile custodial-dispatcher config --quiet
+          python scripts/audit/academic_hygiene_toolkit.py --selftest
+          python scripts/demo/web3_demo.py --offline-demo
+
+      - name: Verify Production Sovereign Timelock Deploy (capsuleDispatcher == 0x0)
+        run: |
+          TMP_DIR=$(mktemp -d)
+          SKIP_SEEDING=1 SKIP_ZK_CEREMONY=1 DISABLE_FAUCET=1 ENABLE_TIMELOCK=1 TIMELOCK_DELAY_SEC=300 OUTPUT_CONTRACTS_DIR="$TMP_DIR/contracts" LOCAL_VAULT_DIR="$TMP_DIR/local" npx hardhat run scripts/deploy/deploy.js --network default | tee "$TMP_DIR/deploy.log"
+          grep -q "capsuleDispatcher disabled to 0x0000000000000000000000000000000000000000 on-chain" "$TMP_DIR/deploy.log"
+          rm -rf "$TMP_DIR"
+
+      - name: Build Production Frontend Bundle
+        run: npm --prefix frontend run build

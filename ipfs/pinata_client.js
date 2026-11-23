@@ -4,7 +4,7 @@
  */
 
 /**
- * Retrieve configured Pinata JWT from environment or localStorage
+ * Retrieve configured Pinata JWT from sessionStorage or environment variables
  * @returns {string|null}
  */
 export function getPinataJwt() {
@@ -12,10 +12,6 @@ export function getPinataJwt() {
     if (window.sessionStorage) {
       const sessionSaved = window.sessionStorage.getItem("GENO_PINATA_JWT");
       if (sessionSaved && sessionSaved.trim().length > 0) return sessionSaved.trim();
-    }
-    if (window.localStorage) {
-      const saved = window.localStorage.getItem("GENO_PINATA_JWT");
-      if (saved && saved.trim().length > 0) return saved.trim();
     }
   }
   try {
@@ -54,7 +50,8 @@ export function setPinataJwt(token) {
  * @returns {Promise<{ cid: string, pinnedOn: string }|null>}
  */
 export async function pinFileToPinata(fileBytes, fileName, mimeType, customJwt = null) {
-  const jwt = customJwt || getPinataJwt();
+  const rawJwt = customJwt || getPinataJwt();
+  const jwt = typeof rawJwt === "string" ? rawJwt.trim().replace(/^Bearer\s+/i, "").trim() : "";
   if (!jwt || typeof fetch === "undefined") {
     return null;
   }
@@ -63,18 +60,28 @@ export async function pinFileToPinata(fileBytes, fileName, mimeType, customJwt =
     const blob = new Blob([fileBytes], { type: mimeType });
     formData.append("file", blob, fileName);
 
+    const payloadSize = fileBytes?.byteLength ?? fileBytes?.length ?? 0;
+    const isJsonPayload = mimeType === "application/json";
+    const uploadTimeoutMs = isJsonPayload
+      ? 15_000
+      : Math.max(30_000, Math.min(300_000, 15_000 + Math.ceil((payloadSize || 0) / 65536) * 500));
+
     const res = await fetch("https://api.pinata.cloud/pinning/pinFileToIPFS", {
       method: "POST",
       headers: {
         Authorization: `Bearer ${jwt}`,
       },
       body: formData,
+      signal: AbortSignal.timeout(uploadTimeoutMs),
     });
 
     if (res.ok) {
       const json = await res.json();
-      return { cid: json.IpfsHash, pinnedOn: "pinata-cloud" };
+      if (json && typeof json.IpfsHash === "string" && json.IpfsHash.length > 0) {
+        return { cid: json.IpfsHash, pinnedOn: "pinata-cloud" };
+      }
     }
+    console.warn(`Pinata API file upload failed (HTTP ${res.status}): falling back to local Kubo.`);
   } catch (err) {
     console.warn("Pinata API file upload warning:", err.message);
   }
@@ -82,8 +89,9 @@ export async function pinFileToPinata(fileBytes, fileName, mimeType, customJwt =
 }
 
 /**
- * Upload JSON document to Pinata Cloud
- * @param {Object} jsonData 
+ * Upload JSON document to Pinata Cloud using deterministic UTF-8 serialization
+ * so the pinned IPFS bytes and CIDv0 match client-side SHA-256 metadataHash 100%.
+ * @param {Object|string} jsonData 
  * @param {string} [name] 
  * @param {string|null} [customJwt] 
  * @returns {Promise<{ cid: string, pinnedOn: string }|null>}
@@ -93,25 +101,7 @@ export async function pinJsonToPinata(jsonData, name = "metadata.json", customJw
   if (!jwt || typeof fetch === "undefined") {
     return null;
   }
-  try {
-    const res = await fetch("https://api.pinata.cloud/pinning/pinJSONToIPFS", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${jwt}`,
-      },
-      body: JSON.stringify({
-        pinataContent: jsonData,
-        pinataMetadata: { name },
-      }),
-    });
-
-    if (res.ok) {
-      const json = await res.json();
-      return { cid: json.IpfsHash, pinnedOn: "pinata-cloud" };
-    }
-  } catch (err) {
-    console.warn("Pinata JSON upload warning:", err.message);
-  }
-  return null;
+  const canonicalJson = typeof jsonData === "string" ? jsonData : JSON.stringify(jsonData, null, 2);
+  const jsonBytes = new TextEncoder().encode(canonicalJson);
+  return await pinFileToPinata(jsonBytes, name, "application/json", jwt);
 }

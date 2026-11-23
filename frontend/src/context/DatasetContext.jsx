@@ -1,5 +1,6 @@
-import React, { createContext, useContext, useEffect, useMemo } from "react";
+import React, { createContext, useContext, useEffect, useMemo, useRef } from "react";
 import { useWeb3 } from "./Web3Context";
+import { useLanguage } from "./LanguageContext";
 import { useGenomicCatalog } from "../hooks/useGenomicCatalog";
 import { useGenomicFilters } from "../hooks/useGenomicFilters";
 import { useDatasetDecryption } from "../hooks/useDatasetDecryption";
@@ -7,29 +8,39 @@ import { useDatasetDecryption } from "../hooks/useDatasetDecryption";
 const DatasetContext = createContext(null);
 
 export function DatasetProvider({ children }) {
-  const { account, contracts, getContracts, researcherKeyPair, showToast } = useWeb3();
+  const { account, signer, contracts, getContracts, researcherKeyPair, showToast } = useWeb3();
+  const { lang } = useLanguage();
 
-  const catalog = useGenomicCatalog({ account, getContracts });
+  const catalog = useGenomicCatalog({ account, getContracts, lang });
   const filters = useGenomicFilters({ datasets: catalog.datasets });
   const decryption = useDatasetDecryption({
     datasets: catalog.datasets,
     setPurchasedData: catalog.setPurchasedData,
     account,
+    signer,
     contracts,
     researcherKeyPair,
-    showToast
+    showToast,
+    lang
   });
 
   const { setPurchasedData } = catalog;
+  const { handleClearDecryptedData } = decryption;
 
-  // Memory Hygiene (VULN-04 Fixed): DatasetContext disconnect memory clearance
+  // Memory Hygiene (VULN-04 / MED-02 Fixed): DatasetContext disconnect & wallet-switch memory clearance
+  const prevAccountRef = useRef(account);
   useEffect(() => {
+    const prevAddr = prevAccountRef.current ? prevAccountRef.current.toLowerCase() : "";
+    const nextAddr = account ? account.toLowerCase() : "";
     if (!account) {
+      handleClearDecryptedData();
       setPurchasedData([]);
-    } else {
-      // Active account connected; catalog handles on-chain synchronization
+    } else if (prevAddr !== nextAddr) {
+      handleClearDecryptedData();
+      setPurchasedData([]);
     }
-  }, [account, setPurchasedData]);
+    prevAccountRef.current = account;
+  }, [account, handleClearDecryptedData, setPurchasedData]);
 
   const value = useMemo(
     () => ({
@@ -47,6 +58,7 @@ export function DatasetProvider({ children }) {
       disputeCapsule: catalog.disputeCapsule,
       setManualEscrowRelease: catalog.setManualEscrowRelease,
       releaseEscrow: catalog.releaseEscrow,
+      claimDisputeTimeoutRefund: catalog.claimDisputeTimeoutRefund,
 
       // 2. 15-Tier Multi-Attribute Genomic Filters
       filterKeyword: filters.filterKeyword,
@@ -100,7 +112,8 @@ export function DatasetProvider({ children }) {
       decryptionProgress: decryption.decryptionProgress,
       handleDecryptData: decryption.handleDecryptData,
       handleDownloadFile: decryption.handleDownloadFile,
-      handleDownloadPdf: decryption.handleDownloadPdf
+      handleDownloadPdf: decryption.handleDownloadPdf,
+      handleClearDecryptedData: decryption.handleClearDecryptedData
     }),
     [catalog, filters, decryption]
   );

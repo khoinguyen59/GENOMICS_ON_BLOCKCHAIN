@@ -16,20 +16,20 @@ console.log("GENOCHAIN: DIVERSE DATASET COMPREHENSIVE COMPATIBILITY & CRYPTO VER
 console.log("=".repeat(88));
 
 const testTargets = [
-  // 1. GA4GH Phenopackets v2 (JSON)
+  // 1. GA4GH Phenopackets v2 (Non-Pathological Molecular Traits JSON)
   {
-    name: "GA4GH_Phenopacket_ABCA4 (Stargardt)",
-    filePath: "data/diverse_real_datasets/GA4GH_Phenopacket_ABCA4_PMID_10874631_II_2.json",
+    name: "GA4GH_Phenopacket_ALDH2 (Acetaldehyde Metabolism)",
+    filePath: "data/diverse_real_datasets/GA4GH_Phenopacket_ALDH2_rs671_KHV.json",
     category: "GA4GH Phenopacket v2"
   },
   {
-    name: "GA4GH_Phenopacket_ADA (Immune SCID)",
-    filePath: "data/diverse_real_datasets/GA4GH_Phenopacket_ADA_PMID_1680289_patient.json",
+    name: "GA4GH_Phenopacket_ACTN3 (Fast-Twitch Muscle Fiber)",
+    filePath: "data/diverse_real_datasets/GA4GH_Phenopacket_ACTN3_rs1815739_Sprint.json",
     category: "GA4GH Phenopacket v2"
   },
   {
-    name: "GA4GH_Phenopacket_FBN1 (Marfan Locus)",
-    filePath: "data/diverse_real_datasets/GA4GH_Phenopacket_FBN1_PMID_10756346_Patient_B13.json",
+    name: "GA4GH_Phenopacket_TAS2R38 (Bitter Taste Receptor)",
+    filePath: "data/diverse_real_datasets/GA4GH_Phenopacket_TAS2R38_rs713598_Taste.json",
     category: "GA4GH Phenopacket v2"
   },
 

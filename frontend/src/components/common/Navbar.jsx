@@ -1,8 +1,10 @@
-import React from "react";
+import React, { useState, useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import { useWeb3 } from "../../context/Web3Context";
 import { useLanguage } from "../../context/LanguageContext";
 import { useTheme } from "../../context/ThemeContext";
 import { useDatasets } from "../../context/DatasetContext";
+import { useModalFocusTrap } from "../../hooks/useModalFocusTrap";
 import {
   GenoTokenIcon,
   SearchGlassIcon,
@@ -26,14 +28,56 @@ export default function Navbar() {
     connectWallet,
     disconnectWallet,
     claimFaucet,
+    faucetEnabled,
+    faucetVoucherRequired,
+    showFaucetVoucherModal,
+    setShowFaucetVoucherModal,
     showToast
   } = useWeb3();
 
   const { filterKeyword, setFilterKeyword } = useDatasets();
   const { lang, changeLanguage, t } = useLanguage();
   const { theme, setTheme } = useTheme();
+  const [voucherNonce, setVoucherNonce] = useState("");
+  const [voucherDeadline, setVoucherDeadline] = useState("");
+  const [voucherSignature, setVoucherSignature] = useState("");
+  const [submittingVoucher, setSubmittingVoucher] = useState(false);
+
+  const voucherModalRef = useModalFocusTrap(showFaucetVoucherModal, () => setShowFaucetVoucherModal(false));
+  const prevVoucherRequiredRef = useRef(faucetVoucherRequired);
+
+  useEffect(() => {
+    if (
+      showFaucetVoucherModal &&
+      (!faucetEnabled || (prevVoucherRequiredRef.current && !faucetVoucherRequired))
+    ) {
+      setShowFaucetVoucherModal(false);
+    }
+    prevVoucherRequiredRef.current = faucetVoucherRequired;
+  }, [faucetEnabled, faucetVoucherRequired, showFaucetVoucherModal, setShowFaucetVoucherModal]);
+
+  const handleSubmitFaucetVoucher = async () => {
+    setSubmittingVoucher(true);
+    try {
+      const res = await claimFaucet({
+        voucher: {
+          nonce: voucherNonce,
+          deadline: voucherDeadline,
+          signature: voucherSignature
+        }
+      });
+      if (res?.ok) {
+        setVoucherNonce("");
+        setVoucherDeadline("");
+        setVoucherSignature("");
+      }
+    } finally {
+      setSubmittingVoucher(false);
+    }
+  };
 
   return (
+    <>
     <header className="os2-top-navbar">
       {/* Left: OpenSea OS2 Search Input */}
       <div className="os2-top-search-wrap">
@@ -110,10 +154,19 @@ export default function Navbar() {
         {account ? (
           <div className="os2-wallet-cluster">
             <button
+              id="navbar-faucet-btn"
               type="button"
               className="os2-faucet-btn"
-              onClick={claimFaucet}
-              title={t("faucetClaimTitle")}
+              onClick={() => claimFaucet()}
+              disabled={!faucetEnabled}
+              aria-disabled={!faucetEnabled}
+              title={
+                !faucetEnabled
+                  ? t("faucetDisabledMsg")
+                  : faucetVoucherRequired
+                    ? t("faucetVoucherModalTitle")
+                    : t("faucetClaimTitle")
+              }
             >
               <GenoTokenIcon size={14} color="#fbbf24" />
               <span>{t("faucetClaim")}</span>
@@ -128,9 +181,14 @@ export default function Navbar() {
                 type="button"
                 className="os2-wallet-addr"
                 onClick={() => {
-                  if (navigator.clipboard) {
-                    navigator.clipboard.writeText(account);
-                    showToast(t("copiedToast"));
+                  if (navigator.clipboard?.writeText) {
+                    Promise.resolve(navigator.clipboard.writeText(account))
+                      .then(() => {
+                        showToast(t("copiedToast"));
+                      })
+                      .catch(() => {
+                        showToast(lang === "vi" ? "Không có quyền ghi bộ nhớ tạm." : "Clipboard permission denied.", "error");
+                      });
                   }
                 }}
                 title={account}
@@ -221,9 +279,12 @@ export default function Navbar() {
           title={t("navProfile")}
           aria-label={t("navProfile")}
           onClick={() => {
-            if (account && navigator.clipboard) {
-              navigator.clipboard.writeText(account).catch(() => {});
-              showToast(t("profileCopiedMsg"));
+            if (account && navigator.clipboard?.writeText) {
+              Promise.resolve(navigator.clipboard.writeText(account))
+                .then(() => showToast(t("profileCopiedMsg")))
+                .catch(() => {
+                  showToast(lang === "vi" ? "Không có quyền ghi bộ nhớ tạm." : "Clipboard permission denied.", "error");
+                });
             }
             setUserRole("donor");
             setDonorTab("vault");
@@ -235,5 +296,114 @@ export default function Navbar() {
         </button>
       </div>
     </header>
+
+      {/* Voucher-Gated Faucet Claim Modal rendered via Portal to document.body (outside <header> stacking context) */}
+      {showFaucetVoucherModal && typeof document !== "undefined" && createPortal(
+        <div
+          className="terminal-modal-backdrop"
+          onClick={() => setShowFaucetVoucherModal(false)}
+        >
+          <div
+            ref={voucherModalRef}
+            tabIndex={-1}
+            className="terminal-modal-window"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="faucet-voucher-modal-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="modal-header-bar" role="region" aria-label={t("faucetVoucherModalTitle")}>
+              <div className="modal-title-left">
+                <GenoTokenIcon size={16} color="#fbbf24" />
+                <h2 id="faucet-voucher-modal-title" style={{ fontSize: "14px", fontWeight: 700, margin: 0 }}>
+                  {t("faucetVoucherModalTitle")}
+                </h2>
+              </div>
+              <button
+                type="button"
+                className="modal-close-btn"
+                title={t("close")}
+                aria-label={t("close")}
+                onClick={() => setShowFaucetVoucherModal(false)}
+              >
+                <CloseCrossIcon size={16} color="#94a3b8" />
+              </button>
+            </div>
+
+            <div className="modal-body" role="region" aria-label={t("faucetVoucherNonceLabel")} style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+              <p style={{ fontSize: "12px", color: "var(--text-secondary)", lineHeight: "1.5", margin: 0 }}>
+                {t("faucetVoucherModalDesc")}
+              </p>
+              <div className="form-group-row">
+                <div className="form-field" style={{ marginBottom: 0 }}>
+                  <label htmlFor="faucet-voucher-nonce-input" className="field-label">
+                    {t("faucetVoucherNonceLabel")}
+                  </label>
+                  <input
+                    id="faucet-voucher-nonce-input"
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    className="field-input"
+                    placeholder="1"
+                    value={voucherNonce}
+                    onChange={(e) => setVoucherNonce(e.target.value)}
+                  />
+                </div>
+                <div className="form-field" style={{ marginBottom: 0 }}>
+                  <label htmlFor="faucet-voucher-deadline-input" className="field-label">
+                    {t("faucetVoucherDeadlineLabel")}
+                  </label>
+                  <input
+                    id="faucet-voucher-deadline-input"
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    className="field-input"
+                    placeholder="1795000000"
+                    value={voucherDeadline}
+                    onChange={(e) => setVoucherDeadline(e.target.value)}
+                  />
+                </div>
+              </div>
+              <div className="form-field" style={{ marginBottom: 0 }}>
+                <label htmlFor="faucet-voucher-sig-input" className="field-label">
+                  {t("faucetVoucherSigLabel")}
+                </label>
+                <input
+                  id="faucet-voucher-sig-input"
+                  type="text"
+                  className="field-input"
+                  style={{ fontFamily: "var(--font-mono)", fontSize: "11.5px" }}
+                  placeholder="0x..."
+                  value={voucherSignature}
+                  onChange={(e) => setVoucherSignature(e.target.value)}
+                />
+              </div>
+            </div>
+
+            <div className="modal-footer-bar" role="region" aria-label={t("faucetVoucherSubmitBtn")}>
+              <button
+                type="button"
+                className="btn-terminal btn-terminal-ghost"
+                onClick={() => setShowFaucetVoucherModal(false)}
+              >
+                {t("cancel")}
+              </button>
+              <button
+                id="btn-submit-faucet-voucher"
+                type="button"
+                className="btn-terminal btn-terminal-primary"
+                disabled={submittingVoucher}
+                onClick={handleSubmitFaucetVoucher}
+              >
+                <span>{submittingVoucher ? "..." : t("faucetVoucherSubmitBtn")}</span>
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+    </>
   );
 }

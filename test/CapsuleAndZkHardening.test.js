@@ -597,10 +597,10 @@ describe("Protocol Hardening: Canonical Key Capsule Validation, ZK Epoch Isolati
       const epoch1 = await zkVerifier.vkEpoch();
       expect(epoch1).to.equal(epoch0 + 1n);
 
-      // Prior verified trait claims MUST persist across VK rotations!
-      expect(await zkVerifier.hasVerifiedVariant(commitment, donor1.address)).to.equal(true);
-      expect(await zkVerifier.verifiedCommitments(commitment, donor1.address)).to.equal(true);
-      expect(await zkVerifier.hasVerifiedTraitVariant(traitId, commitment, donor1.address)).to.equal(true);
+      // Prior verified trait claims MUST be invalidated under the rotated VK epoch until re-proven!
+      expect(await zkVerifier.hasVerifiedVariant(commitment, donor1.address)).to.equal(false);
+      expect(await zkVerifier.verifiedCommitments(commitment, donor1.address)).to.equal(false);
+      expect(await zkVerifier.hasVerifiedTraitVariant(traitId, commitment, donor1.address)).to.equal(false);
 
       // Create a second bounty to test replay rejection and re-proving under new VK
       await (

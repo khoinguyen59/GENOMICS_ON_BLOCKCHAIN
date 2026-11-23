@@ -1,7 +1,8 @@
 import React from "react";
-import { useWeb3 } from "../../context/Web3Context";
+import { useWeb3, CONFIGURED_CHAIN_ID, CONFIGURED_CHAIN_NAME } from "../../context/Web3Context";
 import { useLanguage } from "../../context/LanguageContext";
 import { useDatasets } from "../../context/DatasetContext";
+import { formatConfiguredChainText } from "../../utils/asyncResilience";
 import {
   GenoLogoIcon,
   VerifiedBadgeIcon,
@@ -52,7 +53,13 @@ export default function DatasetCatalogTable({ onPurchase }) {
         </thead>
         <tbody>
           {filteredDatasets.map((ds) => {
-            const isPurchased = purchasedData.some((p) => p.dataId === ds.dataId);
+            const purchasedItem = purchasedData.find((p) => p.dataId === ds.dataId);
+            const isPurchased = Boolean(purchasedItem);
+            const isEscrowDisputed = Boolean(purchasedItem?.escrowInfo?.isDisputed);
+            const isEscrowPendingDelivery = Boolean(
+              purchasedItem?.isEscrowPending &&
+              !(purchasedItem?.capsuleDelivered ?? purchasedItem?.escrowInfo?.capsuleDelivered)
+            );
             const isOwner = account && ds.owner.toLowerCase() === account.toLowerCase();
 
             return (
@@ -65,9 +72,25 @@ export default function DatasetCatalogTable({ onPurchase }) {
                     </div>
                     <div>
                       <div className="gene-symbol-row">
-                        <span className="gene-symbol">{ds.geneSymbol || ds.gene}</span>
-                        <span className="rsid-chip">{ds.rsId || "rs671"}</span>
-                        <VerifiedBadgeIcon size={13} color="#10b981" />
+                        <span className="gene-symbol">{ds.geneSymbol || ds.gene || "—"}</span>
+                        <span className="rsid-chip">{ds.rsId || "—"}</span>
+                        {ds.metadataVerificationStatus === "verified" && !ds.metadataTampered ? (
+                          <span data-verification-badge="verified" title={t("evmSha256Match") || "EVM SHA-256 MATCH"} style={{ display: "inline-flex", alignItems: "center" }}>
+                            <VerifiedBadgeIcon size={13} color="#10b981" />
+                          </span>
+                        ) : ds.metadataTampered || ds.metadataVerificationStatus === "tampered" ? (
+                          <span data-verification-badge="tampered" title={t("evmMetadataTamperWarn")} style={{ display: "inline-flex", alignItems: "center" }}>
+                            <AlertTriangleIcon size={13} color="var(--accent-rose)" />
+                          </span>
+                        ) : (
+                          <span
+                            data-verification-badge={ds.metadataVerificationStatus || "unverified"}
+                            title={ds.metadataVerificationStatus === "unanchored" ? t("evmMetadataUnanchoredBadge") : t("evmMetadataUnverifiedBadge")}
+                            style={{ display: "inline-flex", alignItems: "center" }}
+                          >
+                            <AlertTriangleIcon size={13} color="var(--accent-amber)" />
+                          </span>
+                        )}
                       </div>
                       <div className="disease-subtext">
                         {getLocalizedTitle ? getLocalizedTitle(ds, language) : ds.disease}
@@ -77,7 +100,7 @@ export default function DatasetCatalogTable({ onPurchase }) {
                 </td>
                 <td>
                   <div style={{ display: "flex", flexDirection: "column", gap: "3px" }}>
-                    <span className="chrom-chip">{ds.chromosome || "chr12"}</span>
+                    <span className="chrom-chip">{ds.chromosome || "—"}</span>
                     <span
                       style={{
                         fontSize: "11px",
@@ -141,7 +164,7 @@ export default function DatasetCatalogTable({ onPurchase }) {
                     {ds.price} $GENO
                   </div>
                   <div className="price-sub" style={{ fontSize: "11px" }}>
-                    {t("royaltyNote")}
+                    {`${Number(((ds.royaltyBps ?? 1000) / 100).toFixed(2))}% ${t("royaltyNote")}`}
                   </div>
                 </td>
                 <td>
@@ -161,24 +184,59 @@ export default function DatasetCatalogTable({ onPurchase }) {
                       <span className="owner-chip">{t("btnYourDataset")}</span>
                     ) : isPurchased ? (
                       <button
-                        className="btn-terminal btn-terminal-success"
-                        style={{ height: "30px", padding: "0 10px", fontSize: "12px" }}
+                        className={`btn-terminal ${isEscrowDisputed || isEscrowPendingDelivery ? "" : "btn-terminal-success"}`}
+                        style={
+                          isEscrowDisputed
+                            ? {
+                                height: "30px",
+                                padding: "0 10px",
+                                fontSize: "12px",
+                                color: "var(--accent-rose-text)",
+                                borderColor: "var(--accent-rose)",
+                                background: "rgba(239, 68, 68, 0.14)"
+                              }
+                            : isEscrowPendingDelivery
+                              ? {
+                                  height: "30px",
+                                  padding: "0 10px",
+                                  fontSize: "12px",
+                                  color: "var(--accent-amber-text)",
+                                  borderColor: "var(--accent-amber)",
+                                  background: "rgba(245, 158, 11, 0.14)"
+                                }
+                              : { height: "30px", padding: "0 10px", fontSize: "12px" }
+                        }
                         onClick={() => setResearcherTab("licensed")}
                         type="button"
                       >
-                        <InMemoryDecryptIcon size={13} />
-                        <span>{t("btnPurchased")}</span>
+                        {isEscrowDisputed ? (
+                          <>
+                            <AlertTriangleIcon size={13} color="var(--accent-rose-text)" />
+                            <span>{t("escrowStatusDisputed")}</span>
+                          </>
+                        ) : isEscrowPendingDelivery ? (
+                          <>
+                            <RefreshSpinIcon size={13} />
+                            <span>{t("escrowPendingDelivery")}</span>
+                          </>
+                        ) : (
+                          <>
+                            <InMemoryDecryptIcon size={13} />
+                            <span>{t("btnPurchased")}</span>
+                          </>
+                        )}
                       </button>
                     ) : (
                       <button
                         className="btn-terminal btn-terminal-primary"
                         style={{ height: "30px", padding: "0 10px", fontSize: "12px" }}
                         onClick={() => onPurchase?.(ds)}
-                        disabled={ds.status !== "Active"}
+                        disabled={ds.status !== "Active" || Boolean(ds.metadataTampered)}
+                        title={ds.metadataTampered ? t("evmMetadataTamperWarn") : undefined}
                         type="button"
                       >
                         <SealedCipherIcon size={12} />
-                        <span>{t("btnPurchase")}</span>
+                        <span>{ds.metadataTampered ? t("btnMetadataTampered") : t("btnPurchase")}</span>
                       </button>
                     )}
                     <button
@@ -213,7 +271,11 @@ export default function DatasetCatalogTable({ onPurchase }) {
                       <span style={{ color: "var(--accent-rose-text)" }}>{t("rpcOfflineTitle") || "Mất kết nối Node RPC Blockchain"}</span>
                     </div>
                     <div style={{ fontSize: "12px", color: "var(--text-secondary)", marginBottom: "12px", lineHeight: "1.5" }}>
-                      {t("rpcOfflineDesc") || "Không thể tải danh mục dữ liệu do lỗi kết nối node EVM. Vui lòng kiểm tra Hardhat Node."} ({catalogError})
+                      {formatConfiguredChainText(
+                        t("rpcOfflineDesc") || "Không thể tải danh mục dữ liệu do lỗi kết nối node EVM.",
+                        CONFIGURED_CHAIN_ID,
+                        CONFIGURED_CHAIN_NAME
+                      )} ({catalogError})
                     </div>
                     <button
                       type="button"

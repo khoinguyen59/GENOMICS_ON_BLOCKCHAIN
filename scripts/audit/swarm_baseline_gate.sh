@@ -1,18 +1,33 @@
 #!/usr/bin/env bash
-# Baseline gate for the 6-agent isomorphic swarm audit.
-# Lead Agent runs this ONCE so the swarm shares one ground-truth log
-# and does not race on hardhat artifacts/cache.
+# Baseline gate for the multi-agent verification harness.
+# Resolves portable Node v22.x (nvm) and project Python .venv cleanly with zero machine-hardcoded paths.
 set -u
-# ENV FIX (measured 2026-11-05): the broken Roaming/npm shim and Anaconda's node.exe
-# shadow the real toolchain, which made every node/npm/npx call die with MODULE_NOT_FOUND
-# in ~0s. A previous run of this script produced 11 bogus exit=1 rows. Do not trust that log.
-export PATH="/c/nvm4w1/nodejs:$PATH"
-cd "$(dirname "$0")/../.." || exit 1
+
+REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+cd "$REPO_ROOT" || exit 1
+
+if [ -n "${NVM_NODE22_BIN:-}" ] && [ -d "$NVM_NODE22_BIN" ]; then
+  export PATH="$NVM_NODE22_BIN:$PATH"
+elif [ -d "${LOCALAPPDATA:-}/nvm/v22.15.0" ]; then
+  export PATH="${LOCALAPPDATA}/nvm/v22.15.0:$PATH"
+elif [ -d "${HOME:-}/AppData/Local/nvm/v22.15.0" ]; then
+  export PATH="${HOME}/AppData/Local/nvm/v22.15.0:$PATH"
+fi
+
+if [ -x "$REPO_ROOT/.venv/Scripts/python.exe" ]; then
+  PYTHON_BIN="$REPO_ROOT/.venv/Scripts/python.exe"
+elif [ -x "$REPO_ROOT/.venv/bin/python" ]; then
+  PYTHON_BIN="$REPO_ROOT/.venv/bin/python"
+else
+  PYTHON_BIN="$(command -v python3 || command -v python)"
+fi
+
 LOG_DIR=docs/reports/swarm_audit
 mkdir -p "$LOG_DIR"
 OUT="$LOG_DIR/00_baseline_gate.log"
 rm -f "$LOG_DIR/00_baseline_gate.DONE"
 : > "$OUT"
+: > "$LOG_DIR/00_baseline_summary.txt"
 
 run() {
   local label="$1"; shift
@@ -21,30 +36,31 @@ run() {
     echo "########## $label ##########"
     echo "\$ $*"
   } >> "$OUT" 2>&1
-  local t0=$(date +%s)
+  local t0
+  t0=$(date +%s)
   "$@" >> "$OUT" 2>&1
   local code=$?
-  local t1=$(date +%s)
+  local t1
+  t1=$(date +%s)
   {
     echo "---- exit=$code  elapsed=$((t1-t0))s  ----"
   } >> "$OUT" 2>&1
   echo "$label exit=$code elapsed=$((t1-t0))s" >> "$LOG_DIR/00_baseline_summary.txt"
 }
 
-: > "$LOG_DIR/00_baseline_summary.txt"
-
-run "T0-toolchain" bash -c "node -v; npm -v; npx hardhat --version"
-run "T1-npm-test"   npx hardhat test
-run "T2-stress"     npx hardhat run scripts/audit/independent_stress_suite.mjs
+run "T0-toolchain"      bash -c "node -v; npm -v; npx hardhat --version; \"$PYTHON_BIN\" --version"
+run "T1-npm-test"       npx hardhat test
+run "T2-stress"         npx hardhat run scripts/audit/independent_stress_suite.mjs
 run "T3-frontend-build" npm --prefix frontend run build
-run "T4-audit-root" npm audit --omit=dev
+run "T4-audit-root"     npm audit --omit=dev
 run "T4-audit-frontend" npm --prefix frontend audit --omit=dev
-run "T5-solhint"    npx --yes solhint "contracts/**/*.sol"
-run "T6-gitgrep"    bash -c "git grep -i 'QmGeno' -- frontend/ crypto/ ipfs/ || echo NO_QMGENO_HIT"
-run "T6-gitgrep2"   bash -c "git grep -nE 'rawContent|capsuleKey' -- frontend/src/ || echo NO_PLAINTEXT_HIT"
-run "T6-gitgrep3"   bash -c "git grep -nE 'datasets\.length[[:space:]]*\+[[:space:]]*1' -- frontend/src/ || echo NO_STATE_FAKE_HIT"
-run "T7-web3-demo"  python scripts/demo/web3_demo.py
-run "T8-hygiene"    python scripts/audit/academic_hygiene_toolkit.py --selftest
+run "T5-solhint"        npm run lint:sol
+run "T6-eip170"         "$PYTHON_BIN" scripts/audit/check_eip170.py
+run "T7-gitgrep"        bash -c "git grep -i 'QmGeno' -- frontend/ crypto/ ipfs/ || echo NO_QMGENO_HIT"
+run "T7-gitgrep2"       bash -c "git grep -nE 'rawContent|capsuleKey' -- frontend/src/ || echo NO_PLAINTEXT_HIT"
+run "T7-gitgrep3"       bash -c "git grep -nE 'datasets\.length[[:space:]]*\+[[:space:]]*1' -- frontend/src/ || echo NO_STATE_FAKE_HIT"
+run "T8-web3-demo"      "$PYTHON_BIN" scripts/demo/web3_demo.py --offline-demo
+run "T9-hygiene"        "$PYTHON_BIN" scripts/audit/academic_hygiene_toolkit.py --selftest
 
 echo "" >> "$OUT"
 echo "########## BASELINE COMPLETE ##########" >> "$OUT"

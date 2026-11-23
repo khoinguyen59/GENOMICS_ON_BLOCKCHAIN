@@ -54,9 +54,9 @@ describe("AGENT2 :: Reentrancy vectors via contracts/mocks (ReentrancyGuard + CE
 
     const res = await capture(() => attacker.registerWithRegistry(
       ethers.keccak256(ethers.toUtf8Bytes("REENT-NFT")),
-      "QmReentNftRaw1111111111111111111111111111111",
-      "QmReentNftSum11111111111111111111111111111111",
-      "QmReentNftMeta1111111111111111111111111111111",
+      "QmXdHckBFHQrgCHErrE9YgUVXPG3UGtwqaqAyu5wpAUTd8",
+      "QmR7j9G4cp5mHAPKg5n8BRt6LDfwn4RWDtxy8iNhhztZAu",
+      "QmYodg1czJkdkVUcovTyD8L5RVmbyHcWXLqJ9tVoUzri7k",
       "ipfs://reent", price, 86400, 500
     ));
     expect(res.ok, res.error).to.equal(true); // the outer registration is legitimate
@@ -88,9 +88,9 @@ describe("AGENT2 :: Reentrancy vectors via contracts/mocks (ReentrancyGuard + CE
 
     const reg = await registry.connect(seller).registerGenomicData(
       ethers.keccak256(ethers.toUtf8Bytes("REENT-TOKEN")),
-      "QmReentTokRaw11111111111111111111111111111111",
-      "QmReentTokSum1111111111111111111111111111111",
-      "QmReentTokMeta11111111111111111111111111111",
+      "QmbPJ5txk7Ur9Srm9gTxJwtCRSr2x15o2cVX9Gyaxr69bN",
+      "QmYBu2JuShpiCjkH28cQcg7R3n1TrH2QUFqbo4EssLHksi",
+      "QmeBY3gVap6BTXxHCo8ENhqA96rWcKrVZ4SHhdVisgoeba",
       "ipfs://reent-tok", price, 86400, 1000
     );
     expect((await reg.wait()).status).to.equal(1);
@@ -133,9 +133,9 @@ describe("AGENT2 :: Reentrancy vectors via contracts/mocks (ReentrancyGuard + CE
 
     const reg = await registry.connect(seller).registerGenomicData(
       ethers.keccak256(ethers.toUtf8Bytes("REENT-ESCROW")),
-      "QmReentEscRaw11111111111111111111111111111111",
-      "QmReentEscSum1111111111111111111111111111111",
-      "QmReentEscMeta111111111111111111111111111111",
+      "QmWMX1dWvutgXg1ppnL8XP9k13L4ug74ih7S4Vv2konQYM",
+      "QmfCqvLAKGS6NShd97YqAYQpsqrsKMre2cLVdWQUtEaHwV",
+      "QmehJ1o3bpMEWCEoYwzYfVAChyZUAzwjorti83Y7DJ3XJb",
       "ipfs://reent-esc", price, 86400, 1000
     );
     expect((await reg.wait()).status).to.equal(1);
@@ -188,9 +188,9 @@ describe("AGENT2 :: Reentrancy vectors via contracts/mocks (ReentrancyGuard + CE
     for (const seed of ["W1", "W2"]) {
       const r = await registry.connect(seller).registerGenomicData(
         ethers.keccak256(ethers.toUtf8Bytes(seed)),
-        `QmWorker${seed}111111111111111111111111111111111`,
-        `QmWorkerS${seed}11111111111111111111111111111111`,
-        `QmWorkerM${seed}1111111111111111111111111111111`,
+        "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG",
+        "QmZ4tDuvesekSs4qM5ZBKpXiZGun7S2CYtEZRB3DYXkjGx",
+        "QmPZ9qBzzyAtRaQQQUZr6xHS6wVfETRR249s63UME18znJ",
         `ipfs://w-${seed}`, price, 86400, 1000
       );
       expect((await r.wait()).status).to.equal(1);

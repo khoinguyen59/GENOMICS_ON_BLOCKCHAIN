@@ -21,7 +21,7 @@ import hre from "hardhat";
 const E18 = 10n ** 18n;
 const price = 100n * E18;
 const DISPUTE = 86400;
-const CID_OK = "QmEscRaw11111111111111111111111111111111111";
+const CID_OK = "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG";
 const REAL_CAPSULE =
   '{"version":"GENO-PRE-v1","keyCipher":"' + "cd".repeat(512) + '"}';
 
@@ -359,16 +359,16 @@ describe("AGENT2X :: Custody, boundary and spec-conformance adversarial layer (r
     ).to.satisfy((s) => BigInt(s.minted) === BigInt(squad.length) * 1000n * E18);
   });
 
-  it("A2X-R04 REQUIRED: royalty must respect EIP-2981 feeDenominator bounds (<= 10000 bps)", async function () {
+  it("A2X-R04 REQUIRED: royalty must respect MAX_ROYALTY_BPS ceiling (<= 5000 bps = 50%)", async function () {
     const expectedTokenId = await nft.nextTokenId();
     const r = await capture(() => registry.connect(seller).registerGenomicData(
-      ethers.keccak256(ethers.toUtf8Bytes("A2X-100PCT")), CID_OK, CID_OK, CID_OK,
-      "ipfs://x", price, 86400, 10000 // 100% royalty
+      ethers.keccak256(ethers.toUtf8Bytes("A2X-50PCT")), CID_OK, CID_OK, CID_OK,
+      "ipfs://x", price, 86400, 5000 // MAX_ROYALTY_BPS = 50% ceiling
     ));
     const info = r.ok ? await nft.royaltyInfo(expectedTokenId, price) : { receiver: null, amount: 0n };
     expect(
       { accepted: r.ok, royaltyBpsApplied: info.amount === 0n ? 0 : Number((info.amount * 10000n) / price), revert: r.error },
-      "registerGenomicData(uint96 royaltyBps) enforces EIP-2981 <= 10000 bps bound"
-    ).to.satisfy((s) => s.accepted === true && s.royaltyBpsApplied === 10000);
+      "registerGenomicData(uint96 royaltyBps) enforces MAX_ROYALTY_BPS <= 5000 bps bound"
+    ).to.satisfy((s) => s.accepted === true && s.royaltyBpsApplied === 5000);
   });
 });

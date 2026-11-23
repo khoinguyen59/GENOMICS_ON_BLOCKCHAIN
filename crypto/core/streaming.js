@@ -1,9 +1,9 @@
 /**
  * @file streaming.js
- * @description 64KB chunked streaming encryption/decryption architecture following GA4GH Crypt4GH
- *              O(1) memory optimization principles, upgraded to FIPS 140-3 standards with
- *              AES-256-GCM and RSA-OAEP 2048-bit on native W3C Web Crypto API, leveraging
- *              hardware acceleration (Intel AES-NI and ARMv8 Cryptography Extensions).
+ * @description 64KB chunked AEAD framing encryption/decryption architecture inspired by GA4GH Crypt4GH
+ *              block framing (Blob.slice per-chunk slicing with a bounded 500MB payload ceiling),
+ *              upgraded to FIPS 140-3 standards with AES-256-GCM and RSA-OAEP 2048-bit on native
+ *              W3C Web Crypto API, leveraging hardware acceleration (Intel AES-NI and ARMv8 Crypto).
  * @module crypto/core/streaming
  */
 
@@ -26,12 +26,25 @@ if (!cryptoObj || !cryptoObj.subtle) {
   throw new Error("Web Crypto API (crypto.subtle) is required but not available in this environment.");
 }
 
-function buildChunkAad(chunkIndex, chunkCount, totalPlaintextSize) {
+function buildChunkAadV1(chunkIndex, chunkCount, totalPlaintextSize) {
   const aad = new Uint8Array(16);
   const view = new DataView(aad.buffer);
   view.setUint32(0, chunkIndex >>> 0, false);
   view.setUint32(4, chunkCount >>> 0, false);
   view.setBigUint64(8, BigInt(totalPlaintextSize), false);
+  return aad;
+}
+
+function buildChunkAadV2(chunkSize, chunkIndex, chunkCount, totalPlaintextSize) {
+  // 25-byte AAD: magic[4] ("GNC2") || chunkSize[4] || chunkIndex[4] || chunkCount[4] || totalPlaintextSize[8] || isFinal[1]
+  const aad = new Uint8Array(25);
+  aad.set([0x47, 0x4E, 0x43, 0x32], 0);
+  const view = new DataView(aad.buffer);
+  view.setUint32(4, chunkSize >>> 0, false);
+  view.setUint32(8, chunkIndex >>> 0, false);
+  view.setUint32(12, chunkCount >>> 0, false);
+  view.setBigUint64(16, BigInt(totalPlaintextSize), false);
+  aad[24] = chunkIndex === chunkCount - 1 ? 1 : 0;
   return aad;
 }
 
@@ -49,9 +62,16 @@ function buildChunkAad(chunkIndex, chunkCount, totalPlaintextSize) {
  * @param {CryptoKey} [options.key] Optional symmetric key
  * @returns {Promise<{ payload: Uint8Array, rawDataHash: string, keyHex: string, activeKey: CryptoKey, chunkCount: number, totalPlaintextSize: number }>}
  */
+const MAX_ALLOWED_PLAIN_BYTES = 500 * 1024 * 1024; // 500MB safety ceiling
+const MAX_CHUNK_SIZE_BYTES = 16 * 1024 * 1024; // 16MB per-chunk ceiling
+const MAX_CHUNK_COUNT = 500000; // Symmetric encrypt/decrypt chunk count ceiling (L-11)
+
 export async function encryptGenomicDataChunked(data, options = {}) {
   const safeOptions = options || {};
-  const chunkSize = safeOptions.chunkSize || 64 * 1024; // 64KB chunks
+  const chunkSize = safeOptions.chunkSize === undefined ? 64 * 1024 : safeOptions.chunkSize; // 64KB default chunks
+  if (!Number.isInteger(chunkSize) || chunkSize <= 0 || chunkSize > MAX_CHUNK_SIZE_BYTES) {
+    throw new Error(`Invalid chunkSize: expected integer between 1 and ${MAX_CHUNK_SIZE_BYTES} bytes`);
+  }
   const onProgress = safeOptions.onProgress || (() => {});
   const activeKey =
     typeof safeOptions.key === "string"
@@ -89,21 +109,28 @@ export async function encryptGenomicDataChunked(data, options = {}) {
     totalBytes = 0;
   }
 
+  if (totalBytes > MAX_ALLOWED_PLAIN_BYTES) {
+    throw new Error("Plaintext size exceeds maximum allowed safe limit");
+  }
+
   const chunkCount = Math.ceil(totalBytes / chunkSize) || 1;
+  if (chunkCount > MAX_CHUNK_COUNT) {
+    throw new Error(`Chunk count (${chunkCount}) exceeds maximum allowed safe limit (${MAX_CHUNK_COUNT})`);
+  }
   const {
     invocationSequence,
     nonceBudgetRemaining,
     keyHex,
   } = await consumeKeyInvocationBudget(activeKey, chunkCount);
 
-  // Header: MAGIC (4) "GNC1" + ChunkSize (4) + ChunkCount (4) + TotalPlaintextSize (8) = 20 bytes
+  // Header: MAGIC (4) "GNC2" + ChunkSize (4) + ChunkCount (4) + TotalPlaintextSize (8) = 20 bytes
   const headerSize = 20;
   const totalCiphertextSize = totalBytes + chunkCount * 32;
   const fullPayload = new Uint8Array(headerSize + totalCiphertextSize);
   const view = new DataView(fullPayload.buffer, fullPayload.byteOffset, fullPayload.byteLength);
 
-  // 'GNC1' = 0x47, 0x4E, 0x43, 0x31
-  fullPayload.set([0x47, 0x4E, 0x43, 0x31], 0);
+  // 'GNC2' = 0x47, 0x4E, 0x43, 0x32 (binds magic, chunkSize, chunkIndex, chunkCount, totalBytes, isFinal in AAD)
+  fullPayload.set([0x47, 0x4E, 0x43, 0x32], 0);
   view.setUint32(4, chunkSize, false);
   view.setUint32(8, chunkCount, false);
   view.setBigUint64(12, BigInt(totalBytes), false);
@@ -122,7 +149,7 @@ export async function encryptGenomicDataChunked(data, options = {}) {
     }
 
     const chunkIv = cryptoObj.getRandomValues(new Uint8Array(12));
-    const additionalData = buildChunkAad(i, chunkCount, totalBytes);
+    const additionalData = buildChunkAadV2(chunkSize, i, chunkCount, totalBytes);
     const encBuf = await cryptoObj.subtle.encrypt(
       { name: "AES-GCM", iv: chunkIv, additionalData },
       activeKey,
@@ -182,13 +209,15 @@ export async function decryptGenomicDataChunked(payloadBytes, key, options = {})
     ? payloadBytes
     : new Uint8Array(payloadBytes);
 
-  // Check MAGIC 'GNC1'
-  const isChunked =
+  // Check MAGIC 'GNC2' (current) or 'GNC1' (legacy backward-compatible)
+  const isGncPrefix =
     bytes.length >= 20 &&
     bytes[0] === 0x47 &&
     bytes[1] === 0x4E &&
-    bytes[2] === 0x43 &&
-    bytes[3] === 0x31;
+    bytes[2] === 0x43;
+  const isGnc2 = isGncPrefix && bytes[3] === 0x32;
+  const isGnc1 = isGncPrefix && bytes[3] === 0x31;
+  const isChunked = isGnc2 || isGnc1;
 
   if (!isChunked) {
     // Fallback to standard single-payload decryption for backward compatibility
@@ -205,14 +234,16 @@ export async function decryptGenomicDataChunked(payloadBytes, key, options = {})
   const totalPlaintextSizeRaw = view.getBigUint64(12, false);
   const totalPlaintextSize = Number(totalPlaintextSizeRaw);
 
-  const MAX_ALLOWED_PLAIN_BYTES = 500 * 1024 * 1024; // 500MB safety ceiling
+  if (!Number.isInteger(chunkSize) || chunkSize <= 0 || chunkSize > MAX_CHUNK_SIZE_BYTES) {
+    throw new Error(`Corrupted chunked payload: invalid chunkSize (${chunkSize})`);
+  }
   if (!Number.isFinite(totalPlaintextSize) || totalPlaintextSize < 0) {
     throw new Error("Corrupted chunked payload: invalid totalPlaintextSize in header");
   }
   if (totalPlaintextSize > MAX_ALLOWED_PLAIN_BYTES) {
     throw new Error("Plaintext size exceeds maximum allowed safe limit");
   }
-  if (chunkCount < 0 || chunkCount > 500000) {
+  if (chunkCount < 1 || chunkCount > MAX_CHUNK_COUNT) {
     throw new Error(`Corrupted chunked payload: unreasonable chunkCount (${chunkCount})`);
   }
   if (totalPlaintextSize > Math.max(0, bytes.length - 20)) {
@@ -236,7 +267,9 @@ export async function decryptGenomicDataChunked(payloadBytes, key, options = {})
     const chunkCiphertext = bytes.subarray(readOffset + 12, readOffset + chunkLen);
     readOffset += chunkLen;
 
-    const additionalData = buildChunkAad(i, chunkCount, totalPlaintextSize);
+    const additionalData = isGnc2
+      ? buildChunkAadV2(chunkSize, i, chunkCount, totalPlaintextSize)
+      : buildChunkAadV1(i, chunkCount, totalPlaintextSize);
     const decBuf = await cryptoObj.subtle.decrypt(
       { name: "AES-GCM", iv: chunkIv, additionalData },
       activeKey,
@@ -252,6 +285,12 @@ export async function decryptGenomicDataChunked(payloadBytes, key, options = {})
     writeOffset += plainChunk.length;
 
     onProgress((i + 1) / chunkCount, writeOffset, totalPlaintextSize);
+  }
+
+  if (readOffset !== bytes.length) {
+    throw new Error(
+      `Corrupted chunked payload: unexpected trailing bytes (${bytes.length - readOffset} unauthenticated bytes)`
+    );
   }
 
   if (writeOffset !== totalPlaintextSize) {

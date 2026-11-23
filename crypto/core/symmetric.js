@@ -69,6 +69,14 @@ export async function importKeyFromHex(hexKey) {
   );
 }
 
+function parseIvHex(iv) {
+  const cleanIv = iv.trim().replace(/^0x/i, "");
+  if (!/^[0-9a-fA-F]{24}$/.test(cleanIv)) {
+    throw new Error("Invalid AES-GCM IV hex: expected 24 hexadecimal characters (12 bytes).");
+  }
+  return new Uint8Array(cleanIv.match(/.{1,2}/g).map((b) => parseInt(b, 16)));
+}
+
 /**
  * Pack IV (12 bytes) and ciphertext into a single binary payload
  * @param {Uint8Array|string} iv 
@@ -76,9 +84,7 @@ export async function importKeyFromHex(hexKey) {
  * @returns {Uint8Array}
  */
 export function packCiphertextPayload(iv, ciphertext) {
-  const ivBytes = typeof iv === "string"
-    ? new Uint8Array(iv.replace(/^0x/, "").match(/.{1,2}/g).map((b) => parseInt(b, 16)))
-    : iv;
+  const ivBytes = typeof iv === "string" ? parseIvHex(iv) : iv;
   const payload = new Uint8Array(ivBytes.length + ciphertext.length);
   payload.set(ivBytes, 0);
   payload.set(ciphertext, ivBytes.length);
@@ -261,10 +267,7 @@ export async function decryptGenomicData(ciphertext, iv, key, asString = true) {
 
   let activeIv = iv;
   if (typeof iv === "string") {
-    const cleanIv = iv.startsWith("0x") ? iv.slice(2) : iv;
-    activeIv = new Uint8Array(
-      cleanIv.match(/.{1,2}/g).map((byte) => parseInt(byte, 16))
-    );
+    activeIv = parseIvHex(iv);
   }
 
   const decryptedBuffer = await cryptoObj.subtle.decrypt(

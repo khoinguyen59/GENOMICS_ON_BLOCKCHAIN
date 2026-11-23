@@ -1,5 +1,30 @@
 import { useState, useMemo, useCallback } from "react";
 
+export function matchesBloodTypeFilter(dataset, filterBloodType) {
+  if (!filterBloodType || filterBloodType === "All") return true;
+  const targetBlood = String(filterBloodType).trim().toUpperCase();
+  const bg = String(dataset?.bloodGroup || "").trim().toUpperCase();
+  const bt = String(dataset?.bloodType || "").trim().toUpperCase();
+  return (bg.length > 0 && bg === targetBlood) || (bt.length > 0 && bt === targetBlood);
+}
+
+export function localizeZygosity(zyg, lang = "vi") {
+  if (!zyg) return zyg;
+  const activeLang = lang === "en" ? "en" : "vi";
+  const str = String(zyg);
+  const low = str.toLowerCase();
+  if (str.includes("0/1") || str.includes("1/0") || str.includes("0|1") || str.includes("1|0") || low.includes("het")) {
+    return activeLang === "en" ? "0/1 (Heterozygous)" : "Dị hợp tử (0/1)";
+  }
+  if (str.includes("0/0") || str.includes("0|0") || (low.includes("hom") && low.includes("ref"))) {
+    return activeLang === "en" ? "0/0 (Homozygous Ref)" : "Đồng hợp tử tham chiếu (0/0)";
+  }
+  if (str.includes("1/1") || str.includes("1|1") || low.includes("hom")) {
+    return activeLang === "en" ? "1/1 (Homozygous Alt)" : "Đồng hợp tử (1/1)";
+  }
+  return str;
+}
+
 export function useGenomicFilters({ datasets = [] } = {}) {
   const [filterKeyword, setFilterKeyword] = useState("");
   const [filterChromosome, setFilterChromosome] = useState("All");
@@ -31,6 +56,10 @@ export function useGenomicFilters({ datasets = [] } = {}) {
   }, []);
 
   const filteredDatasets = useMemo(() => {
+    const normChrom = (c) => {
+      const s = String(c || "").trim().toLowerCase().replace(/^chr/, "");
+      return s === "mt" ? "m" : s;
+    };
     const list = datasets || [];
     const filtered = list.filter((d) => {
       const q = filterKeyword.toLowerCase().trim();
@@ -53,16 +82,14 @@ export function useGenomicFilters({ datasets = [] } = {}) {
         d.bloodGroup?.toLowerCase().includes(q) ||
         d.bloodType?.toLowerCase().includes(q);
 
-      const matchesChrom = filterChromosome === "All" || (d.chromosome && d.chromosome.toLowerCase() === filterChromosome.toLowerCase());
+      const matchesChrom = filterChromosome === "All" || (d.chromosome && normChrom(d.chromosome) === normChrom(filterChromosome));
       const matchesGene = filterGene === "All" || (d.geneSymbol && d.geneSymbol.toLowerCase().includes(filterGene.toLowerCase())) || (d.gene && d.gene.toLowerCase().includes(filterGene.toLowerCase()));
       const matchesSig = filterSignificance === "All" || d.clinicalSignificance === filterSignificance;
       const matchesCons = filterConsequence === "All" || d.consequence === filterConsequence;
       const matchesZyg = filterZygosity === "All" || (d.zygosity && d.zygosity.includes(filterZygosity));
       const matchesRegion = filterRegion === "All" || d.region?.toLowerCase().includes(filterRegion.toLowerCase()) || d.ancestry?.toLowerCase().includes(filterRegion.toLowerCase());
-      const matchesBlood = filterBloodType === "All" ||
-        (d.bloodGroup && (d.bloodGroup.toLowerCase() === filterBloodType.toLowerCase() || d.bloodGroup.includes(filterBloodType))) ||
-        (d.bloodType && (d.bloodType.toLowerCase() === filterBloodType.toLowerCase() || d.bloodType.includes(filterBloodType)));
-      const matchesFormat = filterFormat === "All" || (d.format && d.format.includes(filterFormat));
+      const matchesBlood = matchesBloodTypeFilter(d, filterBloodType);
+      const matchesFormat = filterFormat === "All" || (d.format && d.format.toUpperCase().includes(filterFormat.toUpperCase()));
       const matchesAssembly = filterAssembly === "All" || (d.assembly && d.assembly.toLowerCase().includes(filterAssembly.toLowerCase()));
       const matchesPlatform = filterPlatform === "All" || (d.platform && d.platform.toLowerCase().includes(filterPlatform.toLowerCase()));
       const matchesPriceTier = filterPriceTier === "All" ||
@@ -122,7 +149,11 @@ export function useGenomicFilters({ datasets = [] } = {}) {
     const mapVi = {
       "Physiological Traits": "Tính Trạng Thể Chất",
       "Physical Traits & Performance": "Tính Trạng Thể Chất & Hiệu Suất",
+      "Sensory & Metabolism": "Chuyển Hóa & Vị Giác",
       "Reference Benchmark": "Chuẩn Đối Chứng",
+      "Reference Genomes": "Hệ Gen Tham Chiếu",
+      "1000 Genomes Project": "Dự Án 1000 Genomes",
+      "On-Chain Cohort": "Mẫu Di Truyền On-Chain",
       "Carrier Screening": "Sàng Lọc Người Mang Gen", "Pharmacogenomics": "Dược Lý Di Truyền",
       "Population Genetics": "Di Truyền Quần Thể", "Morphological Traits": "Hình Thái Học",
       "NGS Sequencing Reads": "Giải Trình Tự NGS", "Pathogenic Risk": "Biến Dị Chức Năng"
@@ -130,7 +161,11 @@ export function useGenomicFilters({ datasets = [] } = {}) {
     const mapEn = {
       "Physiological Traits": "Physiological Traits",
       "Physical Traits & Performance": "Physical Traits & Performance",
+      "Sensory & Metabolism": "Sensory & Metabolism",
       "Reference Benchmark": "Reference Benchmark",
+      "Reference Genomes": "Reference Genomes",
+      "1000 Genomes Project": "1000 Genomes Project",
+      "On-Chain Cohort": "On-Chain Cohort",
       "Carrier Screening": "Carrier Screening", "Pharmacogenomics": "Pharmacogenomics",
       "Population Genetics": "Population Genetics", "Morphological Traits": "Morphological Traits",
       "NGS Sequencing Reads": "NGS Sequencing Reads", "Pathogenic Risk": "Functional Variation"
@@ -155,15 +190,7 @@ export function useGenomicFilters({ datasets = [] } = {}) {
   }, []);
 
   const getLocalizedZygosity = useCallback((zyg, lang) => {
-    if (!zyg) return zyg;
-    const activeLang = getActiveLang(lang);
-    if (zyg.includes("0/1") || zyg.toLowerCase().includes("het")) {
-      return activeLang === "en" ? "0/1 (Heterozygous)" : "Dị hợp tử (0/1)";
-    }
-    if (zyg.includes("1/1") || zyg.toLowerCase().includes("hom")) {
-      return activeLang === "en" ? "1/1 (Homozygous Alt)" : "Đồng hợp tử (1/1)";
-    }
-    return zyg;
+    return localizeZygosity(zyg, getActiveLang(lang));
   }, []);
 
   return {

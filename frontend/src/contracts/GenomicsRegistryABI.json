@@ -37,6 +37,11 @@
   },
   {
     "inputs": [],
+    "name": "ActiveBountiesExist",
+    "type": "error"
+  },
+  {
+    "inputs": [],
     "name": "ArtifactHashesAlreadyAnchored",
     "type": "error"
   },
@@ -88,6 +93,11 @@
   {
     "inputs": [],
     "name": "DataNotFound",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "DisputeArbitrationActive",
     "type": "error"
   },
   {
@@ -287,7 +297,7 @@
         "type": "uint256"
       },
       {
-        "indexed": false,
+        "indexed": true,
         "internalType": "uint256",
         "name": "expiresAt",
         "type": "uint256"
@@ -338,6 +348,31 @@
       }
     ],
     "name": "BlindTagRegistered",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "uint256",
+        "name": "dataId",
+        "type": "uint256"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "researcher",
+        "type": "address"
+      },
+      {
+        "indexed": true,
+        "internalType": "bytes32",
+        "name": "capsuleHash",
+        "type": "bytes32"
+      }
+    ],
+    "name": "CapsuleDelivered",
     "type": "event"
   },
   {
@@ -400,7 +435,7 @@
         "type": "address"
       },
       {
-        "indexed": false,
+        "indexed": true,
         "internalType": "bool",
         "name": "authorized",
         "type": "bool"
@@ -413,7 +448,7 @@
     "anonymous": false,
     "inputs": [
       {
-        "indexed": false,
+        "indexed": true,
         "internalType": "bool",
         "name": "required",
         "type": "bool"
@@ -432,13 +467,13 @@
         "type": "uint256"
       },
       {
-        "indexed": false,
+        "indexed": true,
         "internalType": "uint256",
         "name": "oldPrice",
         "type": "uint256"
       },
       {
-        "indexed": false,
+        "indexed": true,
         "internalType": "uint256",
         "name": "newPrice",
         "type": "uint256"
@@ -458,13 +493,13 @@
       },
       {
         "indexed": false,
-        "internalType": "enum GenomicsRegistry.DataStatus",
+        "internalType": "enum GenomicsRegistryStorage.DataStatus",
         "name": "oldStatus",
         "type": "uint8"
       },
       {
         "indexed": false,
-        "internalType": "enum GenomicsRegistry.DataStatus",
+        "internalType": "enum GenomicsRegistryStorage.DataStatus",
         "name": "newStatus",
         "type": "uint8"
       }
@@ -488,13 +523,32 @@
         "type": "address"
       },
       {
-        "indexed": false,
+        "indexed": true,
         "internalType": "uint256",
         "name": "expiresAt",
         "type": "uint256"
       }
     ],
     "name": "DirectAccessGranted",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "uint256",
+        "name": "dataId",
+        "type": "uint256"
+      },
+      {
+        "indexed": true,
+        "internalType": "bool",
+        "name": "disabled",
+        "type": "bool"
+      }
+    ],
+    "name": "DispatcherOptOutUpdated",
     "type": "event"
   },
   {
@@ -532,7 +586,7 @@
         "type": "address"
       },
       {
-        "indexed": false,
+        "indexed": true,
         "internalType": "uint256",
         "name": "amount",
         "type": "uint256"
@@ -613,7 +667,7 @@
         "type": "address"
       },
       {
-        "indexed": false,
+        "indexed": true,
         "internalType": "uint256",
         "name": "amount",
         "type": "uint256"
@@ -675,7 +729,7 @@
         "type": "address"
       },
       {
-        "indexed": false,
+        "indexed": true,
         "internalType": "uint256",
         "name": "blockNumber",
         "type": "uint256"
@@ -743,6 +797,25 @@
         "type": "address"
       }
     ],
+    "name": "OwnershipTransferStarted",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "previousOwner",
+        "type": "address"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "newOwner",
+        "type": "address"
+      }
+    ],
     "name": "OwnershipTransferred",
     "type": "event"
   },
@@ -781,7 +854,7 @@
         "type": "address"
       },
       {
-        "indexed": false,
+        "indexed": true,
         "internalType": "uint256",
         "name": "amount",
         "type": "uint256"
@@ -843,7 +916,7 @@
         "type": "address"
       },
       {
-        "indexed": false,
+        "indexed": true,
         "internalType": "uint256",
         "name": "amount",
         "type": "uint256"
@@ -873,7 +946,59 @@
   },
   {
     "inputs": [],
+    "name": "DISPUTE_ARBITRATION_TIMEOUT",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "MAX_ACCESS_DURATION",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
     "name": "MAX_BLIND_TAGS_PER_DATASET",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "MAX_MANUAL_ESCROW_EXTENSION",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "MAX_PRICE",
     "outputs": [
       {
         "internalType": "uint256",
@@ -898,15 +1023,22 @@
     "type": "function"
   },
   {
+    "inputs": [],
+    "name": "acceptOwnership",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
     "inputs": [
       {
         "internalType": "uint256",
-        "name": "",
+        "name": "dataId",
         "type": "uint256"
       },
       {
         "internalType": "address",
-        "name": "",
+        "name": "researcher",
         "type": "address"
       }
     ],
@@ -1047,6 +1179,19 @@
         "type": "uint256"
       }
     ],
+    "name": "claimDisputeTimeoutRefund",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "dataId",
+        "type": "uint256"
+      }
+    ],
     "name": "claimEscrowRefund",
     "outputs": [],
     "stateMutability": "nonpayable",
@@ -1100,7 +1245,7 @@
     "outputs": [
       {
         "internalType": "bytes32",
-        "name": "",
+        "name": "blindTag",
         "type": "bytes32"
       }
     ],
@@ -1196,6 +1341,32 @@
     "type": "function"
   },
   {
+    "inputs": [],
+    "name": "disableCapsuleDispatcher",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "name": "dispatcherDisabled",
+    "outputs": [
+      {
+        "internalType": "bool",
+        "name": "",
+        "type": "bool"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
     "inputs": [
       {
         "internalType": "uint256",
@@ -1235,12 +1406,12 @@
     "inputs": [
       {
         "internalType": "uint256",
-        "name": "",
+        "name": "dataId",
         "type": "uint256"
       },
       {
         "internalType": "address",
-        "name": "",
+        "name": "buyerAddr",
         "type": "address"
       }
     ],
@@ -1250,6 +1421,21 @@
         "internalType": "address",
         "name": "buyer",
         "type": "address"
+      },
+      {
+        "internalType": "bool",
+        "name": "released",
+        "type": "bool"
+      },
+      {
+        "internalType": "bool",
+        "name": "refunded",
+        "type": "bool"
+      },
+      {
+        "internalType": "bool",
+        "name": "capsuleDelivered",
+        "type": "bool"
       },
       {
         "internalType": "address",
@@ -1270,21 +1456,6 @@
         "internalType": "uint256",
         "name": "disputeWindow",
         "type": "uint256"
-      },
-      {
-        "internalType": "bool",
-        "name": "released",
-        "type": "bool"
-      },
-      {
-        "internalType": "bool",
-        "name": "refunded",
-        "type": "bool"
-      },
-      {
-        "internalType": "bool",
-        "name": "capsuleDelivered",
-        "type": "bool"
       }
     ],
     "stateMutability": "view",
@@ -1319,6 +1490,43 @@
       {
         "internalType": "uint256",
         "name": "",
+        "type": "uint256"
+      },
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "name": "escrowDisputedAt",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "escrowEngine",
+    "outputs": [
+      {
+        "internalType": "address",
+        "name": "engine",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "id",
         "type": "uint256"
       }
     ],
@@ -1370,7 +1578,7 @@
         "type": "uint256"
       },
       {
-        "internalType": "enum GenomicsRegistry.DataStatus",
+        "internalType": "enum GenomicsRegistryStorage.DataStatus",
         "name": "status",
         "type": "uint8"
       },
@@ -1394,7 +1602,7 @@
     "outputs": [
       {
         "internalType": "contract GenomicNFT",
-        "name": "",
+        "name": "nft",
         "type": "address"
       }
     ],
@@ -1453,7 +1661,7 @@
             "type": "uint256"
           },
           {
-            "internalType": "enum GenomicsRegistry.DataStatus",
+            "internalType": "enum GenomicsRegistryStorage.DataStatus",
             "name": "status",
             "type": "uint8"
           },
@@ -1468,7 +1676,7 @@
             "type": "uint256"
           }
         ],
-        "internalType": "struct GenomicsRegistry.GenomicData[]",
+        "internalType": "struct GenomicsRegistryStorage.GenomicData[]",
         "name": "",
         "type": "tuple[]"
       }
@@ -1592,7 +1800,7 @@
             "type": "uint256"
           },
           {
-            "internalType": "enum GenomicsRegistry.DataStatus",
+            "internalType": "enum GenomicsRegistryStorage.DataStatus",
             "name": "status",
             "type": "uint8"
           },
@@ -1607,7 +1815,7 @@
             "type": "uint256"
           }
         ],
-        "internalType": "struct GenomicsRegistry.GenomicData[]",
+        "internalType": "struct GenomicsRegistryStorage.GenomicData[]",
         "name": "items",
         "type": "tuple[]"
       },
@@ -1625,6 +1833,30 @@
       {
         "internalType": "uint256",
         "name": "dataId",
+        "type": "uint256"
+      },
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "name": "getEscrowLockDeadline",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
         "type": "uint256"
       }
     ],
@@ -1678,7 +1910,7 @@
             "type": "uint256"
           },
           {
-            "internalType": "enum GenomicsRegistry.DataStatus",
+            "internalType": "enum GenomicsRegistryStorage.DataStatus",
             "name": "status",
             "type": "uint8"
           },
@@ -1693,7 +1925,7 @@
             "type": "uint256"
           }
         ],
-        "internalType": "struct GenomicsRegistry.GenomicData",
+        "internalType": "struct GenomicsRegistryStorage.GenomicData",
         "name": "",
         "type": "tuple"
       }
@@ -1827,6 +2059,30 @@
     "outputs": [
       {
         "internalType": "bool",
+        "name": "active",
+        "type": "bool"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      },
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "name": "hasDonorClaimedZkBounty",
+    "outputs": [
+      {
+        "internalType": "bool",
         "name": "",
         "type": "bool"
       }
@@ -1838,36 +2094,12 @@
     "inputs": [
       {
         "internalType": "uint256",
-        "name": "bountyId",
+        "name": "",
         "type": "uint256"
       },
       {
         "internalType": "address",
-        "name": "donor",
-        "type": "address"
-      }
-    ],
-    "name": "hasDonorClaimedZkBounty",
-    "outputs": [
-      {
-        "internalType": "bool",
-        "name": "claimed",
-        "type": "bool"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "uint256",
-        "name": "dataId",
-        "type": "uint256"
-      },
-      {
-        "internalType": "address",
-        "name": "worker",
+        "name": "",
         "type": "address"
       }
     ],
@@ -1910,12 +2142,12 @@
     "inputs": [
       {
         "internalType": "uint256",
-        "name": "dataId",
+        "name": "",
         "type": "uint256"
       },
       {
         "internalType": "bytes32",
-        "name": "blindTag",
+        "name": "",
         "type": "bytes32"
       }
     ],
@@ -1951,6 +2183,19 @@
   },
   {
     "inputs": [],
+    "name": "metadataStore",
+    "outputs": [
+      {
+        "internalType": "address",
+        "name": "store",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
     "name": "owner",
     "outputs": [
       {
@@ -1968,6 +2213,19 @@
     "outputs": [
       {
         "internalType": "contract IERC20",
+        "name": "token",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "pendingOwner",
+    "outputs": [
+      {
+        "internalType": "address",
         "name": "",
         "type": "address"
       }
@@ -1979,7 +2237,7 @@
     "inputs": [
       {
         "internalType": "uint256",
-        "name": "dataId",
+        "name": "",
         "type": "uint256"
       }
     ],
@@ -1992,6 +2250,29 @@
       }
     ],
     "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "dataId",
+        "type": "uint256"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "studyCommitment",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "uint256",
+        "name": "maxFee",
+        "type": "uint256"
+      }
+    ],
+    "name": "recordStudyReuse",
+    "outputs": [],
+    "stateMutability": "nonpayable",
     "type": "function"
   },
   {
@@ -2324,6 +2605,55 @@
   {
     "inputs": [
       {
+        "internalType": "bytes32[3]",
+        "name": "hashes",
+        "type": "bytes32[3]"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "salt",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "string[4]",
+        "name": "cidsAndUri",
+        "type": "string[4]"
+      },
+      {
+        "internalType": "uint256",
+        "name": "priceInGeno",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "accessDurationSeconds",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint96",
+        "name": "royaltyBps",
+        "type": "uint96"
+      },
+      {
+        "internalType": "bytes32[]",
+        "name": "blindTags",
+        "type": "bytes32[]"
+      }
+    ],
+    "name": "revealAndRegisterGenomicDataBundle",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "newDataId",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
         "internalType": "uint256",
         "name": "dataId",
         "type": "uint256"
@@ -2384,6 +2714,24 @@
       }
     ],
     "name": "setDatasetBlindTags",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "dataId",
+        "type": "uint256"
+      },
+      {
+        "internalType": "bool",
+        "name": "disabled",
+        "type": "bool"
+      }
+    ],
+    "name": "setDispatcherOptOut",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
@@ -2543,7 +2891,7 @@
         "type": "uint256"
       },
       {
-        "internalType": "enum GenomicsRegistry.DataStatus",
+        "internalType": "enum GenomicsRegistryStorage.DataStatus",
         "name": "newStatus",
         "type": "uint8"
       }
@@ -2557,49 +2905,20 @@
     "inputs": [
       {
         "internalType": "uint256",
-        "name": "dataId",
+        "name": "",
         "type": "uint256"
       },
       {
         "internalType": "bytes32",
-        "name": "variantCommitment",
+        "name": "",
         "type": "bytes32"
       }
     ],
-    "name": "verifyDatasetTraitPossession",
+    "name": "verifyDatasetBoundTrait",
     "outputs": [
       {
         "internalType": "bool",
-        "name": "verified",
-        "type": "bool"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "uint256",
-        "name": "dataId",
-        "type": "uint256"
-      },
-      {
-        "internalType": "bytes32",
-        "name": "traitId",
-        "type": "bytes32"
-      },
-      {
-        "internalType": "bytes32",
-        "name": "variantCommitment",
-        "type": "bytes32"
-      }
-    ],
-    "name": "verifyDatasetTraitPossession",
-    "outputs": [
-      {
-        "internalType": "bool",
-        "name": "verified",
+        "name": "",
         "type": "bool"
       }
     ],
@@ -2614,17 +2933,46 @@
         "type": "uint256"
       },
       {
-        "internalType": "address",
+        "internalType": "bytes32",
         "name": "",
-        "type": "address"
+        "type": "bytes32"
       }
     ],
-    "name": "workerAuthorizedEpoch",
+    "name": "verifyDatasetTraitPossession",
     "outputs": [
+      {
+        "internalType": "bool",
+        "name": "",
+        "type": "bool"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
       {
         "internalType": "uint256",
         "name": "",
         "type": "uint256"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "",
+        "type": "bytes32"
+      }
+    ],
+    "name": "verifyDatasetTraitPossession",
+    "outputs": [
+      {
+        "internalType": "bool",
+        "name": "",
+        "type": "bool"
       }
     ],
     "stateMutability": "view",

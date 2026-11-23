@@ -1,0 +1,32 @@
+# GenoChain Protocol - Immutable Non-Root Automated Capsule Dispatcher Image
+FROM python:3.11-slim
+
+ARG INSTALL_BOTO3=""
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+RUN groupadd --gid 10001 genochain \
+    && useradd --uid 10001 --gid 10001 --shell /usr/sbin/nologin --create-home genochain \
+    && mkdir -p /app/scripts/demo /app/frontend/src/contracts /var/lib/genochain /run/secrets/vault \
+    && chown -R genochain:genochain /app /var/lib/genochain /run/secrets
+
+WORKDIR /app
+
+COPY deploy/requirements.dispatcher.txt /app/deploy/requirements.dispatcher.txt
+RUN pip install --no-cache-dir -r /app/deploy/requirements.dispatcher.txt \
+    && if [ -n "$INSTALL_BOTO3" ]; then pip install --no-cache-dir "$INSTALL_BOTO3"; fi
+
+# Copy ONLY minimal dispatcher script and public contract ABI/address metadata (zero secrets or .local/)
+COPY --chown=genochain:genochain scripts/demo/capsule_dispatcher.py /app/scripts/demo/capsule_dispatcher.py
+COPY --chown=genochain:genochain frontend/src/contracts/contractAddresses.json /app/frontend/src/contracts/contractAddresses.json
+COPY --chown=genochain:genochain frontend/src/contracts/GenomicsRegistryABI.json /app/frontend/src/contracts/GenomicsRegistryABI.json
+COPY --chown=genochain:genochain frontend/src/contracts/GenomicNFTABI.json /app/frontend/src/contracts/GenomicNFTABI.json
+
+USER genochain
+
+EXPOSE 8091
+
+ENTRYPOINT ["python", "/app/scripts/demo/capsule_dispatcher.py"]

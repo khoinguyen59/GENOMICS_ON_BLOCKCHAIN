@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from "react";
-import { ethers } from "ethers";
-import { useWeb3 } from "../../context/Web3Context";
+import { useWeb3, CONFIGURED_CHAIN_ID, CONFIGURED_CHAIN_NAME } from "../../context/Web3Context";
 import { useDatasets } from "../../context/DatasetContext";
 import { useLanguage } from "../../context/LanguageContext";
 import { verifyDatasetTraitZkStatus } from "../../services/datasetService";
+import { useModalFocusTrap } from "../../hooks/useModalFocusTrap";
 import {
   GenoLogoIcon,
   GenoTokenIcon,
@@ -18,7 +18,8 @@ import {
   CheckCircleIcon,
   LockOpenIcon,
   LockClosedIcon,
-  RefreshSpinIcon
+  RefreshSpinIcon,
+  AlertTriangleIcon
 } from "../icons/GenoIcons";
 import GenomicVisualCover from "../common/GenomicVisualCover";
 import contractAddresses from "../../contracts/contractAddresses.json";
@@ -37,38 +38,44 @@ export default function AssetDetailModal({ onPurchase }) {
   const { t, lang } = useLanguage();
   const [useEscrow, setUseEscrow] = useState(true);
   const [copiedKey, setCopiedKey] = useState(null);
-  const [zkStatus, setZkStatus] = useState({ linked: false, verifierAddress: "", bountyCount: 0, verified: false });
+  const [zkStatus, setZkStatus] = useState({
+    linked: false,
+    verifierAddress: "",
+    bountyCount: 0,
+    verified: false,
+    datasetBound: false,
+    verificationScope: "none"
+  });
+
+  const modalRef = useModalFocusTrap(Boolean(selectedAssetModal), () => setSelectedAssetModal(null));
 
   useEffect(() => {
     let active = true;
     if (!selectedAssetModal?.dataId || !contracts?.registry) {
-      setZkStatus({ linked: false, verifierAddress: "", bountyCount: 0, verified: false });
+      setZkStatus({
+        linked: false,
+        verifierAddress: "",
+        bountyCount: 0,
+        verified: false,
+        datasetBound: false,
+        verificationScope: "none"
+      });
       return () => {
         active = false;
       };
     }
-    const canonicalCommitment =
-      selectedAssetModal.variantCommitment ||
-      (selectedAssetModal.geneSymbol && selectedAssetModal.owner
-        ? ethers.keccak256(
-            ethers.toUtf8Bytes(
-              `${selectedAssetModal.geneSymbol}:${selectedAssetModal.rsId || selectedAssetModal.clinvarId || "TRAIT"}:${selectedAssetModal.owner}`
-            )
-          )
-        : null);
-    const canonicalTraitId = selectedAssetModal.geneSymbol
-      ? ethers.keccak256(
-          ethers.toUtf8Bytes(
-            `${selectedAssetModal.geneSymbol}_${selectedAssetModal.rsId || "TRAIT"}`
-          )
-        )
-      : null;
     verifyDatasetTraitZkStatus({
       dataId: selectedAssetModal.dataId,
       contracts,
-      variantCommitment: canonicalCommitment,
-      targetTraitId: canonicalTraitId,
+      rawDataHash: selectedAssetModal.rawDataHash || null,
+      variantCommitment: selectedAssetModal.variantCommitment || null,
+      targetTraitId: selectedAssetModal.bountyTargetTraitId || null,
+      bountyTargetTraitId: selectedAssetModal.bountyTargetTraitId || null,
+      geneSymbol: selectedAssetModal.geneSymbol || selectedAssetModal.gene || "",
+      rsId: selectedAssetModal.rsId || "",
+      clinvarId: selectedAssetModal.clinvarId || "",
       owner: selectedAssetModal.owner,
+      originalCreator: selectedAssetModal.originalCreator,
     }).then((res) => {
       if (active) setZkStatus(res);
     });
@@ -77,23 +84,17 @@ export default function AssetDetailModal({ onPurchase }) {
     };
   }, [
     selectedAssetModal?.dataId,
+    selectedAssetModal?.rawDataHash,
     selectedAssetModal?.variantCommitment,
+    selectedAssetModal?.bountyTargetTraitId,
     selectedAssetModal?.geneSymbol,
+    selectedAssetModal?.gene,
     selectedAssetModal?.rsId,
     selectedAssetModal?.clinvarId,
     selectedAssetModal?.owner,
+    selectedAssetModal?.originalCreator,
     contracts,
   ]);
-
-  useEffect(() => {
-    const handleKeyDown = (e) => {
-      if (e.key === "Escape") {
-        setSelectedAssetModal(null);
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [setSelectedAssetModal]);
 
   if (!selectedAssetModal) return null;
 
@@ -102,7 +103,11 @@ export default function AssetDetailModal({ onPurchase }) {
   );
   const purchasedRecord = purchasedData?.find((p) => p.dataId === selectedAssetModal.dataId);
   const isPurchased = Boolean(purchasedRecord);
-  const isEscrowPending = Boolean(purchasedRecord?.isEscrowPending || purchasedRecord?.escrowInfo?.isPending);
+  const isEscrowDisputed = Boolean(purchasedRecord?.escrowInfo?.isDisputed);
+  const isEscrowPending = Boolean(
+    (purchasedRecord?.isEscrowPending || purchasedRecord?.escrowInfo?.isPending) &&
+    !(purchasedRecord?.capsuleDelivered ?? purchasedRecord?.escrowInfo?.capsuleDelivered)
+  );
   const displayTokenId = selectedAssetModal.tokenId ?? selectedAssetModal.dataId;
   const royaltyPct = Number((((selectedAssetModal.royaltyBps ?? 1000)) / 100).toFixed(2));
 
@@ -112,29 +117,36 @@ export default function AssetDetailModal({ onPurchase }) {
     : (selectedAssetModal.clinicalSignificance || "Physiological Traits");
 
   const copyText = (text, key) => {
-    if (navigator.clipboard) {
-      navigator.clipboard.writeText(text);
-      setCopiedKey(key);
-      showToast(t("copiedToast") || "Đã sao chép vào bộ nhớ tạm!");
-      setTimeout(() => setCopiedKey(null), 2500);
+    if (navigator.clipboard?.writeText) {
+      Promise.resolve(navigator.clipboard.writeText(text))
+        .then(() => {
+          setCopiedKey(key);
+          showToast(t("copiedToast") || "Đã sao chép vào bộ nhớ tạm!");
+          setTimeout(() => setCopiedKey(null), 2500);
+        })
+        .catch(() => {
+          showToast(lang === "vi" ? "Không có quyền ghi bộ nhớ tạm." : "Clipboard permission denied.", "error");
+        });
     }
   };
 
+  const is1000G = String(selectedAssetModal.platform || "").includes("1000") || String(selectedAssetModal.ancestry || "").includes("1000");
+  const isCrypt4gh = String(selectedAssetModal.format || "").toLowerCase().includes("c4gh") || String(selectedAssetModal.format || "").toLowerCase().includes("crypt4gh");
   const traitList = [
     {
       type: t("propertyGene") || "TARGET GENE",
       value: selectedAssetModal.geneSymbol?.split(" ")?.[0] || selectedAssetModal.gene,
-      rarity: t("traitSubGeneFreq")
+      rarity: selectedAssetModal.chromosome || "HGNC Locus"
     },
     {
       type: t("propertyChrom") || "CHROMOSOME",
-      value: selectedAssetModal.chromosome || "chr12",
+      value: selectedAssetModal.chromosome || "UNSPECIFIED",
       rarity: selectedAssetModal.assembly || "GRCh38"
     },
     {
       type: t("propertyRsid") || "dbSNP rsID",
-      value: selectedAssetModal.rsId || selectedAssetModal.clinvarId || "rs671",
-      rarity: "dbSNP v156"
+      value: selectedAssetModal.rsId || selectedAssetModal.clinvarId || "N/A",
+      rarity: selectedAssetModal.clinvarId || "dbSNP v156"
     },
     {
       type: t("propertySignificance") || "FUNCTIONAL TRAIT",
@@ -153,22 +165,33 @@ export default function AssetDetailModal({ onPurchase }) {
     },
     {
       type: t("propertyAncestry") || "COHORT",
-      value: selectedAssetModal.ancestry || selectedAssetModal.region || "Vietnamese Kinh (KHV)",
-      rarity: t("traitSubProject")
+      value: selectedAssetModal.ancestry || selectedAssetModal.region || "On-Chain Cohort",
+      rarity: is1000G ? t("traitSubProject") : (selectedAssetModal.platform || "On-Chain Verified")
     },
     {
       type: t("propertyFormat") || "FORMAT",
       value: selectedAssetModal.format || "VCF v4.2",
-      rarity: t("traitSubContainer")
+      rarity: isCrypt4gh ? t("traitSubContainer") : "AES-256-GCM"
     }
   ];
 
-  const registryAddress = contractAddresses.GenomicsRegistry || "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0";
-  const nftContractAddress = contractAddresses.GenomicNFT || "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512";
+  const registryAddress = contractAddresses.GenomicsRegistry || "";
+  const formattedRegistryAddr =
+    registryAddress.length >= 42
+      ? `${registryAddress.substring(0, 6)}...${registryAddress.substring(38)}`
+      : registryAddress || "N/A";
+  const resolvedChainDisplay =
+    CONFIGURED_CHAIN_ID === 31337 ? (t("chainVal") || CONFIGURED_CHAIN_NAME) : CONFIGURED_CHAIN_NAME;
+  const verificationStatus =
+    selectedAssetModal.metadataVerificationStatus ||
+    (selectedAssetModal.metadataTampered ? "tampered" : "unverified");
+  const isMetadataTampered = verificationStatus === "tampered" || Boolean(selectedAssetModal.metadataTampered);
 
   return (
     <div className="terminal-modal-backdrop" onClick={() => setSelectedAssetModal(null)}>
       <div
+        ref={modalRef}
+        tabIndex={-1}
         className="terminal-modal-window opensea-modal-container"
         role="dialog"
         aria-modal="true"
@@ -220,18 +243,18 @@ export default function AssetDetailModal({ onPurchase }) {
                     {t("contractDetailsTitle") || "Smart Contract Specifications"}
                   </span>
                 </div>
-                <VerifiedBadgeIcon size={13} color="var(--accent-emerald)" />
+                {verificationStatus === "verified" && <VerifiedBadgeIcon size={13} color="var(--accent-emerald)" />}
               </div>
 
               <div className="opensea-accordion-body">
                 <div className="opensea-spec-row">
                   <span className="opensea-spec-key">{t("contractAddressLabel") || "Contract Address"}</span>
                   <div className="opensea-spec-val-copyable">
-                    <span className="mono-hash">{registryAddress.substring(0, 6)}...{registryAddress.substring(38)}</span>
+                    <span className="mono-hash">{formattedRegistryAddr}</span>
                     <button
                       type="button"
                       className="icon-copy-btn"
-                      onClick={() => copyText(registryAddress, "contract")}
+                      onClick={() => registryAddress && copyText(registryAddress, "contract")}
                       title={t("copyContractAddress") || (lang === "vi" ? "Sao chép địa chỉ hợp đồng" : "Copy contract address")}
                       aria-label={t("copyContractAddress") || (lang === "vi" ? "Sao chép địa chỉ hợp đồng" : "Copy contract address")}
                     >
@@ -252,7 +275,7 @@ export default function AssetDetailModal({ onPurchase }) {
 
                 <div className="opensea-spec-row">
                   <span className="opensea-spec-key">{t("chainLabel") || "Blockchain Network"}</span>
-                  <span className="opensea-spec-val">{t("chainVal") || "Local Hardhat EVM (31337)"}</span>
+                  <span className="opensea-spec-val">{resolvedChainDisplay}</span>
                 </div>
 
                 <div className="opensea-spec-row">
@@ -281,7 +304,7 @@ export default function AssetDetailModal({ onPurchase }) {
                 </div>
 
                 <div className="opensea-spec-row">
-                  <span className="opensea-spec-key">{t("rawCiphertextIpfsLabel") || "Ciphertext CID"}</span>
+                  <span className="opensea-spec-key">{t("rawCiphertextIpfsLabel") || "Raw Ciphertext CID"}</span>
                   <div className="opensea-spec-val-copyable">
                     <span className="mono-hash">{selectedAssetModal.rawCid ? `${selectedAssetModal.rawCid.substring(0, 10)}...` : "N/A"}</span>
                     {selectedAssetModal.rawCid && (
@@ -293,6 +316,24 @@ export default function AssetDetailModal({ onPurchase }) {
                         aria-label={t("copyRawCid") || (lang === "vi" ? "Sao chép CID Dữ liệu thô" : "Copy Raw CID")}
                       >
                         {copiedKey === "rawCid" ? <CheckCircleIcon size={12} color="var(--accent-emerald)" /> : <CopyIcon size={12} />}
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <div className="opensea-spec-row">
+                  <span className="opensea-spec-key">{t("modalSummaryCidLabel") || "Summary Report CID"}</span>
+                  <div className="opensea-spec-val-copyable">
+                    <span className="mono-hash">{selectedAssetModal.summaryCid ? `${selectedAssetModal.summaryCid.substring(0, 10)}...` : "N/A"}</span>
+                    {selectedAssetModal.summaryCid && (
+                      <button
+                        type="button"
+                        className="icon-copy-btn"
+                        onClick={() => copyText(selectedAssetModal.summaryCid, "summaryCid")}
+                        title={t("modalSummaryCidLabel") || "Copy Summary CID"}
+                        aria-label={t("modalSummaryCidLabel") || "Copy Summary CID"}
+                      >
+                        {copiedKey === "summaryCid" ? <CheckCircleIcon size={12} color="var(--accent-emerald)" /> : <CopyIcon size={12} />}
                       </button>
                     )}
                   </div>
@@ -314,9 +355,35 @@ export default function AssetDetailModal({ onPurchase }) {
                   letterSpacing: "0.05em"
                 }}
               >
-                {selectedAssetModal.category || "1000 Genomes Project Bio-Bank"}
+                {lang === "vi"
+                  ? (selectedAssetModal.categoryVi ||
+                      (getLocalizedSignificance
+                        ? getLocalizedSignificance(selectedAssetModal.category || selectedAssetModal.clinicalSignificance, "vi")
+                        : selectedAssetModal.category) ||
+                      "Ngân hàng Dữ liệu 1000 Genomes")
+                  : (selectedAssetModal.categoryEn ||
+                      (getLocalizedSignificance
+                        ? getLocalizedSignificance(selectedAssetModal.category || selectedAssetModal.clinicalSignificance, "en")
+                        : selectedAssetModal.category) ||
+                      "1000 Genomes Project Bio-Bank")}
               </span>
-              <VerifiedBadgeIcon size={13} color="var(--accent-cyan)" />
+              {verificationStatus === "verified" ? (
+                <span data-verification-badge="verified" title={t("evmSha256Match") || "EVM SHA-256 MATCH"} style={{ display: "inline-flex", alignItems: "center" }}>
+                  <VerifiedBadgeIcon size={13} color="var(--accent-cyan)" />
+                </span>
+              ) : verificationStatus === "tampered" ? (
+                <span data-verification-badge="tampered" title={t("evmMetadataTamperWarn")} style={{ display: "inline-flex", alignItems: "center" }}>
+                  <AlertTriangleIcon size={13} color="var(--accent-rose)" />
+                </span>
+              ) : (
+                <span
+                  data-verification-badge={verificationStatus}
+                  title={verificationStatus === "unanchored" ? t("evmMetadataUnanchoredBadge") : t("evmMetadataUnverifiedBadge")}
+                  style={{ display: "inline-flex", alignItems: "center" }}
+                >
+                  <AlertTriangleIcon size={13} color="var(--accent-amber)" />
+                </span>
+              )}
             </div>
 
             {/* Asset Title */}
@@ -360,7 +427,7 @@ export default function AssetDetailModal({ onPurchase }) {
               <div className="buybox-header">
                 <div>
                   <div className="buybox-price-label">
-                    {t("modalEscrowPriceLabel") || "CURRENT ACCESS PRICE"}
+                    {`${t("modalEscrowPriceLabel") || "ACCESS LICENSE FEE ($GENO)"} · ${royaltyPct}% EIP-2981`}
                   </div>
                   <div className="buybox-price-row">
                     <GenoTokenIcon size={24} color="var(--accent-cyan)" />
@@ -375,22 +442,20 @@ export default function AssetDetailModal({ onPurchase }) {
 
               {/* Escrow Protection Toggle */}
               {!isOwner && !isPurchased && (
-                <div
+                <label
+                  htmlFor="escrow-protection-toggle-modal"
                   className="buybox-escrow-toggle-row"
-                  onClick={() => setUseEscrow((prev) => !prev)}
                 >
-                  <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                  <span style={{ display: "flex", alignItems: "center", gap: "10px" }}>
                     <input
                       type="checkbox"
                       id="escrow-protection-toggle-modal"
                       checked={useEscrow}
                       onChange={(e) => setUseEscrow(e.target.checked)}
-                      onClick={(e) => e.stopPropagation()}
                       style={{ accentColor: "var(--accent-emerald)", cursor: "pointer", width: "16px", height: "16px" }}
                     />
-                    <div>
-                      <label
-                        htmlFor="escrow-protection-toggle-modal"
+                    <span style={{ display: "block" }}>
+                      <span
                         style={{
                           fontSize: "12.5px",
                           fontWeight: 700,
@@ -403,12 +468,12 @@ export default function AssetDetailModal({ onPurchase }) {
                       >
                         <ShieldCheckIcon size={14} color={useEscrow ? "var(--accent-emerald-text)" : "var(--text-secondary)"} />
                         <span>{t("escrowProtectionToggle")}</span>
-                      </label>
-                      <div style={{ fontSize: "11px", color: "var(--text-secondary)", marginTop: "2px" }}>
+                      </span>
+                      <span style={{ display: "block", fontSize: "11px", color: "var(--text-secondary)", marginTop: "2px" }}>
                         {t("escrowGuaranteeDesc") || "Funds held in smart contract until capsule dispatch. 100% refund guarantee."}
-                      </div>
-                    </div>
-                  </div>
+                      </span>
+                    </span>
+                  </span>
 
                   <span
                     style={{
@@ -424,7 +489,7 @@ export default function AssetDetailModal({ onPurchase }) {
                   >
                     {useEscrow ? t("escrowLock24h") : t("escrowDirect")}
                   </span>
-                </div>
+                </label>
               )}
 
               {/* Primary Action Buttons (Preserving isOwner, isPurchased, btnYourDataset, btnPurchased) */}
@@ -439,15 +504,21 @@ export default function AssetDetailModal({ onPurchase }) {
                   </button>
                 ) : isPurchased ? (
                   <button
-                    className={`btn-terminal ${isEscrowPending ? "" : "btn-terminal-success"} btn-opensea-large`}
+                    className={`btn-terminal ${isEscrowDisputed || isEscrowPending ? "" : "btn-terminal-success"} btn-opensea-large`}
                     style={
-                      isEscrowPending
+                      isEscrowDisputed
                         ? {
-                            color: "var(--accent-amber-text)",
-                            borderColor: "var(--accent-amber)",
-                            background: "rgba(245, 158, 11, 0.14)"
+                            color: "var(--accent-rose-text)",
+                            borderColor: "var(--accent-rose)",
+                            background: "rgba(239, 68, 68, 0.14)"
                           }
-                        : undefined
+                        : isEscrowPending
+                          ? {
+                              color: "var(--accent-amber-text)",
+                              borderColor: "var(--accent-amber)",
+                              background: "rgba(245, 158, 11, 0.14)"
+                            }
+                          : undefined
                     }
                     type="button"
                     onClick={() => {
@@ -455,7 +526,12 @@ export default function AssetDetailModal({ onPurchase }) {
                       setResearcherTab("licensed");
                     }}
                   >
-                    {isEscrowPending ? (
+                    {isEscrowDisputed ? (
+                      <>
+                        <AlertTriangleIcon size={14} color="var(--accent-rose-text)" />
+                        <span>{t("escrowStatusDisputed")} • {t("viewLicensedTab")}</span>
+                      </>
+                    ) : isEscrowPending ? (
                       <>
                         <RefreshSpinIcon size={14} />
                         <span>{t("escrowPendingDelivery")} • {t("viewLicensedTab")}</span>
@@ -471,11 +547,12 @@ export default function AssetDetailModal({ onPurchase }) {
                   <button
                     className="btn-terminal btn-terminal-primary btn-opensea-large"
                     onClick={() => onPurchase?.(selectedAssetModal, { useEscrow, disputeWindowDays: 1 })}
-                    disabled={selectedAssetModal.status !== "Active"}
+                    disabled={selectedAssetModal.status !== "Active" || isMetadataTampered}
+                    title={isMetadataTampered ? t("evmMetadataTamperWarn") : undefined}
                     type="button"
                   >
                     <SealedCipherIcon size={16} />
-                    <span>{t("btnExecutePurchase")}</span>
+                    <span>{isMetadataTampered ? t("btnMetadataTampered") : t("btnExecutePurchase")}</span>
                   </button>
                 )}
               </div>
@@ -483,16 +560,56 @@ export default function AssetDetailModal({ onPurchase }) {
 
             {/* Cryptographic Proof Anchor & Zero-Plaintext Audit Box */}
             <div className="opensea-crypto-proof-box">
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px", flexWrap: "wrap", marginBottom: "6px" }}>
                 <span style={{ fontSize: "11px", fontWeight: 700, color: "var(--accent-cyan)", letterSpacing: "0.04em", textTransform: "uppercase" }}>
                   {t("modalHashLabel")}
                 </span>
-                <span style={{ fontSize: "10.5px", color: "var(--accent-emerald-text)", fontFamily: "var(--font-mono)", fontWeight: 700 }}>
-                  {t("evmSha256Match") || "✓ EVM SHA-256 MATCH"}
+                <span
+                  id="asset-modal-hash-status"
+                  data-verification-status={verificationStatus}
+                  data-tampered={String(isMetadataTampered)}
+                  style={
+                    verificationStatus === "tampered"
+                      ? {
+                          fontSize: "10.5px",
+                          color: "var(--accent-rose-text)",
+                          background: "var(--accent-rose-subtle)",
+                          border: "1px solid var(--accent-rose)",
+                          borderRadius: "4px",
+                          padding: "2px 6px",
+                          fontFamily: "var(--font-mono)",
+                          fontWeight: 700
+                        }
+                      : verificationStatus === "unverified" || verificationStatus === "unanchored"
+                        ? {
+                            fontSize: "10.5px",
+                            color: "var(--accent-amber-text)",
+                            background: "var(--accent-amber-subtle)",
+                            border: "1px solid var(--accent-amber)",
+                            borderRadius: "4px",
+                            padding: "2px 6px",
+                            fontFamily: "var(--font-mono)",
+                            fontWeight: 700
+                          }
+                        : {
+                            fontSize: "10.5px",
+                            color: "var(--accent-emerald-text)",
+                            fontFamily: "var(--font-mono)",
+                            fontWeight: 700
+                          }
+                  }
+                >
+                  {verificationStatus === "tampered"
+                    ? t("evmMetadataTamperWarn")
+                    : verificationStatus === "unanchored"
+                      ? t("evmMetadataUnanchoredBadge")
+                      : verificationStatus === "unverified"
+                        ? t("evmMetadataUnverifiedBadge")
+                        : (t("evmSha256Match") || "✓ EVM SHA-256 MATCH")}
                 </span>
               </div>
               <div className="opensea-hash-row">
-                <span className="mono-hash opensea-full-hash">{selectedAssetModal.rawDataHash}</span>
+                <span className="mono-hash opensea-full-hash" title="rawDataHash (SHA-256)">Raw: {selectedAssetModal.rawDataHash}</span>
                 <button
                   type="button"
                   className="icon-copy-btn"
@@ -503,6 +620,34 @@ export default function AssetDetailModal({ onPurchase }) {
                   {copiedKey === "hash" ? <CheckCircleIcon size={12} color="var(--accent-emerald)" /> : <CopyIcon size={12} />}
                 </button>
               </div>
+              {selectedAssetModal.summaryDataHash && (
+                <div className="opensea-hash-row" style={{ marginTop: "4px" }}>
+                  <span className="mono-hash opensea-full-hash" title="summaryDataHash (SHA-256)">PDF: {selectedAssetModal.summaryDataHash}</span>
+                  <button
+                    type="button"
+                    className="icon-copy-btn"
+                    onClick={() => copyText(selectedAssetModal.summaryDataHash, "sumHash")}
+                    title={t("copySummaryHash")}
+                    aria-label={t("copySummaryHash")}
+                  >
+                    {copiedKey === "sumHash" ? <CheckCircleIcon size={12} color="var(--accent-emerald)" /> : <CopyIcon size={12} />}
+                  </button>
+                </div>
+              )}
+              {selectedAssetModal.metadataHash && (
+                <div className="opensea-hash-row" style={{ marginTop: "4px" }}>
+                  <span className="mono-hash opensea-full-hash" title="metadataHash (SHA-256)">Meta: {selectedAssetModal.metadataHash}</span>
+                  <button
+                    type="button"
+                    className="icon-copy-btn"
+                    onClick={() => copyText(selectedAssetModal.metadataHash, "metaHash")}
+                    title={t("copyMetadataHash")}
+                    aria-label={t("copyMetadataHash")}
+                  >
+                    {copiedKey === "metaHash" ? <CheckCircleIcon size={12} color="var(--accent-emerald)" /> : <CopyIcon size={12} />}
+                  </button>
+                </div>
+              )}
               <div style={{ fontSize: "11px", color: "var(--text-secondary)", marginTop: "6px", lineHeight: "1.4" }}>
                 {t("provenanceZeroPlaintext")}
               </div>
@@ -523,8 +668,23 @@ export default function AssetDetailModal({ onPurchase }) {
                     ? `${t("zkVerifierLinkedLabel")}: ${zkStatus.verifierAddress.slice(0, 8)}... (${zkStatus.bountyCount} ${t("zkBountiesUnit")})`
                     : t("zkVerifierNotLinked")}
                 </span>
-                <span style={{ color: zkStatus.verified ? "var(--accent-emerald-text)" : "var(--accent-cyan)", fontWeight: 700 }}>
-                  {zkStatus.verified ? t("zkTraitVerifiedBadge") : t("zkAnchoredBadge")}
+                <span
+                  id="asset-modal-zk-badge"
+                  data-zk-scope={zkStatus.verificationScope || "none"}
+                  style={{
+                    color: zkStatus.datasetBound
+                      ? "var(--accent-emerald-text)"
+                      : zkStatus.verified
+                        ? "var(--accent-amber-text)"
+                        : "var(--accent-cyan)",
+                    fontWeight: 700
+                  }}
+                >
+                  {zkStatus.datasetBound
+                    ? t("zkDatasetBoundVerifiedBadge")
+                    : zkStatus.verified
+                      ? t("zkDonorLevelVerifiedBadge")
+                      : t("zkAnchoredBadge")}
                 </span>
               </div>
             </div>

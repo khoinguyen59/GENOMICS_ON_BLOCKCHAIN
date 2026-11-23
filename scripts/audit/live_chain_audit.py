@@ -26,8 +26,10 @@ if sys.platform == "win32":
 
 RPC_URL = "http://127.0.0.1:8545"
 
-def raw_rpc_call(method, params=[]):
+def raw_rpc_call(method, params=None):
     """Gửi trực tiếp raw JSON-RPC request qua HTTP socket tới node 8545"""
+    if params is None:
+        params = []
     req_data = json.dumps({
         "jsonrpc": "2.0",
         "method": method,
@@ -94,66 +96,73 @@ def main():
     print("\n  [ATTACK #1] Tấn công rút cạn Token Faucet liên tiếp:")
     print(f"    - Attacker: {attacker}")
     try:
-        # First claim (might fail if cooldown active from previous run)
+        # First claim (might revert if cooldown active from previous run)
         tx = token.functions.faucet(attacker).transact({"from": attacker})
         w3.eth.wait_for_transaction_receipt(tx)
         print("    - Lần 1: Claim thành công 1,000 $GENO.")
-    except Exception as e:
-        print(f"    - Lần 1: Đang trong cooldown từ phiên trước.")
+    except (ContractLogicError, ValueError):
+        print("    - Lần 1: Đang trong cooldown từ phiên trước.")
 
+    reverted = False
     try:
         # Immediate second claim (MUST REVERT ON-CHAIN)
         tx2 = token.functions.faucet(attacker).transact({"from": attacker})
-        w3.eth.wait_for_transaction_receipt(tx2)
-        print("    [FAIL] LỖI BẢO MẬT: Faucet cho phép rút liên tiếp!")
-        assert False, "Faucet Cooldown bypassed!"
-    except Exception as e:
-        print(f"    ✔ EVM ĐÃ CHẶN THÀNH CÔNG (On-chain Revert): Cooldown 1 giờ được thực thi nghiêm ngặt.")
+        rc2 = w3.eth.wait_for_transaction_receipt(tx2)
+        reverted = (rc2.status == 0)
+    except (ContractLogicError, ValueError):
+        reverted = True
+    assert reverted, "Faucet Cooldown bypassed! Immediate second faucet claim succeeded."
+    print("    ✔ EVM ĐÃ CHẶN THÀNH CÔNG (On-chain Revert): Cooldown 1 giờ được thực thi nghiêm ngặt.")
 
     # ATTACK 2: Unauthorized Direct NFT Mint (Bypass Registry)
     print("\n  [ATTACK #2] Kẻ tấn công tự mint NFT dữ liệu không qua Registry:")
+    reverted = False
     try:
         fake_hash = hashlib.sha256(b"fake_dna").digest()
         bad_tx = nft.functions.mintGenomicNFT(
             attacker, "ipfs://fake", fake_hash, "QmFake", "QmFake", "QmFake", 1000
         ).transact({"from": attacker})
-        w3.eth.wait_for_transaction_receipt(bad_tx)
-        print("    [FAIL] LỖI BẢO MẬT: Non-registry có thể tự mint NFT!")
-        assert False, "GenomicNFT access control violated!"
-    except Exception as e:
-        print(f"    ✔ EVM ĐÃ CHẶN THÀNH CÔNG: Chỉ hợp đồng GenomicsRegistry mới được phép gọi mintGenomicNFT (OnlyRegistry).")
+        bad_rc = w3.eth.wait_for_transaction_receipt(bad_tx)
+        reverted = (bad_rc.status == 0)
+    except (ContractLogicError, ValueError):
+        reverted = True
+    assert reverted, "GenomicNFT access control violated! Non-registry minted NFT."
+    print("    ✔ EVM ĐÃ CHẶN THÀNH CÔNG: Chỉ hợp đồng GenomicsRegistry mới được phép gọi mintGenomicNFT (OnlyRegistry).")
 
     # ATTACK 3: Unauthorized Price Tampering
     print("\n  [ATTACK #3] Kẻ tấn công tự ý đổi phí truy cập (updateDataPrice) của bộ dữ liệu #1:")
+    reverted = False
     try:
         tamper_tx = registry.functions.updateDataPrice(1, w3.to_wei(99999, "ether")).transact({"from": attacker})
-        w3.eth.wait_for_transaction_receipt(tamper_tx)
-        print("    [FAIL] LỖI BẢO MẬT: Người ngoài có thể sửa giá dataset!")
-        assert False, "updateDataPrice onlyDataOwner bypassed!"
-    except Exception as e:
-        print(f"    ✔ EVM ĐÃ CHẶN THÀNH CÔNG: Ràng buộc onlyDataOwner ngăn chặn kẻ tấn công đổi giá.")
+        tamper_rc = w3.eth.wait_for_transaction_receipt(tamper_tx)
+        reverted = (tamper_rc.status == 0)
+    except (ContractLogicError, ValueError):
+        reverted = True
+    assert reverted, "updateDataPrice onlyDataOwner bypassed!"
+    print("    ✔ EVM ĐÃ CHẶN THÀNH CÔNG: Ràng buộc onlyDataOwner ngăn chặn kẻ tấn công đổi giá.")
 
     # ATTACK 4: Unauthorized Status Revocation
     print("\n  [ATTACK #4] Kẻ tấn công tìm cách Revoke dataset #1:")
+    reverted = False
     try:
         revoke_tx = registry.functions.updateDataStatus(1, 2).transact({"from": attacker})
-        w3.eth.wait_for_transaction_receipt(revoke_tx)
-        print("    [FAIL] LỖI BẢO MẬT: Người ngoài có thể đổi status dataset!")
-        assert False, "updateDataStatus onlyDataOwner bypassed!"
-    except Exception as e:
-        print(f"    ✔ EVM ĐÃ CHẶN THÀNH CÔNG: Ràng buộc onlyDataOwner ngăn chặn kẻ tấn công đổi status.")
+        revoke_rc = w3.eth.wait_for_transaction_receipt(revoke_tx)
+        reverted = (revoke_rc.status == 0)
+    except (ContractLogicError, ValueError):
+        reverted = True
+    assert reverted, "updateDataStatus onlyDataOwner bypassed!"
+    print("    ✔ EVM ĐÃ CHẶN THÀNH CÔNG: Ràng buộc onlyDataOwner ngăn chặn kẻ tấn công đổi status.")
 
     # ATTACK 5: Theft of Access Capsule
     print("\n  [ATTACK #5] Kẻ tấn công đánh cắp Key Capsule khi chưa trả tiền mua:")
+    reverted = False
+    stolen_capsule = None
     try:
         stolen_capsule = registry.functions.getTransformedCapsule(1).call({"from": attacker})
-        if stolen_capsule and len(stolen_capsule) > 0:
-            print(f"    [FAIL] LỖI BẢO MẬT: Đọc trộm được capsule mà không cần mua quyền!")
-            assert False, "getTransformedCapsule leak!"
-        else:
-            print(f"    ✔ EVM ĐÃ CHẶN THÀNH CÔNG: getTransformedCapsule từ chối khi không có active grant.")
-    except Exception as e:
-        print(f"    ✔ EVM ĐÃ CHẶN THÀNH CÔNG (Revert on-chain): Access denied or expired.")
+    except (ContractLogicError, ValueError):
+        reverted = True
+    assert reverted, f"getTransformedCapsule leak! Expected on-chain revert, got: {stolen_capsule!r}"
+    print("    ✔ EVM ĐÃ CHẶN THÀNH CÔNG (Revert on-chain): Access denied or expired.")
 
     print("\n[PHASE 3] ĐỐI SOÁT DÒNG TIỀN ESCROW & CHI TRẢ ROYALTY THỰC TẾ:")
     # Check balances before
@@ -167,9 +176,10 @@ def main():
     royalty_amount = royalty_info[1]
     seller_expected = price - royalty_amount
 
+    royalty_pct = (royalty_amount * 100.0) / price if price > 0 else 0.0
     print(f"  - Dataset Target        : ID #1 (Token #{token_id})")
     print(f"  - Giá niêm yết          : {w3.from_wei(price, 'ether')} $GENO")
-    print(f"  - Tỷ lệ Royalty EIP-2981: 10% ({w3.from_wei(royalty_amount, 'ether')} $GENO cho {royalty_receiver})")
+    print(f"  - Tỷ lệ Royalty EIP-2981: {royalty_pct:.2f}% ({w3.from_wei(royalty_amount, 'ether')} $GENO cho {royalty_receiver})")
     print(f"  - Thực nhận cho Người bán: {w3.from_wei(seller_expected, 'ether')} $GENO")
 
     # Select a researcher account that does not already have an active access grant
@@ -179,8 +189,9 @@ def main():
             buyer_account = acc
             break
     if not buyer_account:
-        # Fast-forward time past 30 days if all accounts have purchased
-        w3.provider.make_request("evm_increaseTime", [31 * 86400])
+        # Fast-forward time dynamically past the dataset's on-chain accessDuration (+1 day buffer)
+        warp_sec = int(dataset_info[8]) + 86400
+        w3.provider.make_request("evm_increaseTime", [warp_sec])
         w3.provider.make_request("evm_mine", [])
         buyer_account = accounts[3]
 
@@ -191,7 +202,8 @@ def main():
 
     # Ensure researcher has enough tokens
     if bal_buyer_before < price:
-        token.functions.mint(researcher, price * 2).transact({"from": deployer})
+        mint_tx_phase3 = token.functions.mint(researcher, price * 2).transact({"from": deployer})
+        w3.eth.wait_for_transaction_receipt(mint_tx_phase3)
         bal_buyer_before = token.functions.balanceOf(researcher).call()
 
     # Approve & Buy
@@ -201,25 +213,46 @@ def main():
     # Buy access
     buy_tx = registry.functions.grantAccess(1).transact({"from": researcher})
     buy_receipt = w3.eth.wait_for_transaction_receipt(buy_tx)
+    assert buy_receipt.status == 1, "grantAccess transaction failed on-chain!"
 
     bal_buyer_after = token.functions.balanceOf(researcher).call()
     bal_owner_after = token.functions.balanceOf(owner_addr).call()
     bal_royalty_after = token.functions.balanceOf(royalty_receiver).call()
 
+    buyer_delta = bal_buyer_before - bal_buyer_after
+    owner_delta = bal_owner_after - bal_owner_before
+    royalty_delta = bal_royalty_after - bal_royalty_before
+    assert buyer_delta == price, f"Buyer balance delta mismatch: expected {price}, got {buyer_delta}"
+    if owner_addr.lower() == royalty_receiver.lower():
+        assert owner_delta == price, f"Creator-owner balance delta mismatch: expected {price}, got {owner_delta}"
+    else:
+        assert owner_delta == seller_expected, f"Seller balance delta mismatch: expected {seller_expected}, got {owner_delta}"
+        assert royalty_delta == royalty_amount, f"Royalty receiver delta mismatch: expected {royalty_amount}, got {royalty_delta}"
+    has_access = registry.functions.hasActiveAccess(1, researcher).call()
+    assert has_access is True, "Researcher does not have active access after grantAccess!"
+
     print(f"\n  [ON-CHAIN RECEIPT ĐƯỢC ĐÀO THỰC TẾ TRÊN BLOCK #{buy_receipt.blockNumber}]:")
-    print(f"  ✔ TxHash                : 0x{buy_receipt.transactionHash.hex()}")
+    print(f"  ✔ TxHash                : {Web3.to_hex(buy_receipt.transactionHash)}")
     print(f"  ✔ Gas Used              : {buy_receipt.gasUsed:,} gas")
     print(f"  ✔ Effective Gas Price   : {w3.from_wei(buy_receipt.effectiveGasPrice, 'gwei')} Gwei")
-    print(f"  ✔ Số dư Người mua giảm  : -{w3.from_wei(bal_buyer_before - bal_buyer_after, 'ether')} $GENO")
-    print(f"  ✔ Số dư Người bán tăng  : +{w3.from_wei(bal_owner_after - bal_owner_before, 'ether')} $GENO")
-    print(f"  ✔ Quyền truy cập cấp mới: hasActiveAccess = {registry.functions.hasActiveAccess(1, researcher).call()}")
+    print(f"  ✔ Số dư Người mua giảm  : -{w3.from_wei(buyer_delta, 'ether')} $GENO")
+    print(f"  ✔ Số dư Người bán tăng  : +{w3.from_wei(owner_delta, 'ether')} $GENO")
+    print(f"  ✔ Quyền truy cập cấp mới: hasActiveAccess = {has_access}")
 
     print("\n[PHASE 4] XÁC MINH CƠ CHẾ ĐỐT TOKEN DEFLATIONARY:")
+    burn_amount = w3.to_wei(25, "ether")
+    if token.functions.balanceOf(researcher).call() < burn_amount:
+        mint_tx = token.functions.mint(researcher, burn_amount).transact({"from": deployer})
+        w3.eth.wait_for_transaction_receipt(mint_tx)
     supply_before = token.functions.totalSupply().call()
-    burn_tx = token.functions.burn(w3.to_wei(25, "ether")).transact({"from": researcher})
+    burn_tx = token.functions.burn(burn_amount).transact({"from": researcher})
     burn_receipt = w3.eth.wait_for_transaction_receipt(burn_tx)
+    assert burn_receipt.status == 1, "ERC20Burnable burn transaction failed!"
     supply_after = token.functions.totalSupply().call()
-    print(f"  ✔ Burn TxHash           : 0x{burn_receipt.transactionHash.hex()}")
+    assert (supply_before - supply_after) == burn_amount, (
+        f"Total supply decrease mismatch: expected {burn_amount}, got {supply_before - supply_after}"
+    )
+    print(f"  ✔ Burn TxHash           : {Web3.to_hex(burn_receipt.transactionHash)}")
     print(f"  ✔ Tổng cung giảm chính xác 25 $GENO: {w3.from_wei(supply_before - supply_after, 'ether')} $GENO")
 
     print("\n" + "=" * 80)

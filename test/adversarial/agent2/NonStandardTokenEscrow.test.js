@@ -54,9 +54,9 @@ describe("AGENT2 :: Non-Standard (void-return) ERC20 through the escrow lifecycl
 
     const reg = await registry.connect(seller).registerGenomicData(
       ethers.keccak256(ethers.toUtf8Bytes("NST_DS1")),
-      "QmNstRaw1111111111111111111111111111111111",
-      "QmNstSum1111111111111111111111111111111111",
-      "QmNstMeta111111111111111111111111111111111",
+      "QmcAnKW3SMsuxYiNWCTuMZhp8GXpQmt8HjKFWPEJoNkM4B",
+      "QmV3xjiLwjT5gmvn9zjqjNCRXqBYTLxV2tugBgKcFFMgcu",
+      "QmTUYCNn6YgU3jN2eGHKJDTgjtJ3GJUsMWT3ZiAVFNCsWC",
       "ipfs://nst-ds1", price, 86400 * 30, 1000
     );
     expect((await reg.wait()).status).to.equal(1);

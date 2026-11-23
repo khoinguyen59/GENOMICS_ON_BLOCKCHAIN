@@ -1,0 +1,76 @@
+# GenoChain Protocol - Caddy TLS Reverse Proxy Configuration
+# Copy to deploy/Caddyfile and replace {$GATEWAY_DOMAIN} / {$ACME_EMAIL} via deploy/.env.production.
+# Note: Compression (gzip/zstd) is intentionally disabled on /ipfs/*, /v1/ipfs/*, and /api/v0/upload
+# because genomic payloads are pre-encrypted AES-256-GCM ciphertexts (incompressible high-entropy bytes).
+
+{
+	email {$ACME_EMAIL}
+}
+
+{$GATEWAY_DOMAIN} {
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+		-Server
+	}
+
+	# Block public access to Prometheus /metrics (only allow loopback / internal RFC1918 scrapers)
+	@public_metrics {
+		path /metrics
+		not remote_ip 127.0.0.1 ::1 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16
+	}
+	handle /metrics {
+		# Inside handle /metrics, respond executes before reverse_proxy per Caddy directive order
+		respond @public_metrics 403
+		encode gzip zstd
+		reverse_proxy ipfs-access-gateway:8090
+	}
+
+	# Public liveness probe
+	handle /healthz {
+		encode gzip zstd
+		reverse_proxy ipfs-access-gateway:8090
+	}
+
+	# SIWE-Authenticated Donor Ciphertext & Metadata Upload Proxy (up to 500 MiB = 524,288,000 B + margin)
+	handle /api/v0/upload {
+		request_body {
+			max_size 525MB
+		}
+		reverse_proxy ipfs-access-gateway:8090 {
+			flush_interval -1
+			transport http {
+				read_timeout 300s
+				write_timeout 300s
+			}
+		}
+	}
+
+	# Public Active Phenopacket Metadata + SIWE-Gated Private Ciphertext Proxy (no gzip on AES-GCM blobs)
+	handle /ipfs/* {
+		reverse_proxy ipfs-access-gateway:8090 {
+			flush_interval -1
+			transport http {
+				read_timeout 300s
+				write_timeout 300s
+			}
+		}
+	}
+
+	handle /v1/ipfs/* {
+		reverse_proxy ipfs-access-gateway:8090 {
+			flush_interval -1
+			transport http {
+				read_timeout 300s
+				write_timeout 300s
+			}
+		}
+	}
+
+	# Reject all other routes cleanly
+	handle {
+		respond "Not Found" 404
+	}
+}

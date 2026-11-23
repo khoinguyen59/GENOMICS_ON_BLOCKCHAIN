@@ -59,12 +59,13 @@ export default function DonorPortal({
 
       {/* Sub-tab 1: Drag & Drop Minting Studio */}
       {donorTab === "upload" && (
-        <DragDropMintingStudio onPublishSuccess={onPublishDataset} />
+        <DragDropMintingStudio key={account || "disconnected"} onPublishSuccess={onPublishDataset} />
       )}
 
       {/* Sub-tab 2: Patient Sovereign Vault & Royalties */}
       {donorTab === "vault" && (
         <PatientSovereignVault
+          key={account || "disconnected"}
           onUpdateStatus={onUpdateStatus}
           onUpdatePrice={onUpdatePrice}
           onGrantDirectAccess={onGrantDirectAccess}

@@ -109,7 +109,7 @@ describe("Adversarial Stress Testing & Edge Cases Audit (Genomics on Blockchain)
       expect(ownerAfter - ownerBefore).to.equal(price);
     });
 
-    it("Should support 100% royalty (10000 bps) without reverting", async function () {
+    it("Should support maximum 50% royalty (MAX_ROYALTY_BPS = 5000 bps) without reverting", async function () {
       const price = ethers.parseUnits("50", 18);
       await registry.registerGenomicData(
         dummyHash,
@@ -119,7 +119,7 @@ describe("Adversarial Stress Testing & Edge Cases Audit (Genomics on Blockchain)
         "ipfs://test",
         price,
         86400,
-        10000 // 100% royalty
+        5000 // MAX_ROYALTY_BPS = 50% royalty ceiling
       );
 
       await token.faucet(researcher1.address);
@@ -132,7 +132,7 @@ describe("Adversarial Stress Testing & Edge Cases Audit (Genomics on Blockchain)
       expect(ownerAfter - ownerBefore).to.equal(price);
     });
 
-    it("Should revert if royaltyBps exceeds 100% (> 10000 bps)", async function () {
+    it("Should revert if royaltyBps exceeds MAX_ROYALTY_BPS (> 5000 bps)", async function () {
       await expect(
         registry.registerGenomicData(
           dummyHash,
@@ -142,9 +142,9 @@ describe("Adversarial Stress Testing & Edge Cases Audit (Genomics on Blockchain)
           "ipfs://test",
           ethers.parseUnits("10", 18),
           86400,
-          10001 // > 10000
+          5001 // > MAX_ROYALTY_BPS (5000)
         )
-      ).to.be.rejected;
+      ).to.be.revertedWithCustomError(nft, "ERC2981InvalidTokenRoyalty");
     });
 
     it("Should handle 1 wei price without precision underflow", async function () {
@@ -420,7 +420,7 @@ describe("Adversarial Stress Testing & Edge Cases Audit (Genomics on Blockchain)
       // Create backup using researcher1's ethers signer
       const backupJson = await createWalletKeyBackup(researcher1, researcher1.address, originalKeyPair);
       const parsedBackup = JSON.parse(backupJson);
-      expect(parsedBackup.version).to.equal("GENO-WALLET-BACKUP-v1");
+      expect(parsedBackup.version).to.equal("GENO-WALLET-BACKUP-v2");
       expect(parsedBackup.account).to.equal(researcher1.address.toLowerCase());
 
       // Restore backup using researcher1's ethers signer
@@ -487,9 +487,9 @@ describe("Adversarial Stress Testing & Edge Cases Audit (Genomics on Blockchain)
       const rawHash = ethers.keccak256(ethers.toUtf8Bytes("TestWorkerDedup"));
       await registry.connect(researcher1).registerGenomicData(
         rawHash,
-        "QmTestRawC1d11111111111111111111111111111111111",
-        "QmTestSumC1d11111111111111111111111111111111111",
-        "QmTestMetaC1d1111111111111111111111111111111111",
+        "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG",
+        "QmZ4tDuvesekSs4qM5ZBKpXiZGun7S2CYtEZRB3DYXkjGx",
+        "QmPZ9qBzzyAtRaQQQUZr6xHS6wVfETRR249s63UME18znJ",
         "ipfs://test",
         ethers.parseEther("10"),
         86400,

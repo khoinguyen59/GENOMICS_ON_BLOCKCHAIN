@@ -183,7 +183,7 @@ describe("Production Protocol Architecture & Security Verification", function ()
       // Attempting to open another escrow while first is still pending should revert
       await expect(
         registry.connect(researcher).grantAccessWithEscrow(1, DISPUTE_WINDOW)
-      ).to.be.revertedWithCustomError(registry, "AccessAlreadyActive");
+      ).to.be.revertedWithCustomError(registry, "EscrowAlreadyActive");
 
       // Even if access expires, an unreleased/unrefunded escrow must block duplicate purchase
       // Fast forward past access duration (30 days) and dispute window (24 hours)

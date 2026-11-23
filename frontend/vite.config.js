@@ -1,35 +1,81 @@
-import { defineConfig } from "vite";
+import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react";
 
-export default defineConfig({
-  plugins: [react()],
-  server: {
-    port: 3000,
-    open: false,
-    proxy: {
-      "/ipfs-rpc": {
-        target: "http://127.0.0.1:5001",
-        rewrite: (path) => path.replace(/^\/ipfs-rpc/, "/api/v0"),
-        changeOrigin: true,
-      },
-    },
+const ipfsProxyConfig = {
+  "/ipfs-rpc": {
+    target: "http://127.0.0.1:5001",
+    rewrite: (path) => path.replace(/^\/ipfs-rpc/, "/api/v0"),
+    changeOrigin: true,
   },
-  build: {
-    chunkSizeWarningLimit: 600,
-    rollupOptions: {
-      output: {
-        manualChunks(id) {
-          if (id.includes("node_modules/ethers")) {
-            return "vendor-ethers";
-          }
-          if (id.includes("node_modules/react") || id.includes("node_modules/react-dom")) {
-            return "vendor-react";
-          }
-          if (id.includes("node_modules/lucide-react")) {
-            return "vendor-icons";
-          }
+  "/ipfs-gw": {
+    target: "http://127.0.0.1:8080",
+    rewrite: (path) => path.replace(/^\/ipfs-gw/, ""),
+    changeOrigin: true,
+  },
+};
+
+function stripLoopbackCspForNonLocalChains(chainIdRaw) {
+  const trimmed = String(chainIdRaw || "").trim();
+  const isNonLocal = trimmed !== "" && trimmed !== "31337";
+  return {
+    name: "genochain-prod-csp-hardening",
+    transformIndexHtml(html) {
+      if (!isNonLocal) return html;
+      return html.replace(
+        /(<meta\s+http-equiv="Content-Security-Policy"\s+content=")([^"]+)(")/i,
+        (_m, prefix, policy, suffix) => {
+          const cleaned = policy
+            .replace(/\s+(?:https?|wss?):\/\/(?:127\.0\.0\.1|localhost):(?:\*|\d+)/gi, "")
+            .replace(/\s{2,}/g, " ")
+            .replace(/;\s+/g, "; ")
+            .trim();
+          return `${prefix}${cleaned}${suffix}`;
+        }
+      );
+    },
+  };
+}
+
+export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode, process.cwd(), "");
+  const effectiveChainId = process.env.VITE_CHAIN_ID ?? env.VITE_CHAIN_ID ?? "";
+  return {
+    plugins: [react(), stripLoopbackCspForNonLocalChains(effectiveChainId)],
+    server: {
+      port: 3000,
+      open: false,
+      proxy: ipfsProxyConfig,
+    },
+    preview: {
+      proxy: ipfsProxyConfig,
+    },
+    build: {
+      chunkSizeWarningLimit: 700,
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            const normId = id.replace(/\\/g, "/");
+            if (normId.includes("/node_modules/snarkjs/") || normId.includes("/node_modules/ffjavascript/")) {
+              return "vendor-snarkjs";
+            }
+            if (normId.includes("/node_modules/ethers/")) {
+              return "vendor-ethers";
+            }
+            if (normId.includes("/node_modules/react/") || normId.includes("/node_modules/react-dom/")) {
+              return "vendor-react";
+            }
+            if (normId.includes("/node_modules/")) {
+              return "vendor-utils";
+            }
+            if (normId.includes("/frontend/src/contracts/")) {
+              return "contracts-meta";
+            }
+            if (normId.includes("/crypto/") || normId.includes("/ipfs/")) {
+              return "genomics-core";
+            }
+          },
         },
       },
     },
-  },
+  };
 });

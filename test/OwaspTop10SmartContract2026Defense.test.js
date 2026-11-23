@@ -521,24 +521,20 @@ describe("OWASP Smart Contract Top 10 (2026 Edition) & DeFiHackLabs Defense Suit
   // SC09: Integer Overflow & Underflow ($260.4M in 2025/2026 incidents)
   // =========================================================================
   describe("SC09: Solidity 0.8.20 Checked Arithmetic & Timestamp Boundaries", function () {
-    it("SC09.1 - Arithmetic overflow in access duration timestamp calculation reverts safely", async function () {
+    it("SC09.1 - Arithmetic overflow in access duration timestamp calculation is blocked at registration (MAX_ACCESS_DURATION = 365 days)", async function () {
       const maxUint256 = ethers.MaxUint256;
-      await genomicsRegistry.connect(aliceCreator).registerGenomicData(
-        SAMPLE_DATA_HASH,
-        SAMPLE_RAW_CID,
-        SAMPLE_SUMMARY_CID,
-        SAMPLE_METADATA_CID,
-        SAMPLE_TOKEN_URI,
-        PRICE,
-        maxUint256, // Duration causing block.timestamp + duration overflow in grantAccess
-        ROYALTY_BPS
-      );
-
-      await genomicToken.connect(charlieBuyer).approve(genomicsRegistry.target, PRICE);
-      // grantAccess calculates block.timestamp + data.accessDuration which overflows uint256
       await expect(
-        genomicsRegistry.connect(charlieBuyer)["grantAccess(uint256)"](1)
-      ).to.be.rejected; // Reverts on overflow
+        genomicsRegistry.connect(aliceCreator).registerGenomicData(
+          SAMPLE_DATA_HASH,
+          SAMPLE_RAW_CID,
+          SAMPLE_SUMMARY_CID,
+          SAMPLE_METADATA_CID,
+          SAMPLE_TOKEN_URI,
+          PRICE,
+          maxUint256, // Exceeds MAX_ACCESS_DURATION (365 days) -> blocked immediately before any grantAccess overflow
+          ROYALTY_BPS
+        )
+      ).to.be.revertedWithCustomError(genomicsRegistry, "InvalidDuration");
     });
 
     it("SC09.2 - Paginated queries safely handle offset + limit > total items without out-of-bounds error", async function () {

@@ -1,7 +1,8 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useWeb3 } from "../../context/Web3Context";
 import { useLanguage } from "../../context/LanguageContext";
 import { useDatasets } from "../../context/DatasetContext";
+import { claimDisputeTimeoutRefund as claimDisputeTimeoutRefundSvc } from "../../services/datasetService";
 import {
   InMemoryDecryptIcon,
   VerifiedBadgeIcon,
@@ -17,8 +18,54 @@ const sanitizeFileName = (name) => (!name ? "Genomic_Data" : name.replace(/[/\\?
 const MAX_PREVIEW_BYTES = 50 * 1024; // 50KB preview cap for browser DOM performance
 const MAX_PREVIEW_LINES = 1000;
 
+function resolveDownloadExtension(item, rawContent) {
+  const isBin = rawContent instanceof Uint8Array;
+  if (isBin && rawContent.length >= 2 && rawContent[0] === 0x1f && rawContent[1] === 0x8b) {
+    return String(item?.format || "").toLowerCase().includes("fastq") ? ".fastq.gz" : ".vcf.gz";
+  }
+  if (isBin && rawContent.length >= 4 && rawContent[0] === 0x42 && rawContent[1] === 0x41 && rawContent[2] === 0x4d && rawContent[3] === 0x01) {
+    return ".bam";
+  }
+  if (isBin && rawContent.length >= 8 && rawContent[0] === 0x63 && rawContent[1] === 0x72) {
+    return ".c4gh";
+  }
+  const fmt = String(item?.format || "").toLowerCase();
+  if (fmt.includes("vcf.gz")) return ".vcf.gz";
+  if (fmt.includes("bam")) return ".bam";
+  if (fmt.includes("c4gh") || fmt.includes("crypt4gh")) return ".c4gh";
+  if (fmt.includes("fastq")) return ".fastq";
+  if (fmt.includes("fasta")) return ".fasta";
+  if (fmt.includes("json")) return ".json";
+  return isBin ? ".bin" : ".vcf";
+}
+
 function formatDecryptedPreview(rawContent) {
-  if (!rawContent || typeof rawContent !== "string") {
+  if (!rawContent) {
+    return { previewText: "", isTruncated: false, totalBytes: 0, totalLines: 0 };
+  }
+  if (rawContent instanceof Uint8Array) {
+    const totalBytes = rawContent.length;
+    const isGzip = totalBytes >= 2 && rawContent[0] === 0x1f && rawContent[1] === 0x8b;
+    const isBam = totalBytes >= 4 && rawContent[0] === 0x42 && rawContent[1] === 0x41 && rawContent[2] === 0x4d && rawContent[3] === 0x01;
+    const isC4gh = totalBytes >= 8 && rawContent[0] === 0x63 && rawContent[1] === 0x72 && rawContent[2] === 0x79 && rawContent[3] === 0x70;
+    const container = isGzip ? "GZIP / BGZF (.vcf.gz)" : isBam ? "BAM Binary Alignment (.bam)" : isC4gh ? "GA4GH Crypt4GH (.c4gh)" : "Binary Genomic Container";
+    const sliceLen = Math.min(totalBytes, 256);
+    const hexRows = [];
+    for (let i = 0; i < sliceLen; i += 16) {
+      const chunk = rawContent.subarray(i, Math.min(i + 16, sliceLen));
+      const hex = Array.from(chunk).map((b) => b.toString(16).padStart(2, "0")).join(" ");
+      const ascii = Array.from(chunk).map((b) => (b >= 32 && b <= 126 ? String.fromCharCode(b) : ".")).join("");
+      hexRows.push(`${i.toString(16).padStart(4, "0")}  ${hex.padEnd(47, " ")}  |${ascii}|`);
+    }
+    const header = `[LOSSLESS IN-MEMORY BINARY CONTAINER: ${container}]\nTotal Verified Bytes: ${totalBytes.toLocaleString()} bytes (First ${sliceLen} bytes hex dump):\n`;
+    return {
+      previewText: header + hexRows.join("\n"),
+      isTruncated: totalBytes > sliceLen,
+      totalBytes,
+      totalLines: hexRows.length + 2
+    };
+  }
+  if (typeof rawContent !== "string") {
     return { previewText: "", isTruncated: false, totalBytes: 0, totalLines: 0 };
   }
   const totalBytes = new TextEncoder().encode(rawContent).length;
@@ -47,18 +94,21 @@ export default function LicensedDatasetsView({
   onDownload,
   onDownloadPdf,
   onClaimRefund,
+  onClaimDisputeTimeout,
   onRecordStudyReuse,
   onConfirmEscrow,
   onDisputeCapsule,
-  onSetManualEscrow
+  onSetManualEscrow,
+  onSetManualRelease
 }) {
-  const { setResearcherTab, showToast, account, getContracts } = useWeb3();
+  const { setResearcherTab, showToast, account, signer, getContracts, getProviderAndSigner, refreshBalance } = useWeb3();
   const {
     purchasedData,
     getLocalizedTitle,
     confirmCapsuleAndReleaseEscrow,
     disputeCapsule,
     setManualEscrowRelease,
+    claimDisputeTimeoutRefund,
     fetchOnChainDatasets
   } = useDatasets();
   const { t, language } = useLanguage();
@@ -66,6 +116,24 @@ export default function LicensedDatasetsView({
   const [reuseInputs, setReuseInputs] = useState({});
   const [busyReuseId, setBusyReuseId] = useState(null);
   const [busyEscrowId, setBusyEscrowId] = useState(null);
+
+  const hasAwaitingCapsule = Boolean(
+    (purchasedData || []).some((p) => p.escrowInfo?.isPending && !p.escrowInfo?.capsuleDelivered && !p.escrowInfo?.isDisputed)
+  );
+
+  useEffect(() => {
+    if (account && fetchOnChainDatasets) {
+      fetchOnChainDatasets(account);
+    }
+  }, [account, fetchOnChainDatasets]);
+
+  useEffect(() => {
+    if (!account || !fetchOnChainDatasets || !hasAwaitingCapsule) return undefined;
+    const timer = setInterval(() => {
+      fetchOnChainDatasets(account);
+    }, 2500);
+    return () => clearInterval(timer);
+  }, [account, fetchOnChainDatasets, hasAwaitingCapsule]);
 
   const handleConfirmEscrow = async (dataId) => {
     try {
@@ -111,12 +179,42 @@ export default function LicensedDatasetsView({
     }
   };
 
+  const handleClaimDisputeTimeout = async (dataId) => {
+    try {
+      setBusyEscrowId(dataId);
+      showToast?.(t("escrowDisputeTimeoutClaiming"), "info");
+      if (onClaimDisputeTimeout) {
+        await onClaimDisputeTimeout(dataId);
+      } else {
+        const activeSigner = signer || (await getProviderAndSigner?.())?.signer;
+        if (activeSigner) {
+          await claimDisputeTimeoutRefundSvc({ dataId, account, signer: activeSigner });
+          await fetchOnChainDatasets?.(account);
+        } else if (claimDisputeTimeoutRefund) {
+          await claimDisputeTimeoutRefund(dataId);
+        } else {
+          const { registry } = await getContracts();
+          const tx = await registry.claimDisputeTimeoutRefund(dataId);
+          await tx.wait();
+          await fetchOnChainDatasets?.(account);
+        }
+      }
+      await refreshBalance?.(account);
+      showToast?.(t("escrowDisputeTimeoutSuccess"));
+    } catch (err) {
+      showToast?.((err.shortMessage || err.message), "error");
+    } finally {
+      setBusyEscrowId(null);
+    }
+  };
+
   const handleToggleManualEscrow = async (dataId, currentManual) => {
     try {
       setBusyEscrowId(dataId);
       const nextManual = !currentManual;
-      if (onSetManualEscrow) {
-        await onSetManualEscrow(dataId, nextManual);
+      const manualHandler = onSetManualRelease || onSetManualEscrow;
+      if (manualHandler) {
+        await manualHandler(dataId, nextManual);
       } else if (setManualEscrowRelease) {
         await setManualEscrowRelease(dataId, nextManual);
       } else {
@@ -138,6 +236,8 @@ export default function LicensedDatasetsView({
     try {
       const label = reuseInputs[dataId]?.trim() || `GWAS_STUDY_${dataId}_${Date.now()}`;
       await onRecordStudyReuse?.(dataId, label);
+    } catch (err) {
+      console.warn("Study reuse error handled:", err?.message || err);
     } finally {
       setBusyReuseId(null);
     }
@@ -155,7 +255,7 @@ export default function LicensedDatasetsView({
     link.href = url;
     link.download = sanitizeFileName(filename);
     link.click();
-    URL.revokeObjectURL(url);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
 
   return (
@@ -273,7 +373,7 @@ export default function LicensedDatasetsView({
                       ) : null}
                     </div>
                     <div style={{ fontSize: "11px", fontFamily: "var(--font-mono)", color: "var(--accent-emerald-text)", marginTop: "4px" }}>
-                      {item.artifactHashCount || 1}/3 {t("licensedArtifactHashes")} • {t("licensedReusesLabel")} {item.reuseCount || 0} • 5% {language === "vi" ? "Phí" : "Fee"}:{" "}
+                      {item.artifactHashCount || 1}/3 {t("licensedArtifactHashes")} • {t("licensedReusesLabel")} {item.reuseCount || 0} • 5% {t("licensedReuseFeeLabel")}{" "}
                       {item.reuseFeeGeno ?? Number(((item.price || 0) * 0.05).toFixed(4))} $GENO
                     </div>
                   </div>
@@ -347,8 +447,16 @@ export default function LicensedDatasetsView({
                     </div>
 
                     <div style={{ color: "var(--text-secondary)", marginTop: "4px" }}>
-                      {t("escrowDeadlineLabel")} {new Date(item.escrowInfo.deadline * 1000).toLocaleString()}
+                      {item.escrowInfo.capsuleDelivered ? t("escrowDisputeDeadlineLabel") : t("escrowDeadlineLabel")}{" "}
+                      {new Date(item.escrowInfo.deadline * 1000).toLocaleString(language === "vi" ? "vi-VN" : "en-US")}
                     </div>
+
+                    {item.escrowInfo.isDisputed && item.escrowInfo.disputeTimeoutAt > 0 && (
+                      <div style={{ color: "var(--accent-rose-text)", marginTop: "4px" }}>
+                        {t("escrowDisputeTimeoutDeadlineLabel")}{" "}
+                        {new Date(item.escrowInfo.disputeTimeoutAt * 1000).toLocaleString(language === "vi" ? "vi-VN" : "en-US")}
+                      </div>
+                    )}
 
                     {/* Escrow Action Buttons */}
                     <div style={{ display: "flex", flexDirection: "column", gap: "6px", marginTop: "8px" }}>
@@ -360,7 +468,7 @@ export default function LicensedDatasetsView({
                             className="btn-terminal btn-terminal-success"
                             style={{ flex: 1, height: "32px", fontSize: "11px", justifyContent: "center" }}
                             onClick={() => handleConfirmEscrow(item.dataId)}
-                            disabled={busyEscrowId === item.dataId}
+                            disabled={busyEscrowId === item.dataId || item.escrowInfo.isDisputed}
                             type="button"
                           >
                             <span>{busyEscrowId === item.dataId ? "..." : (t("btnConfirmEscrowRelease") || "Xác nhận & Giải phóng")}</span>
@@ -370,7 +478,7 @@ export default function LicensedDatasetsView({
                             className="btn-terminal btn-terminal-danger"
                             style={{ flex: 1, height: "32px", fontSize: "11px", justifyContent: "center", background: "#b91c1c", borderColor: "#991b1b", color: "#ffffff" }}
                             onClick={() => handleDisputeCapsule(item.dataId)}
-                            disabled={busyEscrowId === item.dataId || item.escrowInfo.isDisputed}
+                            disabled={busyEscrowId === item.dataId || item.escrowInfo.isDisputed || item.escrowInfo.canDispute === false}
                             type="button"
                           >
                             <span>{item.escrowInfo.isDisputed ? (t("escrowDisputedActive") || "Đã khiếu nại") : (t("btnDisputeCapsule") || "Khiếu nại khóa")}</span>
@@ -378,21 +486,83 @@ export default function LicensedDatasetsView({
                         </div>
                       )}
 
+                      {/* 30-Day Arbitration Escape Hatch Refund Button (when escrow is disputed) */}
+                      {item.escrowInfo.isDisputed && (() => {
+                        const timeoutAt = Number(item.escrowInfo.disputeTimeoutAt || 0);
+                        const nowSec = Number(item.chainNowSec || Math.floor(Date.now() / 1000));
+                        const remSec = Math.max(0, timeoutAt - nowSec);
+                        const remDays = Math.ceil(remSec / 86400);
+                        const canEscape = Boolean(item.escrowInfo.canClaimDisputeTimeout);
+                        const deadlineStr = timeoutAt > 0
+                          ? new Date(timeoutAt * 1000).toLocaleString(language === "vi" ? "vi-VN" : "en-US")
+                          : "30d";
+                        const tooltipText = canEscape
+                          ? t("btnClaimDisputeTimeoutRefund")
+                          : `${t("escrowDisputeTimeoutPendingHint")} ${deadlineStr}${remDays > 0 ? ` (${remDays}d)` : ""}`;
+                        return (
+                          <button
+                            id={`btn-claim-dispute-timeout-${item.dataId}`}
+                            className="btn-terminal btn-terminal-danger"
+                            style={{
+                              width: "100%",
+                              height: "32px",
+                              justifyContent: "center",
+                              fontSize: "11.5px",
+                              background: canEscape ? "#b91c1c" : "rgba(185, 28, 28, 0.35)",
+                              borderColor: "#991b1b",
+                              color: "#ffffff"
+                            }}
+                            title={tooltipText}
+                            disabled={!canEscape || busyEscrowId === item.dataId}
+                            onClick={() => handleClaimDisputeTimeout(item.dataId)}
+                            type="button"
+                          >
+                            <span>
+                              {busyEscrowId === item.dataId
+                                ? "..."
+                                : canEscape
+                                  ? t("btnClaimDisputeTimeoutRefund")
+                                  : `${t("btnClaimDisputeTimeoutRefund")} (${remDays > 0 ? `${remDays}d` : "<1d"})`}
+                            </span>
+                          </button>
+                        );
+                      })()}
+
                       {/* Manual Escrow Toggle */}
-                      <button
-                        id={`btn-toggle-manual-${item.dataId}`}
-                        className="btn-terminal btn-terminal-ghost"
-                        style={{ width: "100%", height: "28px", fontSize: "11px", justifyContent: "center" }}
-                        onClick={() => handleToggleManualEscrow(item.dataId, item.escrowInfo.isManual)}
-                        disabled={busyEscrowId === item.dataId}
-                        type="button"
-                      >
-                        <span>
-                          {item.escrowInfo.isManual
-                            ? (t("escrowManualActive") || "Ký quỹ thủ công: ĐANG BẬT (Bấm để tắt)")
-                            : (t("btnToggleManualEscrow") || "Bật chế độ giải phóng ký quỹ thủ công")}
-                        </span>
-                      </button>
+                      {!item.escrowInfo.isDisputed && (() => {
+                        const chainNow = Number(item.chainNowSec || Math.floor(Date.now() / 1000));
+                        const activeDeadline = Number(
+                          item.escrowInfo.deadline ||
+                            item.escrowInfo.lockDeadline ||
+                            item.escrowInfo.deliveryDeadline ||
+                            0
+                        );
+                        const escrowWindowExpired =
+                          (activeDeadline > 0 && chainNow >= activeDeadline) ||
+                          (item.escrowInfo.capsuleDelivered && item.escrowInfo.canDispute === false) ||
+                          (!item.escrowInfo.capsuleDelivered && Boolean(item.escrowInfo.canRefund));
+                        const manualToggleDisabled =
+                          busyEscrowId === item.dataId ||
+                          item.escrowInfo.isDisputed ||
+                          item.status !== "Active" ||
+                          escrowWindowExpired;
+                        return (
+                          <button
+                            id={`btn-toggle-manual-${item.dataId}`}
+                            className="btn-terminal btn-terminal-ghost"
+                            style={{ width: "100%", height: "28px", fontSize: "11px", justifyContent: "center" }}
+                            onClick={() => handleToggleManualEscrow(item.dataId, item.escrowInfo.isManual)}
+                            disabled={manualToggleDisabled}
+                            type="button"
+                          >
+                            <span>
+                              {item.escrowInfo.isManual
+                                ? t("escrowManualActive")
+                                : t("btnToggleManualEscrow")}
+                            </span>
+                          </button>
+                        );
+                      })()}
 
                       {/* 100% Refund Button */}
                       {item.escrowInfo.canRefund && (
@@ -404,7 +574,7 @@ export default function LicensedDatasetsView({
                             height: "32px",
                             justifyContent: "center",
                             fontSize: "12px",
-                            background: "#dc2626",
+                            background: "#b91c1c",
                             color: "#ffffff"
                           }}
                           onClick={() => onClaimRefund?.(item.dataId)}
@@ -419,7 +589,28 @@ export default function LicensedDatasetsView({
 
                 <div style={{ marginTop: "18px" }}>
                   {!item.decryptedContent ? (
-                    (!item.escrowInfo?.capsuleDelivered && (item.isEscrowPending || item.escrowInfo?.isPending)) ? (
+                    (item.escrowInfo?.isDisputed) ? (
+                      <div
+                        style={{
+                          width: "100%",
+                          padding: "10px",
+                          textAlign: "center",
+                          borderRadius: "var(--radius-xs)",
+                          background: "rgba(239, 68, 68, 0.12)",
+                          border: "1px dashed rgba(239, 68, 68, 0.45)",
+                          color: "var(--accent-rose-text)",
+                          fontSize: "12px",
+                          fontWeight: 600,
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          gap: "6px"
+                        }}
+                      >
+                        <AlertTriangleIcon size={14} color="var(--accent-rose-text)" />
+                        <span>{t("escrowStatusDisputed")}</span>
+                      </div>
+                    ) : (!item.escrowInfo?.capsuleDelivered && (item.isEscrowPending || item.escrowInfo?.isPending)) ? (
                       <div
                         style={{
                           width: "100%",
@@ -447,7 +638,7 @@ export default function LicensedDatasetsView({
                         className="btn-terminal btn-terminal-success"
                         title={t("btnDecryptPayload")}
                         style={{ width: "100%", height: "38px", justifyContent: "center", fontSize: "13px" }}
-                        disabled={item.escrowInfo?.isPending && !item.escrowInfo?.capsuleDelivered}
+                        disabled={(item.escrowInfo?.isPending && !item.escrowInfo?.capsuleDelivered) || item.escrowInfo?.isDisputed || item.status !== "Active"}
                         onClick={() => onDecrypt?.(item.dataId)}
                       >
                         <InMemoryDecryptIcon size={15} />
@@ -459,17 +650,23 @@ export default function LicensedDatasetsView({
                       {/* Action Download Buttons */}
                       <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginBottom: "12px" }}>
                         <button
+                          id={`btn-download-raw-${item.dataId}`}
                           className="btn-terminal btn-terminal-primary"
                           style={{ width: "100%", height: "34px", justifyContent: "center", fontSize: "12px" }}
                           onClick={() =>
                             onDownload?.(
                               item.decryptedContent,
-                              `${sanitizeFileName(item.geneSymbol || item.gene.split(" ")[0])}.vcf`
+                              `${sanitizeFileName(item.geneSymbol || item.gene.split(" ")[0])}${resolveDownloadExtension(item, item.decryptedContent)}`
                             )
                           }
                           type="button"
                         >
-                          <span>{t("btnDownloadVcf")}</span>
+                          <span>
+                            {String(t("btnDownloadVcf")).replace(
+                              /\.VCF\b/i,
+                              resolveDownloadExtension(item, item.decryptedContent).toUpperCase()
+                            )}
+                          </span>
                         </button>
 
                         {item.decryptedPdfBytes && (
@@ -604,7 +801,7 @@ export default function LicensedDatasetsView({
                                   onClick={() =>
                                     onDownload?.(
                                       item.decryptedContent,
-                                      `${sanitizeFileName(item.geneSymbol || item.gene?.split(" ")[0] || "dataset")}.vcf`
+                                      `${sanitizeFileName(item.geneSymbol || item.gene?.split(" ")[0] || "dataset")}${resolveDownloadExtension(item, item.decryptedContent)}`
                                     )
                                   }
                                 >

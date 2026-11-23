@@ -2,7 +2,7 @@ import React from "react";
 import { ServerDriveIcon, CloseCrossIcon } from "../icons/GenoIcons";
 import { useWeb3 } from "../../context/Web3Context";
 import { useLanguage } from "../../context/LanguageContext";
-import { setPinataJwt, setKuboRpcEndpoint } from "../../../../ipfs/pinata_uploader.js";
+import { useModalFocusTrap } from "../../hooks/useModalFocusTrap";
 
 export default function IpfsSettingsModal() {
   const {
@@ -12,33 +12,31 @@ export default function IpfsSettingsModal() {
     setPinataJwtInput,
     kuboRpcInput,
     setKuboRpcInput,
+    kuboGatewayInput,
+    setKuboGatewayInput,
     updateIpfsSettings,
     showToast
   } = useWeb3();
   const { t } = useLanguage();
-
-  React.useEffect(() => {
-    if (!showIpfsSettings) return;
-    const handleKeyDown = (e) => {
-      if (e.key === "Escape") {
-        setShowIpfsSettings(false);
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [showIpfsSettings, setShowIpfsSettings]);
+  const modalRef = useModalFocusTrap(showIpfsSettings, () => setShowIpfsSettings(false));
 
   if (!showIpfsSettings) return null;
 
   const handleSave = () => {
-    updateIpfsSettings?.(pinataJwtInput, kuboRpcInput);
-    setShowIpfsSettings(false);
-    showToast(t("success") + ": " + t("savePreferences"));
+    try {
+      updateIpfsSettings?.(pinataJwtInput, kuboRpcInput, kuboGatewayInput);
+      setShowIpfsSettings(false);
+      showToast(t("success") + ": " + t("savePreferences"));
+    } catch (err) {
+      showToast(err?.message || "Invalid Kubo RPC or Gateway endpoint URL.", "error");
+    }
   };
 
   return (
     <div className="terminal-modal-backdrop" onClick={() => setShowIpfsSettings(false)}>
       <div
+        ref={modalRef}
+        tabIndex={-1}
         className="terminal-modal-window"
         role="dialog"
         aria-modal="true"
@@ -73,7 +71,7 @@ export default function IpfsSettingsModal() {
               className="field-input"
               value={pinataJwtInput}
               onChange={(e) => setPinataJwtInput(e.target.value)}
-              placeholder="Bearer eyJhbGciOi..."
+              placeholder="eyJhbGciOi..."
             />
           </div>
 
@@ -87,6 +85,19 @@ export default function IpfsSettingsModal() {
               value={kuboRpcInput}
               onChange={(e) => setKuboRpcInput(e.target.value)}
               placeholder="http://127.0.0.1:5001"
+            />
+          </div>
+
+          <div className="form-field">
+            <label htmlFor="input-kubo-gateway" className="field-label">{t("ipfsKuboGatewayLabel")}</label>
+            <input
+              id="input-kubo-gateway"
+              type="text"
+              aria-label={t("ipfsKuboGatewayLabel")}
+              className="field-input"
+              value={kuboGatewayInput}
+              onChange={(e) => setKuboGatewayInput(e.target.value)}
+              placeholder="https://ipfs.genochain.example.com"
             />
           </div>
         </div>

@@ -102,7 +102,7 @@ describe("AGENT4 / PART2 — assertions of the required security invariants (fai
 
   async function register(seed, reg = registry, who = owner, price = PRICE) {
     const cleanSeed = String(seed).replace(/0/g, "x").replace(/O/g, "o").replace(/I/g, "i").replace(/l/g, "1").replace(/[^1-9A-HJ-NP-Za-km-z]/g, "");
-    const cid = `QmAgent4P2${cleanSeed}11111111111111111111111111111111`;
+    const cid = "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG";
     const hash = ethers.keccak256(ethers.toUtf8Bytes(`agent4-p2-${seed}`));
     await (await reg.connect(who).registerGenomicData(hash, cid, cid, cid, `ipfs://${seed}`, price, DURATION, 1000)).wait();
     return await reg.dataCount();

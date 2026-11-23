@@ -273,7 +273,8 @@ describe("AGENT5 :: Independent Adversarial Suite", function () {
       await expect(registry.connect(buyer1).getTransformedCapsule.staticCall(dataId, { from: buyer1.address }))
         .to.be.revertedWithCustomError(registry, "DataNotActive");
       expect(await registry.hasActiveAccess(dataId, buyer1.address)).to.equal(false);
-      expect(await registry.buyerCapsules(dataId, buyer1.address)).to.equal("");
+      await expect(registry.buyerCapsules(dataId, buyer1.address))
+        .to.be.revertedWithCustomError(registry, "DataNotActive");
       await expect(registry.connect(owner).updateDataStatus(dataId, 0))
         .to.be.revertedWithCustomError(registry, "ConsentPermanentlyRevoked");
       await expect(registry.connect(owner).updateDataPrice(dataId, 1n))
@@ -486,13 +487,13 @@ describe("AGENT5 :: Independent Adversarial Suite", function () {
       expect(rc.originalCreator).to.equal(creator);
     });
 
-    it("E3 [DEFENCE] royaltyBps is capped at the EIP-2981 denominator; >100% reverts", async function () {
-      const h2 = await computeDataHash("pkg-bps-10000");
-      await registry.connect(owner).registerGenomicData(h2, CID_V0, CID_V0_B, CID_V0, "u", PRICE, DURATION, 10000n)
+    it("E3 [DEFENCE] royaltyBps is capped at MAX_ROYALTY_BPS (5000 = 50%); >50% reverts", async function () {
+      const h2 = await computeDataHash("pkg-bps-5000");
+      await registry.connect(owner).registerGenomicData(h2, CID_V0, CID_V0_B, CID_V0, "u", PRICE, DURATION, 5000n)
         .then((t) => t.wait());
       const id2 = (await registry.dataCount()).toString();
       await expect(registry.connect(owner).registerGenomicData(
-        await computeDataHash("pkg-bps-10001"), CID_V0, CID_V0_B, CID_V0, "u", PRICE, DURATION, 10001n))
+        await computeDataHash("pkg-bps-5001"), CID_V0, CID_V0_B, CID_V0, "u", PRICE, DURATION, 5001n))
         .to.be.revertedWithCustomError(nft, "ERC2981InvalidTokenRoyalty");
       await registry.connect(buyer1)["grantAccess(uint256)"](id2).then((t) => t.wait());
       expect(await token.balanceOf(buyer1.address)).to.equal(900n * E18);

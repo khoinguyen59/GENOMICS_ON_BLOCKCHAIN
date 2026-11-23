@@ -403,8 +403,10 @@ describe("AGENT3 ADVERSARIAL: GenoChain Registry / Token / NFT / zk-Verifier", f
       await expect(
         registry.connect(buyer).getTransformedCapsule.staticCall(dataId)
       ).to.be.revertedWithCustomError(registry, "DataNotActive");
-      // buyerCapsules() must not silently return the capsule either
-      expect(await registry.connect(buyer).buyerCapsules.staticCall(dataId, buyer.address)).to.equal("");
+      // buyerCapsules() must fail closed (DataNotActive) when dataset is Revoked
+      await expect(
+        registry.connect(buyer).buyerCapsules.staticCall(dataId, buyer.address)
+      ).to.be.revertedWithCustomError(registry, "DataNotActive");
     });
   });
 
@@ -781,7 +783,9 @@ describe("AGENT3 ADVERSARIAL: GenoChain Registry / Token / NFT / zk-Verifier", f
       await expect(
         registry.connect(buyer).getTransformedCapsule.staticCall(dataId)
       ).to.be.revertedWithCustomError(registry, "DataNotActive");
-      expect(await registry.connect(buyer).buyerCapsules.staticCall(dataId, buyer.address)).to.equal("");
+      await expect(
+        registry.connect(buyer).buyerCapsules.staticCall(dataId, buyer.address)
+      ).to.be.revertedWithCustomError(registry, "DataNotActive");
       expect(await registry.connect(buyer).hasActiveAccess.staticCall(dataId, buyer.address)).to.equal(false);
     });
   });

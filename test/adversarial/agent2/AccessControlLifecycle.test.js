@@ -50,9 +50,9 @@ describe("AGENT2 :: Access-control bypass & status-lifecycle symmetry", function
 
     const reg = await registry.connect(seller).registerGenomicData(
       ethers.keccak256(ethers.toUtf8Bytes("ACL-DS")),
-      "QmAc1Raw11111111111111111111111111111111111",
-      "QmAc1Sum11111111111111111111111111111111111",
-      "QmAc1Meta1111111111111111111111111111111111",
+      "QmWrkC3aPdQQyCJhAotHDhBEzcQWCaDSqG1mfehsERQJHm",
+      "QmetkRJLiovFGgvzS98sB2R661hn44f6kiH4bK4BxhGRLk",
+      "QmdN3bv826Fx5Nw3tP2peUsMuYrMaTDsNKSHb2SZDGDN3f",
       "ipfs://acl", price, durationSeconds, 1000
     );
     expect((await reg.wait()).status).to.equal(1);

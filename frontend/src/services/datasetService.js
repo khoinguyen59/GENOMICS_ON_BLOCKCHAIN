@@ -283,7 +283,7 @@ export async function publishGenomicDataset({
     .join("");
   const encryptedSummary = await encryptGenomicData(clinicalPdf, summaryKeyHex);
 
-  // Step 2: IPFS Decentralized Pinning (Pinata -> SIWE Private IPFS Gateway -> Local Kubo)
+  // Step 2: IPFS Decentralized Pinning (Fail-Closed SIWE Private IPFS Gateway if configured -> else Pinata -> Local Kubo)
   onStepProgress?.(2);
   const uploadAuthCtx = await resolveGatewayAuthContext({ signer, account });
   const rawUpload = await uploadEncryptedRawData(

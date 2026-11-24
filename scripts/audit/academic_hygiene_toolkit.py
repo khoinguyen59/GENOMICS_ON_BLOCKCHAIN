@@ -32,7 +32,8 @@ FORBIDDEN_EXTENSIONS = (
 )
 FORBIDDEN_DIRECTORIES = (
     '__pycache__', '.pytest_cache', '.vscode', '.idea', 'scratch',
-    'node_modules', '.git', '.system_generated', '.agents', '.gemini'
+    'node_modules', '.git', '.system_generated', '.agents', '.gemini',
+    '.venv', '.local'
 )
 
 def check_clean_zip(zip_path: str, verbose: bool = True) -> tuple[bool, list[str]]:
@@ -127,8 +128,10 @@ def check_script_hex_integrity(directory_path: str = None) -> tuple[bool, list[s
     if not os.path.exists(directory_path):
         return True, []
 
-    # Mau kiem tra nghi van: tx_hash.hex() / transactionHash.hex() thay vi Web3.to_hex(...)
-    pattern_tx_hash_hex = re.compile(r'(?:tx_hash|transactionHash|transaction_hash|txHash)\.hex\(\)')
+    # Mau kiem tra nghi van: tx_hash.hex() / transactionHash.hex() / receipt['transactionHash'].hex() thay vi Web3.to_hex(...)
+    pattern_tx_hash_hex = re.compile(
+        r'''(?:(?:tx_hash|transactionHash|transaction_hash|txHash)|\[['"](?:tx_hash|transactionHash|transaction_hash|txHash)['"]\])\.hex\(\)'''
+    )
 
     for root, _, files in os.walk(directory_path):
         for f in files:

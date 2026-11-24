@@ -94,7 +94,7 @@ export default function LiveTransmissionAudit({ liveTransmissionAudit, rawFileTe
 
         <div className="audit-row-arrow">
           <NetworkMeshIcon size={18} color="var(--accent-emerald)" />
-          <span style={{ fontSize: "10px", color: "var(--accent-emerald)", fontWeight: 700 }}>
+          <span style={{ fontSize: "10px", color: "var(--accent-emerald-text)", fontWeight: 700 }}>
             AES-GCM
           </span>
         </div>
@@ -105,7 +105,7 @@ export default function LiveTransmissionAudit({ liveTransmissionAudit, rawFileTe
             <span>{t("auditWireHeader")}</span>
           </div>
           <div className="audit-box-sub">{t("auditWireSub")}</div>
-          <div className="audit-metric-val" style={{ color: "var(--accent-emerald)" }}>
+          <div className="audit-metric-val" style={{ color: "var(--accent-emerald-text)" }}>
             {t("auditZeroLeakageVal")}
           </div>
           <div className="audit-seq-preview">
@@ -134,7 +134,7 @@ export default function LiveTransmissionAudit({ liveTransmissionAudit, rawFileTe
         </div>
         <div className="summary-metric-item">
           <span className="summary-label">{t("auditSecondaryRoyalty")}</span>
-          <span className="summary-val" style={{ color: "var(--accent-amber)" }}>
+          <span className="summary-val" style={{ color: "var(--accent-amber-text)" }}>
             {`${royaltyPct}% ${t("auditRoyaltyVal")}`}
           </span>
         </div>

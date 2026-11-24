@@ -122,6 +122,10 @@ export default function LicensedDatasetsView({
   );
 
   useEffect(() => {
+    setActivePreviewTab({});
+    setReuseInputs({});
+    setBusyReuseId(null);
+    setBusyEscrowId(null);
     if (account && fetchOnChainDatasets) {
       fetchOnChainDatasets(account);
     }

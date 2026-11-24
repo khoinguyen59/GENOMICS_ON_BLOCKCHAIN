@@ -204,21 +204,20 @@ async def audit_scenario(page, axe_js: str, scenario_tag: str, save_shot: bool):
                 '.spotlight-floating-badge',
                 '.opensea-full-hash',
                 '.os2-search-kbd',
+                '.search-kbd-shortcut',
+                '.nft-price-label',
+                '.btn-clear-all-filters',
+                '.audit-box-sub',
+                '.audit-metric-val',
+                '.summary-val',
+                '.admin-bounty-badge',
                 '.filter-count-badge',
                 '.subnav-tab-item.active'
             ].join(', ');
-            for (const el of document.querySelectorAll(contrastSelectors)) {
-                if (el.closest('.os2-featured-strip-card') || el.classList.contains('os2-brand-btn')) continue;
-                const rect = el.getBoundingClientRect();
-                if (rect.width <= 0 || rect.height <= 0) continue;
-                const st = getComputedStyle(el);
-                if (st.visibility === 'hidden' || parseFloat(st.opacity) < 0.9) continue;
-                if (st.webkitTextFillColor === 'rgba(0, 0, 0, 0)') continue;
-                const txt = (el.innerText || '').trim();
-                if (!txt) continue;
+            const checkContrast = (el, fgStr, labelTxt, suffix = '') => {
                 const bgCandidates = getBgCandidates(el);
-                const fgRaw = parseRgba(st.color);
-                if (!bgCandidates.length || !fgRaw || fgRaw.a === 0) continue;
+                const fgRaw = parseRgba(fgStr);
+                if (!bgCandidates.length || !fgRaw || fgRaw.a === 0) return;
                 let worstRatio = Infinity;
                 for (const bg of bgCandidates) {
                     const fg = fgRaw.a < 1 ? blend(fgRaw, bg) : fgRaw;
@@ -226,11 +225,47 @@ async def audit_scenario(page, axe_js: str, scenario_tag: str, save_shot: bool):
                     const ratio = (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
                     if (ratio < worstRatio) worstRatio = ratio;
                 }
+                const st = getComputedStyle(el);
                 const px = parseFloat(st.fontSize) || 14;
                 const bold = (parseInt(st.fontWeight, 10) || 400) >= 700;
                 const minRatio = (px >= 24 || (bold && px >= 18.67)) ? 3.0 : 4.5;
                 if (worstRatio < minRatio) {
-                    failures.push({ tag: el.tagName, id: el.id || '', cls: String(el.className || '').slice(0, 60), text: txt.slice(0, 40), ratio: Number(worstRatio.toFixed(2)), minRatio });
+                    failures.push({
+                        tag: el.tagName + suffix,
+                        id: el.id || '',
+                        cls: String(el.className || '').slice(0, 60) + suffix,
+                        text: labelTxt.slice(0, 40),
+                        ratio: Number(worstRatio.toFixed(2)),
+                        minRatio
+                    });
+                }
+            };
+            for (const el of document.querySelectorAll(contrastSelectors)) {
+                const rect = el.getBoundingClientRect();
+                if (rect.width <= 0 || rect.height <= 0) continue;
+                const st = getComputedStyle(el);
+                if (st.visibility === 'hidden' || parseFloat(st.opacity) < 0.9) continue;
+                if (st.webkitTextFillColor === 'rgba(0, 0, 0, 0)') continue;
+                const txt = (el.innerText || '').trim();
+                if (!txt) continue;
+                checkContrast(el, st.color, txt);
+            }
+            for (const inp of document.querySelectorAll('.os2-search-input[placeholder]')) {
+                const rect = inp.getBoundingClientRect();
+                if (rect.width <= 0 || rect.height <= 0) continue;
+                const st = getComputedStyle(inp);
+                if (st.visibility === 'hidden' || parseFloat(st.opacity) < 0.9) continue;
+                const ph = getComputedStyle(inp, '::placeholder');
+                const phTxt = (inp.getAttribute('placeholder') || '').trim();
+                if (ph && ph.color && phTxt) {
+                    const phOp = parseFloat(ph.opacity);
+                    const fgRaw = parseRgba(ph.color);
+                    if (fgRaw && Number.isFinite(phOp) && phOp < 1) {
+                        const adj = `rgba(${fgRaw.r}, ${fgRaw.g}, ${fgRaw.b}, ${(fgRaw.a * phOp).toFixed(3)})`;
+                        checkContrast(inp, adj, phTxt, '::placeholder');
+                    } else {
+                        checkContrast(inp, ph.color, phTxt, '::placeholder');
+                    }
                 }
             }
             return failures;
@@ -302,7 +337,8 @@ async def audit_scenario(page, axe_js: str, scenario_tag: str, save_shot: bool):
     return {
         "scenario": scenario_tag,
         "passes_count": len(results.get("passes", [])),
-        "violations_count": len(violations),
+        "violations_count": len(blocking),
+        "axe_violations_count": len(violations),
         "blocking_count": len(blocking),
         "overflow_px": overflow_info["overflowPx"],
         "scroll_width": overflow_info["scrollWidth"],
@@ -322,7 +358,7 @@ async def audit_scenario(page, axe_js: str, scenario_tag: str, save_shot: bool):
                     for node in v.get("nodes", [])[:4]
                 ],
             }
-            for v in violations
+            for v in blocking
         ],
     }
 
@@ -374,6 +410,48 @@ async def run_audit():
             blocking_failures += res["blocking_count"]
             if res["overflow_px"] > 0:
                 overflow_failures += 1
+
+        # Audit Expanded Telemetry (LiveTransmissionAudit + PipelineProgressMonitor) & Active Filter Chips in Light & Dark
+        sample_vcf_path = Path(__file__).resolve().parents[2] / "data" / "sample_metabolic_traits.vcf"
+        for theme in ("light", "dark"):
+            await ensure_theme(page, theme)
+            await ensure_lang(page, "en")
+            await switch_view(page, "provider_mint")
+            file_inp = page.locator("#genomic-file-input")
+            if sample_vcf_path.is_file() and await file_inp.count() > 0:
+                await file_inp.set_input_files(str(sample_vcf_path))
+                await page.wait_for_timeout(450)
+            tel_btn = page.locator("#btn-toggle-privacy-telemetry")
+            if await tel_btn.count() > 0 and await tel_btn.is_visible():
+                # Ensure expanded state
+                if await page.locator(".transmission-audit-card, .pipeline-step-list").count() == 0:
+                    await tel_btn.click()
+                    await page.wait_for_timeout(350)
+                tag = f"desktop_{theme}_en_provider_telemetry_expanded"
+                res = await audit_scenario(page, axe_js, tag, False)
+                all_scenarios.append(res)
+                blocking_failures += res["blocking_count"]
+                if res["overflow_px"] > 0:
+                    overflow_failures += 1
+
+            await switch_view(page, "researcher")
+            search_inp_f = page.locator(".os2-search-input").first
+            if await search_inp_f.count() > 0 and await search_inp_f.is_visible():
+                await search_inp_f.fill("ALDH2")
+                await page.wait_for_timeout(300)
+                tag = f"desktop_{theme}_en_researcher_active_filters"
+                res = await audit_scenario(page, axe_js, tag, False)
+                all_scenarios.append(res)
+                blocking_failures += res["blocking_count"]
+                if res["overflow_px"] > 0:
+                    overflow_failures += 1
+                clear_all_btn = page.locator(".btn-clear-all-filters").first
+                if await clear_all_btn.count() > 0 and await clear_all_btn.is_visible():
+                    await clear_all_btn.click()
+                    await page.wait_for_timeout(200)
+                else:
+                    await search_inp_f.fill("")
+                    await page.wait_for_timeout(150)
 
         # Audit AssetDetailModal in Desktop Light VI
         await ensure_theme(page, "light")

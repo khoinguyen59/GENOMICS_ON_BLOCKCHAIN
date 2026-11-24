@@ -126,7 +126,7 @@
 #### A. Hai loại Token tiêu chuẩn:
 1. **ERC-20 (`GenomicToken - $GENO`):**
    - Tên: `"Genomic Token"`, Ký hiệu: `"GENO"`, Số thập phân: `18`.
-   - Tổng cung: `10,000,000 $GENO` đúc ban đầu cho Deployer.
+   - Cung khởi tạo (`INITIAL_SUPPLY`): `10,000,000 $GENO` đúc ban đầu cho Deployer; trần tổng cung cứng (`MAX_TOTAL_SUPPLY`): `100,000,000 $GENO`; trần vòi thử nghiệm tích lũy (`MAX_FAUCET_SUPPLY`): `50,000,000 $GENO`.
    - Trang bị hàm `faucet(address)` có cơ chế chống rút cạn (Rate-limit cooldown 1 giờ/lần nhận 1,000 $GENO).
 2. **ERC-721 Data Ownership NFT (`GenomicNFT - GNFT`):**
    - Mỗi dataset sau khi đăng ký thành công sẽ đúc ra 1 NFT duy nhất đại diện cho quyền sở hữu dữ liệu.
@@ -170,16 +170,16 @@ Toàn bộ hệ thống đã được kiểm thử thực tế theo chuẩn **We
 
 | Nhóm kiểm tra | Hạng mục thực tế | Lệnh kiểm thử thực tế | Kết quả ghi nhận |
 | :--- | :--- | :--- | :---: |
-| **Smart Contract (Mocha/Hardhat)** | 496 Unit, Adversarial, Invariant, Fuzzing, Regression (`R18-01..06m`, `FIX-70c..f`) & OWASP Top 10 (2026) Tests (33 tệp) | `npx hardhat test` | **496/496 PASS (100%)** |
+| **Smart Contract (Mocha/Hardhat)** | 499 Unit, Adversarial, Invariant, Fuzzing, Regression (`R18-01..06p`, `FIX-70c..f`) & OWASP Top 10 (2026) Tests (33 tệp) | `npx hardhat test` | **499/499 PASS (100%)** |
 | **OWASP Top 10 (2026) & DeFiHackLabs** | 25 Tests phòng thủ SC01-SC10 & Định chuẩn $\Delta \text{Balance} = 0$ | `npx hardhat test test/OwaspTop10SmartContract2026Defense.test.js` | **25/25 PASS (100%)** |
-| **Independent Stress Suite & Diverse Datasets** | 24 kiểm định đối kháng độc lập + 14 kịch bản đa định dạng sinh học (INV-11) | `independent_stress_suite.mjs` & `test_diverse_datasets_e2e.mjs` | **24/24 & 14/14 PASS (100%)** |
-| **UI/UX Adversarial & WCAG 2.2 AA** | 15 kiểm định tĩnh UI/XSS/Sanitizer (`sanitizeGenomicMetadata`/`sanitizeMetadataTree`) + 702/702 khóa i18n + 34 online / 29 offline kịch bản axe-core (`wcag22aa`) + 4/4 live E2E Playwright | `ui_ux_adversarial_suite.mjs`, `audit_ui_ux_axe.py`, `e2e_fullstack_playwright.py` | **15/15, 34/34, 29/29 & 4/4 PASS (0 Violations)** |
+| **Independent Stress Suite & Diverse Datasets** | 24 kiểm định đối kháng độc lập + 14 kịch bản đa định dạng sinh học (INV-11) + toàn bộ 23/23 script `scripts/audit/*.mjs` | `independent_stress_suite.mjs` & `test_diverse_datasets_e2e.mjs` | **24/24, 14/14 & 23/23 PASS (100%)** |
+| **UI/UX Adversarial & WCAG 2.2 AA** | 15 kiểm định tĩnh UI/XSS/Sanitizer (`sanitizeGenomicMetadata`/`sanitizeMetadataTree`, 8/8 modal dialogs) + 702/702 khóa i18n + 38 online / 33 offline kịch bản axe-core (`wcag22aa`) + 4/4 live E2E Playwright | `ui_ux_adversarial_suite.mjs`, `audit_ui_ux_axe.py`, `e2e_fullstack_playwright.py` | **15/15, 38/38, 33/33 & 4/4 PASS (0 Violations)** |
 | **Web3.py Tương tác & Cổng SIWE IPFS** | Tương tác trực tiếp EVM thật (`live_chain_audit.py`, `web3_demo.py`, `ipfs_access_gateway.py`, `capsule_dispatcher.py`) | `python scripts/demo/web3_demo.py` & Gate 16 | **PASS (100%)** |
 | **Liêm Chính Học Thuật (UIT / IS355)** | 3/3 kiểm định tên trường, giảng viên, sinh viên (23520783), tỷ lệ hash | `python scripts/audit/academic_hygiene_toolkit.py --selftest` | **3/3 PASS (100%)** |
 | **Phân Tích Tĩnh (Solhint & Slither)** | Quét toàn bộ 7 Smart Contracts tuân thủ quy chuẩn OpenZeppelin & CEI | `npm run lint:sol` & `slither . --exclude-dependencies` | **0 ERRORS / 0 WARNINGS & 0 High/Med** |
 | **Build Frontend & CSP** | Compile bundle client-side production qua Vite (`231 modules`) + Sepolia CSP strip loopback | `npm --prefix frontend run build` | **BUILT (231 Modules, 0 Errors, 0 Loopback Leaks)** |
 | **Bảo mật Plaintext** | Kiểm toán rò rỉ gói tin (Zero-Plaintext Transmission Wire Leak) | DevTools / E2E Inspection & Gate 18 | **0 Bytes Leaked** |
-| **IPFS Integration** | Private Kubo `0.32.1` PNET (`Peers: 0`), CIDv0/CIDv1 parity, 40 live pins, verify SHA-256 trước giải mã | Gate 12, Gate 13, Gate 14, Gate 16 | **VERIFIED (100%)** |
+| **IPFS Integration** | Private Kubo `0.32.1` PNET (`Peers: 0`), CIDv0/CIDv1 parity, 39 live pins (13 cohorts x 3 artifacts), verify SHA-256 trước giải mã | Gate 12, Gate 13, Gate 14, Gate 16 | **VERIFIED (100%)** |
 | **Mẫu dữ liệu thật** | Nạp thực tế mẫu GIAB NA12878 (13.7 KB) và ALDH2 rs671 (13 cohort lành tính) | Live UI Session (`http://127.0.0.1:4173/`) | **VERIFIED (100%)** |
 
 ---

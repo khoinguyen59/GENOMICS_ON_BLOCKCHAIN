@@ -642,11 +642,17 @@ export async function uploadToPrivateGateway(
   const rawGw = options?.customGateway || getExplicitKuboGatewayEndpoint();
   const gateway = normalizeKuboEndpoint(rawGw, null);
   if (!gateway) return null;
-  if (isLocalRawKuboGateway(gateway) && !options?.forceGatewayUpload) return null;
+  const isPrivateGw = !isLocalRawKuboGateway(gateway);
+  if (!isPrivateGw && !options?.forceGatewayUpload) return null;
 
   const signer = options?.signer;
   if (!signer || typeof signer.signMessage !== "function" || !options?.registryAddress) {
-    return null;
+    const authErr = new Error(
+      "Private IPFS Gateway upload requires an authenticated SIWE signer and registryAddress; unauthenticated Kubo RPC / Pinata fallback is strictly disabled."
+    );
+    authErr.privateGatewayFailClosed = true;
+    authErr.nonRetryable = true;
+    throw authErr;
   }
 
   const bytes =
@@ -680,15 +686,25 @@ export async function uploadToPrivateGateway(
     30_000,
     Math.min(300_000, 15_000 + Math.ceil((payloadSize || 0) / 65536) * 500)
   );
-  const res = await fetch(`${gateway}/api/v0/upload`, {
-    method: "POST",
-    headers: {
-      "Content-Type": mimeType || "application/octet-stream",
-      ...siweHeaders,
-    },
-    body: bytes,
-    signal: AbortSignal.timeout(uploadTimeoutMs),
-  });
+  let res;
+  try {
+    res = await fetch(`${gateway}/api/v0/upload`, {
+      method: "POST",
+      headers: {
+        "Content-Type": mimeType || "application/octet-stream",
+        ...siweHeaders,
+      },
+      body: bytes,
+      signal: AbortSignal.timeout(uploadTimeoutMs),
+    });
+  } catch (netErr) {
+    const failErr = new Error(
+      `Private IPFS Gateway upload network error (${netErr?.message || String(netErr)}); fallback to unauthenticated Kubo RPC or Pinata is strictly disabled.`
+    );
+    failErr.privateGatewayFailClosed = true;
+    failErr.cause = netErr;
+    throw failErr;
+  }
   if (res.ok) {
     const json = await res.json();
     if (json && typeof json.cid === "string" && json.cid.length > 0) {
@@ -705,15 +721,17 @@ export async function uploadToPrivateGateway(
     const errJson = await res.json();
     if (errJson?.error) errDetail = `${errDetail}: ${errJson.error}`;
   } catch (_) {}
-  if (!getKuboRpcEndpoint()) {
-    const upErr = new Error(`Private IPFS Gateway upload failed (${errDetail}).`);
-    upErr.status = res.status;
-    if (res.status === 400 || res.status === 401 || res.status === 403 || res.status === 413 || res.status === 429) {
-      upErr.nonRetryable = true;
-    }
-    throw upErr;
+  // Strictly fail closed whenever Private IPFS Gateway is configured (even if VITE_KUBO_RPC is also set):
+  // NEVER return null to silently fall back to unauthenticated pinFileToKubo / Pinata Cloud!
+  const upErr = new Error(
+    `Private IPFS Gateway upload failed (${errDetail}); fallback to unauthenticated Kubo RPC or Pinata is strictly disabled.`
+  );
+  upErr.status = res.status;
+  upErr.privateGatewayFailClosed = true;
+  if (res.status === 400 || res.status === 401 || res.status === 403 || res.status === 413 || res.status === 429) {
+    upErr.nonRetryable = true;
   }
-  return null;
+  throw upErr;
 }
 
 /**

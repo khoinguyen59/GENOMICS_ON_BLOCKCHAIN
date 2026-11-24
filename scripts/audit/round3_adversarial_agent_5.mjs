@@ -152,8 +152,10 @@ async function runRound3Audit() {
   // 1.2 Check frontend/src/contracts/seedMetadata.json for pure molecular genetics
   const seedMetadataPath = path.join(ROOT_DIR, "frontend", "src", "contracts", "seedMetadata.json");
   let seedClean = true;
+  let seedCount = 0;
   if (fs.existsSync(seedMetadataPath)) {
     const seeds = JSON.parse(fs.readFileSync(seedMetadataPath, "utf-8")).seeds || [];
+    seedCount = seeds.length;
     for (const s of seeds) {
       if (/cancer|ung thư|bệnh án|carcinoma/i.test(s.disease)) {
         seedClean = false;
@@ -162,9 +164,11 @@ async function runRound3Audit() {
     }
   }
   assertTest(
-    seedClean,
+    seedClean && seedCount >= 13,
     "INVARIANT-11: frontend seedMetadata.json datasets represent pure molecular genetics & traits",
-    seedClean ? "All 10 seed datasets represent 1000 Genomes, dbSNP traits, or GIAB benchmarks" : "Seed contains clinical cancer"
+    seedClean
+      ? `All ${seedCount} seed datasets represent 1000 Genomes, dbSNP traits, or GIAB benchmarks`
+      : "Seed contains clinical cancer"
   );
 
   // ===========================================================================

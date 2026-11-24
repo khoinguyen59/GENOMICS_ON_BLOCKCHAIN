@@ -982,7 +982,7 @@
   gap: 6px;
   background: transparent;
   border: none;
-  color: var(--accent-rose);
+  color: var(--accent-rose-text);
   font-size: 12px;
   font-weight: 700;
   cursor: pointer;

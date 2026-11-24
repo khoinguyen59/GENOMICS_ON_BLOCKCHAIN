@@ -175,22 +175,48 @@ assert(
     : `Inputs lacking explicit accessible labels (${unlabelledInputs}) in: ${unlabelledInputHits.join(', ')}`
 );
 
-// Test 3: Modal dialogs implement strict ARIA dialog semantics + LIFO focus trap
-let modalFiles = jsxFiles.filter(f => f.toLowerCase().includes('modal') && f.endsWith('.jsx'));
-let accessibleModals = 0;
+// Test 3: Modal dialogs implement strict ARIA dialog semantics + LIFO focus trap across ALL JSX files
+let modalFiles = jsxFiles.filter((f) => {
+  if (!f.endsWith('.jsx')) return false;
+  const content = fs.readFileSync(f, 'utf8');
+  const dialogDivs = scanJsxTags(content, 'div').filter(
+    (d) => /\brole\s*=\s*["']dialog["']/.test(d.attrs) || /\baria-modal\s*=/.test(d.attrs)
+  );
+  return f.toLowerCase().includes('modal') || dialogDivs.length > 0;
+});
+let totalDialogs = 0;
+let compliantDialogs = 0;
+let nonCompliantModalFiles = [];
 for (const file of modalFiles) {
   const content = fs.readFileSync(file, 'utf8');
-  const hasModalSemantics =
-    content.includes('role="dialog"') &&
-    content.includes('aria-modal') &&
-    content.includes('useModalFocusTrap');
-  if (hasModalSemantics) accessibleModals++;
+  const dialogDivs = scanJsxTags(content, 'div').filter(
+    (d) => /\brole\s*=\s*["']dialog["']/.test(d.attrs) || /\baria-modal\s*=/.test(d.attrs)
+  );
+  const validDialogDivs = dialogDivs.filter(
+    (d) => /\brole\s*=\s*["']dialog["']/.test(d.attrs) && /\baria-modal\s*=\s*["']true["']/.test(d.attrs)
+  );
+  const trapCallCount = (content.match(/\buseModalFocusTrap\s*\(/g) || []).length;
+  const expected = Math.max(dialogDivs.length, 1);
+  totalDialogs += expected;
+  const isFileCompliant =
+    dialogDivs.length > 0 &&
+    validDialogDivs.length === dialogDivs.length &&
+    trapCallCount >= dialogDivs.length;
+  if (isFileCompliant) {
+    compliantDialogs += expected;
+  } else {
+    nonCompliantModalFiles.push(
+      `${path.relative(rootDir, file)}(dialogs=${dialogDivs.length},validAria=${validDialogDivs.length},traps=${trapCallCount})`
+    );
+  }
 }
 assert(
-  accessibleModals === modalFiles.length && modalFiles.length > 0,
+  compliantDialogs === totalDialogs && totalDialogs >= 8 && nonCompliantModalFiles.length === 0,
   'A11Y-03',
-  'Modal components strictly enforce role="dialog", aria-modal="true", and useModalFocusTrap (WCAG Focus Not Obscured)',
-  `Verified ${accessibleModals}/${modalFiles.length} modal dialog components.`
+  'All modal dialogs across ALL JSX components strictly enforce role="dialog", aria-modal="true", and useModalFocusTrap (WCAG Focus Not Obscured)',
+  nonCompliantModalFiles.length === 0
+    ? `Verified ${compliantDialogs}/${totalDialogs} modal dialogs across ${modalFiles.length} JSX components.`
+    : `Non-compliant modals: ${nonCompliantModalFiles.join(', ')}`
 );
 
 // Test 4: Color Contrast & Theme Tokens Consistency

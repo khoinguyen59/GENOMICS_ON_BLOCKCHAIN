@@ -318,7 +318,7 @@ Mỗi bộ dữ liệu sinh siêu dữ liệu **GA4GH Phenopackets v2** nghiêm 
 │   ├── zk/                     # build_groth16_artifacts.mjs (lễ thiết lập Phase 1/2 snarkjs không trapdoor)
 │   ├── demo/                   # capsule_dispatcher.py (--watch, --vault-file, --json-logs, --health-port, SIGTERM, AWS KMS tùy chọn), web3_demo.py, zk_ceremony_helper.mjs, zk_prover_cli.mjs
 │   └── audit/                  # check_eip170.py, parse_slither.py, i18n_parity.mjs, audit_ui_ux_axe.py, e2e_fullstack_playwright.py & đối kháng
-├── test/                       # Bộ kiểm thử hợp đồng, mật mã, OWASP 2026, Groth16 & hồi quy bảo mật (33 tệp, 496 tests)
+├── test/                       # Bộ kiểm thử hợp đồng, mật mã, OWASP 2026, Groth16 & hồi quy bảo mật (33 tệp, 499 tests)
 ├── .github/workflows/          # Quy trình CI ci.yml (push/PR) & security_ci.yml (định kỳ hàng tuần, ghim phiên bản Python)
 ├── hardhat.config.js           # Cấu hình Solidity 0.8.24 Cancun + viaIR + mạng localhost / sepolia / baseSepolia / base theo biến môi trường
 └── package.json                # Khai báo phụ thuộc và npm scripts gốc
@@ -376,7 +376,7 @@ Mọi chỉ số dưới đây được đo trực tiếp trên mã nguồn hi�
 
 | Cổng | Hạng Mục Kiểm Chứng | Lệnh Thực Thi | Kết Quả Thực Nghiệm |
 | :---: | :--- | :--- | :--- |
-| **01** | Toàn bộ bộ kiểm thử Hardhat Mocha | `npx hardhat test` | **496 passing / 0 failing** (`33` tệp test) |
+| **01** | Toàn bộ bộ kiểm thử Hardhat Mocha | `npx hardhat test` | **499 passing / 0 failing** (`33` tệp test) |
 | **02** | Stress đối kháng & Đa định dạng sinh học | `independent_stress_suite.mjs` & `test_diverse_datasets_e2e.mjs` | **24/24 PASS** & **14/14 PASS** |
 | **03** | Trần bytecode EIP-170 & EIP-3860 | `python scripts/audit/check_eip170.py` | **7/7 hợp đồng PASS** (`GenomicsRegistry` `21,543 B <= 24,576 B`) |
 | **04** | Phân tích tĩnh chuẩn phong cách Solhint | `npm run lint:sol` (`--max-warnings 0`) | **0 errors / 0 warnings** |
@@ -385,8 +385,8 @@ Mọi chỉ số dưới đây được đo trực tiếp trên mã nguồn hi�
 | **07** | Chuỗi cung ứng phụ thuộc (`npm ci` & `audit`) | `npm ci` & `npm audit --omit=dev` (root & `frontend/`) | **0 lỗ hổng** (root `0`, frontend `0`) |
 | **08** | Liêm chính, UI/UX đối kháng & cú pháp | `academic_hygiene_toolkit.py`, `ui_ux_adversarial_suite.mjs`, `py_compile`, `bash -n`, `swarm_baseline_gate.sh` | **3/3**, **15/15**, **18/18 Python**, **2/2 Shell**, **13/13 Gate** PASS |
 | **09** | Bản dựng Vite & CSP loại bỏ loopback | `VITE_CHAIN_ID=11155111 npm --prefix frontend run build` | **231 modules**, **0** rò rỉ `127.0.0.1`/`localhost` trong `index.html` & gói JS nội bộ |
-| **10** | Trợ năng WCAG 2.2 AA (Offline Preview) | `audit_ui_ux_axe.py --base-url http://127.0.0.1:4173 --output %TEMP%\ui_ux_axe_offline.json` | **29/29 kịch bản PASS**, `0` vi phạm, `0px` overflow, `:focus-visible`/`<html lang>`/`.os2-search-clear >= 24px` |
-| **11** | Trợ năng WCAG 2.2 AA (Online Live EVM+Kubo) | `audit_ui_ux_axe.py --base-url http://127.0.0.1:4173` | **34/34 kịch bản PASS**, `0` vi phạm, `0px` overflow, `:focus-visible`/`<html lang>`/`.os2-search-clear >= 24px` |
+| **10** | Trợ năng WCAG 2.2 AA (Offline Preview) | `audit_ui_ux_axe.py --base-url http://127.0.0.1:4173 --output %TEMP%\ui_ux_axe_offline.json` | **33/33 kịch bản PASS**, `0` vi phạm, `0px` overflow, `:focus-visible`/`<html lang>`/`.os2-search-clear >= 24px` |
+| **11** | Trợ năng WCAG 2.2 AA (Online Live EVM+Kubo) | `audit_ui_ux_axe.py --base-url http://127.0.0.1:4173` | **38/38 kịch bản PASS**, `0` vi phạm, `0px` overflow, `:focus-visible`/`<html lang>`/`.os2-search-clear >= 24px` |
 | **12** | Cách ly Private Kubo `0.32.1` PNET | `LIBP2P_FORCE_PNET=1 ipfs swarm peers` | **Peers: 0** (cách ly hoàn toàn mạng công cộng) |
 | **13** | Khớp byte CIDv0/CIDv1 với Kubo `0.32.1` | `test_ipfs_cid.mjs` + kiểm chứng `11 B`/`256 KiB`/`600 KiB` | **100% byte-exact parity** (CIDv0 & CIDv1) |
 | **14** | Triển khai sống `REQUIRE_IPFS=1` | `REQUIRE_IPFS=1 hardhat run scripts/deploy/deploy.js` | **13 cohort**, **40 recursive pins** trên Kubo |

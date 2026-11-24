@@ -1,5 +1,5 @@
 # GenoChain Protocol - Immutable Non-Root Private IPFS Access-Control & GDPR Gateway Image
-FROM python:3.11-slim
+FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \

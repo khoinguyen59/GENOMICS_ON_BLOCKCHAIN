@@ -195,7 +195,7 @@ async def run_e2e(base_url: str, rpc_url: str, ipfs_api: str, timeout_ms: int):
 
     tmp_vcf = Path(tempfile.gettempdir()) / f"genochain_e2e_{run_nonce}.vcf"
     tmp_vcf.write_text(unique_vcf_content, encoding="utf-8")
-    tmp_checkpoint = REPO_ROOT / ".local" / f"e2e_dispatcher_checkpoint_{run_nonce}.json"
+    tmp_checkpoint = Path(tempfile.gettempdir()) / f"e2e_dispatcher_checkpoint_{run_nonce}.json"
 
     try:
         async with async_playwright() as p:
@@ -461,11 +461,6 @@ async def run_e2e(base_url: str, rpc_url: str, ipfs_api: str, timeout_ms: int):
 
             decrypt_btn = page.locator("#btn-decrypt-dataset-1")
             await decrypt_btn.wait_for(state="visible", timeout=timeout_ms)
-            await wait_for_condition(
-                lambda: True,
-                timeout_sec=1,
-                desc="noop",
-            )
             await decrypt_btn.click()
 
             pre_loc = page.locator("pre").first
@@ -481,7 +476,8 @@ async def run_e2e(base_url: str, rpc_url: str, ipfs_api: str, timeout_ms: int):
             print("\n=== FLOW 4 (MED-02): Direct Wallet Switch Isolation (Account #2 -> Account #1) ===")
             # Grant Account #1 direct access on Seed #1 on-chain BEFORE switching so Seed #1 card
             # mounts immediately for Account #1 and proves decryptedMap does NOT leak across wallets!
-            send_tx(w3, registry.functions.grantDirectAccess(1, acct1), acct0, HARDHAT_PK_0)
+            if not registry.functions.hasActiveAccess(1, acct1).call():
+                send_tx(w3, registry.functions.grantDirectAccess(1, acct1), acct0, HARDHAT_PK_0)
 
             # Confirm Account #2's plaintext is still visibly rendered right before switch
             pre_switch_body = await page.evaluate("() => document.body.innerText")

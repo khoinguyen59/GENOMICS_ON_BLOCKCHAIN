@@ -100,6 +100,16 @@ async function main() {
   // TEST 1: Escrow Edge Case - Premature Expiry when disputeWindow > accessDuration
   // =========================================================================
   try {
+    // Generate real RSA-OAEP-2048 keypair & valid JSON key capsule (INV-09 + strict on-chain schema)
+    const buyerKeyPair = await generateAsymmetricKeyPair(false);
+    const aesKey1 = await generateSymmetricKey();
+    const validCapsule1 = await packageKeyCapsule(
+      aesKey1,
+      buyerKeyPair.publicKey,
+      buyer.address,
+      seller.address
+    );
+
     // Buyer deposits into escrow
     await registry.connect(buyer).grantAccessWithEscrow(dataId, disputeWindow);
     
@@ -107,13 +117,13 @@ async function main() {
     await ethers.provider.send("evm_increaseTime", [4000]);
     await ethers.provider.send("evm_mine");
 
-    // Seller successfully delivers capsule within dispute window (DEF3-ESCROW-01 resolved)
-    await registry.connect(seller).storeTransformedCapsule(dataId, buyer.address, "VALID_CAPSULE_PAYLOAD");
+    // Seller successfully delivers valid JSON capsule within dispute window (DEF3-ESCROW-01 resolved)
+    await registry.connect(seller).storeTransformedCapsule(dataId, buyer.address, validCapsule1);
     const grantActive = await registry.hasActiveAccess(dataId, buyer.address);
     expect(grantActive).to.be.true;
 
     recordPass(
-      "Escrow Edge Case Resolved: Seller successfully delivers capsule within dispute window and activates access duration",
+      "Escrow Edge Case Resolved: Seller successfully delivers valid JSON capsule within dispute window and activates access duration",
       "Empirically confirmed: Setting expiresAt at capsule delivery time prevents premature expiry during dispute window"
     );
   } catch (e) {
@@ -121,7 +131,7 @@ async function main() {
   }
 
   // =========================================================================
-  // TEST 2: Secondary Market NFT Transfer vs Pending Escrow Settlement
+  // TEST 2: Secondary Market NFT Transfer vs Fair-Exchange Escrow Settlement
   // =========================================================================
   try {
     // Register dataset #2 for secondary sale test
@@ -138,46 +148,80 @@ async function main() {
     );
     const dataId2 = 2n;
 
-    // Secondary buyer creates an escrow deposit
+    // Secondary buyer creates an escrow deposit while seller owns NFT #2
     await registry.connect(secondaryBuyer).grantAccessWithEscrow(dataId2, 86400);
 
     // Now seller transfers the NFT (tokenId 2) to newNftOwner!
     await nft.connect(seller).transferFrom(seller.address, newNftOwner.address, 2n);
     expect(await nft.ownerOf(2n)).to.equal(newNftOwner.address);
 
-    // Can old seller deliver capsule?
+    const secKeyPair = await generateAsymmetricKeyPair(false);
+    const aesKey2 = await generateSymmetricKey();
+    const validCapsuleOldSeller = await packageKeyCapsule(
+      aesKey2,
+      secKeyPair.publicKey,
+      secondaryBuyer.address,
+      seller.address
+    );
+    const validCapsuleNewOwner = await packageKeyCapsule(
+      aesKey2,
+      secKeyPair.publicKey,
+      secondaryBuyer.address,
+      newNftOwner.address
+    );
+
+    // Old seller MUST be blocked from delivering capsule after NFT transfer (NotDataOwner)
     let oldSellerBlocked = false;
     try {
-      await registry.connect(seller).storeTransformedCapsule(dataId2, secondaryBuyer.address, "CAPSULE_BY_OLD_SELLER");
+      await registry.connect(seller).storeTransformedCapsule(dataId2, secondaryBuyer.address, validCapsuleOldSeller);
     } catch (err) {
       oldSellerBlocked = true;
       expect(err.message).to.include("NotDataOwner");
     }
     expect(oldSellerBlocked).to.be.true;
 
-    // Now new NFT owner delivers capsule
+    // New NFT owner delivers capsule for pre-transfer escrow and buyer releases it cleanly
+    await registry.connect(newNftOwner).storeTransformedCapsule(dataId2, secondaryBuyer.address, validCapsuleNewOwner);
+    await registry.connect(secondaryBuyer).confirmCapsuleAndReleaseEscrow(dataId2);
+
+    // Now test post-transfer secondary-market purchase: buyer opens escrow with newNftOwner as live NFT owner!
+    await token.transfer(attacker.address, ethers.parseEther("500"));
+    await token.connect(attacker).approve(registry.target, ethers.parseEther("500"));
+    await registry.connect(attacker).grantAccessWithEscrow(dataId2, 86400);
+
     const sellerOldBal = await token.balanceOf(seller.address);
     const newOwnerBalBefore = await token.balanceOf(newNftOwner.address);
 
-    await registry.connect(newNftOwner).storeTransformedCapsule(dataId2, secondaryBuyer.address, "CAPSULE_BY_NEW_OWNER");
+    const validCapsuleSecondary = await packageKeyCapsule(
+      aesKey2,
+      secKeyPair.publicKey,
+      attacker.address,
+      newNftOwner.address
+    );
+    // Fair-Exchange Escrow holds funds pending buyer verification on capsule delivery
+    await registry.connect(newNftOwner).storeTransformedCapsule(dataId2, attacker.address, validCapsuleSecondary);
+    expect(await token.balanceOf(seller.address)).to.equal(sellerOldBal);
+    expect(await token.balanceOf(newNftOwner.address)).to.equal(newOwnerBalBefore);
+
+    // Buyer confirms delivery -> atomic EIP-2981 split: 90 GENO to current NFT owner, 10 GENO royalty to original creator!
+    await registry.connect(attacker).confirmCapsuleAndReleaseEscrow(dataId2);
 
     const sellerNewBal = await token.balanceOf(seller.address);
     const newOwnerBalAfter = await token.balanceOf(newNftOwner.address);
 
-    // Escrow releases payment to current ownerOf(tokenId) (newNftOwner: 90 GENO) and royalty to creator (seller: 10 GENO)
     expect(sellerNewBal - sellerOldBal).to.equal(ethers.parseEther("10")); // 10% royalty to original creator
     expect(newOwnerBalAfter - newOwnerBalBefore).to.equal(ethers.parseEther("90")); // 90% to current NFT owner
 
     recordPass(
-      "Secondary Market NFT Transfer: Escrow correctly routes proceeds to current NFT owner and royalty to creator",
-      "New NFT owner received 90 GENO and creator received 10 GENO royalty (DEF3-ESCROW-02 resolved)"
+      "Secondary Market NFT Transfer: Old seller blocked (NotDataOwner), Fair-Exchange Escrow holds funds until confirmation, and EIP-2981 routes 90% to current NFT owner + 10% royalty to creator",
+      "New NFT owner received 90 GENO and creator received 10 GENO royalty with 0 wei dust loss (DEF3-ESCROW-02 + INV-03 + INV-07 verified)"
     );
   } catch (e) {
     recordFailure("Secondary Market NFT Transfer Escrow test", e);
   }
 
   // =========================================================================
-  // TEST 3: Anti-Tautological Test Hunt - GenomicZkVerifier Fake Proof Backdoor
+  // TEST 3: Anti-Tautological Test Hunt - GenomicZkVerifier Fake Proof Rejection
   // =========================================================================
   try {
     const GenomicZkVerifier = await ethers.getContractFactory("GenomicZkVerifier");
@@ -197,8 +241,10 @@ async function main() {
       86400
     );
 
-    // Attacker passes completely fabricated fake proof
-    const fakeProof = {
+    const vkJson = JSON.parse(
+      fs.readFileSync(path.resolve(__dirname, "../../frontend/public/zk/verification_key.json"), "utf8")
+    );
+    const offCurveProof = {
       a: [12345n, 67890n],
       b: [
         [11111n, 22222n],
@@ -206,20 +252,68 @@ async function main() {
       ],
       c: [55555n, 66666n]
     };
-    const traitCommitment = ethers.keccak256(ethers.toUtf8Bytes("ATTACKER_FAKE_COMMITMENT"));
+    const forgedOnCurveProof = {
+      a: [1n, 2n],
+      b: [
+        [BigInt(vkJson.vk_gamma_2[0][1]), BigInt(vkJson.vk_gamma_2[0][0])],
+        [BigInt(vkJson.vk_gamma_2[1][1]), BigInt(vkJson.vk_gamma_2[1][0])]
+      ],
+      c: [1n, 2n]
+    };
+    // Valid BN254 scalar field element (< R_MOD) so pairing check itself executes instead of early field-bound short-circuit
+    const traitCommitment = ethers.zeroPadValue("0x123456789abcdef0", 32);
 
-    let fakeProofRejected = false;
+    // 3a. Off-curve fabricated coordinates -> MUST revert InvalidCurvePoint
+    let offCurveRejected = false;
     try {
-      await zkVerifier.connect(attacker).claimZkBounty(1n, fakeProof, traitCommitment);
+      await zkVerifier.connect(attacker).claimZkBounty(1n, offCurveProof, traitCommitment);
     } catch (err) {
-      fakeProofRejected = true;
+      offCurveRejected = true;
+      expect(err.message).to.include("InvalidCurvePoint");
+    }
+    expect(offCurveRejected).to.be.true;
+
+    // 3b. Valid on-curve points BEFORE VK ceremony setup -> MUST fail closed with InvalidZkProof (alpha/ic1 == 0)
+    let vkUnsetRejected = false;
+    try {
+      await zkVerifier.connect(attacker).claimZkBounty(1n, forgedOnCurveProof, traitCommitment);
+    } catch (err) {
+      vkUnsetRejected = true;
       expect(err.message).to.include("InvalidZkProof");
     }
-    expect(fakeProofRejected).to.be.true;
+    expect(vkUnsetRejected).to.be.true;
+
+    // 3c. Configure genuine Groth16 V2 VK (IC=4) from compiled ceremony artifact
+    await zkVerifier.connect(deployer).setupVerificationKeyV2(
+      [BigInt(vkJson.vk_alpha_1[0]), BigInt(vkJson.vk_alpha_1[1])],
+      [
+        [BigInt(vkJson.vk_beta_2[0][1]), BigInt(vkJson.vk_beta_2[0][0])],
+        [BigInt(vkJson.vk_beta_2[1][1]), BigInt(vkJson.vk_beta_2[1][0])]
+      ],
+      [
+        [BigInt(vkJson.vk_gamma_2[0][1]), BigInt(vkJson.vk_gamma_2[0][0])],
+        [BigInt(vkJson.vk_gamma_2[1][1]), BigInt(vkJson.vk_gamma_2[1][0])]
+      ],
+      [
+        [BigInt(vkJson.vk_delta_2[0][1]), BigInt(vkJson.vk_delta_2[0][0])],
+        [BigInt(vkJson.vk_delta_2[1][1]), BigInt(vkJson.vk_delta_2[1][0])]
+      ],
+      ...vkJson.IC.map((pt) => [BigInt(pt[0]), BigInt(pt[1])])
+    );
+
+    // 3d. Valid BN254 curve points forming a forged proof after VK setup -> MUST revert InvalidZkProof via pairing precompile
+    let forgedPairingRejected = false;
+    try {
+      await zkVerifier.connect(attacker).claimZkBounty(1n, forgedOnCurveProof, traitCommitment);
+    } catch (err) {
+      forgedPairingRejected = true;
+      expect(err.message).to.include("InvalidZkProof");
+    }
+    expect(forgedPairingRejected).to.be.true;
 
     recordPass(
-      "Anti-Tautological Test Hunt: Synthetic mock fallback removed from GenomicZkVerifier",
-      "Empirically confirmed: Bogus/mock proof strictly reverted with InvalidZkProof() (DEF3-ZK-01 resolved)"
+      "Anti-Tautological Test Hunt: GenomicZkVerifier strictly enforces VK setup, BN254 curve checks, and real Groth16 pairing",
+      "Empirically confirmed: InvalidCurvePoint (off-curve), InvalidZkProof (pre-VK fail-closed), and InvalidZkProof (on-curve forged pairing)"
     );
   } catch (e) {
     recordFailure("Anti-Tautological Test Hunt: GenomicZkVerifier", e);
@@ -323,11 +417,13 @@ async function main() {
     recordFailure("Asymmetric Key Encapsulation", e);
   }
 
+  const failedTests = totalTests - passedTests;
+  const statusBanner = failedTests === 0 ? "100% EMPIRICAL SUCCESS" : `${failedTests} FAILED`;
   console.log("\n" + "=".repeat(80));
-  console.log(`[AUDIT] ROUND 3 AUDIT SUITE SUMMARY: ${passedTests}/${totalTests} TESTS PASSED (100% EMPIRICAL SUCCESS)`);
+  console.log(`[AUDIT] ROUND 3 AUDIT SUITE SUMMARY: ${passedTests}/${totalTests} TESTS PASSED (${statusBanner})`);
   console.log("=".repeat(80));
 
-  if (passedTests !== totalTests) {
+  if (failedTests > 0) {
     process.exit(1);
   }
 }

@@ -6,7 +6,8 @@ import LiveTransmissionAudit from "./LiveTransmissionAudit";
 export default function PipelineProgressMonitor({
   publishStep,
   liveTransmissionAudit,
-  rawFileText
+  rawFileText,
+  royaltyBps = 1000
 }) {
   const { t } = useLanguage();
 
@@ -26,6 +27,7 @@ export default function PipelineProgressMonitor({
       <LiveTransmissionAudit
         liveTransmissionAudit={liveTransmissionAudit}
         rawFileText={rawFileText}
+        royaltyBps={royaltyBps}
       />
 
       {/* Pipeline Architecture Summary */}

@@ -132,6 +132,19 @@ export function getLocalIpfsCacheSize() {
 }
 
 async function pinBytesToIpfsNetwork(fileBytes, fileName, mimeType, customJwt = null, uploadOptions = null) {
+  // Strictly fail-closed routing precedence: when a Private IPFS Gateway is configured,
+  // route FIRST and EXCLUSIVELY through the SIWE-authenticated Private IPFS Gateway
+  // (NEVER leak encrypted payloads to Pinata Cloud or fall back to unauthenticated Kubo RPC).
+  if (isPrivateIpfsGatewayConfigured(uploadOptions?.customGateway || null)) {
+    const gatewayRes = await uploadToPrivateGateway(fileBytes, fileName, mimeType, uploadOptions || {});
+    if (gatewayRes) return gatewayRes;
+    const privateErr = new Error(
+      "Private IPFS Gateway upload failed; Pinata Cloud and unauthenticated Kubo RPC fallbacks are strictly disabled."
+    );
+    privateErr.privateGatewayFailClosed = true;
+    throw privateErr;
+  }
+
   const pinataRes = await pinFileToPinata(fileBytes, fileName, mimeType, customJwt);
   if (pinataRes) return pinataRes;
 
@@ -163,10 +176,25 @@ export async function uploadEncryptedSummaryReport(encryptedPdfBytes, originalFi
 
 export async function uploadPhenopacketMetadata(phenopacketJson, pinataJwt = null, uploadOptions = null) {
   const name = `phenopacket_${phenopacketJson.id || "meta"}.json`;
+  const jsonString = typeof phenopacketJson === "string" ? phenopacketJson : JSON.stringify(phenopacketJson, null, 2);
+
+  // Strictly fail-closed routing precedence: when a Private IPFS Gateway is configured,
+  // route FIRST and EXCLUSIVELY to Private IPFS Gateway (zero Pinata Cloud / raw Kubo leak).
+  if (isPrivateIpfsGatewayConfigured(uploadOptions?.customGateway || null)) {
+    const jsonBytes = new TextEncoder().encode(jsonString);
+    const gwRes = await uploadToPrivateGateway(jsonBytes, name, "application/json", uploadOptions || {});
+    if (gwRes) {
+      return { cid: gwRes.cid, json: phenopacketJson, pinnedOn: gwRes.pinnedOn };
+    }
+    const privateErr = new Error(
+      "Private IPFS Gateway Phenopacket metadata upload failed; Pinata Cloud and unauthenticated Kubo RPC fallbacks are strictly disabled."
+    );
+    privateErr.privateGatewayFailClosed = true;
+    throw privateErr;
+  }
 
   let res = await pinJsonToPinata(phenopacketJson, name, pinataJwt);
   if (!res) {
-    const jsonString = typeof phenopacketJson === "string" ? phenopacketJson : JSON.stringify(phenopacketJson, null, 2);
     const jsonBytes = new TextEncoder().encode(jsonString);
     res = await uploadToPrivateGateway(jsonBytes, name, "application/json", uploadOptions || {});
   }

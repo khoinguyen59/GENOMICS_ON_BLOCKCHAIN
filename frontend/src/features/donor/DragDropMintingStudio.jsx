@@ -926,6 +926,7 @@ export default function DragDropMintingStudio({ onPublishSuccess }) {
           {/* Collapsible Cryptographic Privacy Telemetry & Step Monitor */}
           <div style={{ marginTop: "24px", paddingTop: "18px", borderTop: "1px solid var(--border-subtle)" }}>
             <button
+              id="btn-toggle-privacy-telemetry"
               type="button"
               onClick={() => setShowTelemetry(!showTelemetry)}
               style={{

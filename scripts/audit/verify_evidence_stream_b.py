@@ -146,7 +146,31 @@ def main() -> int:
                 else:
                     print(f"  [PASS] {rel_report}: scenarios={sc}, blocking={bv}, overflow={ov}")
             else:
-                print(f"  [PASS] {rel_report}: valid JSON ({os.path.getsize(abs_rep):,} B)")
+                if data.get("success") is not True:
+                    failures.append(f"{rel_report}: Slither success != True (error={data.get('error')})")
+                    print(f"  [FAIL] {rel_report}: success={data.get('success')!r}")
+                else:
+                    detectors = data.get("results", {}).get("detectors", [])
+                    prod_blocking = []
+                    for d in detectors:
+                        impact = str(d.get("impact", "")).strip().lower()
+                        if impact not in ("high", "medium"):
+                            continue
+                        for el in d.get("elements", []):
+                            src = str(el.get("source_mapping", {}).get("filename_relative", "")).replace("\\", "/")
+                            if src.startswith("contracts/") and not src.startswith("contracts/mocks/"):
+                                prod_blocking.append(f"{d.get('check')}({impact})@{src}")
+                                break
+                    if prod_blocking:
+                        failures.append(
+                            f"{rel_report}: {len(prod_blocking)} High/Medium finding(s) in production contracts/: {prod_blocking[:5]}"
+                        )
+                        print(f"  [FAIL] {rel_report}: {len(prod_blocking)} High/Medium prod finding(s)")
+                    else:
+                        print(
+                            f"  [PASS] {rel_report}: success=True, prod_high_medium=0 "
+                            f"(detectors={len(detectors)}, {os.path.getsize(abs_rep):,} B)"
+                        )
         except Exception as exc:
             failures.append(f"{rel_report}: invalid JSON ({exc})")
             print(f"  [FAIL] {rel_report}: invalid JSON ({exc})")

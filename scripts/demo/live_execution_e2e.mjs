@@ -151,12 +151,19 @@ async function main() {
   console.log(`    IV (Hex, 12 bytes)   : ${encResult.ivHex}`);
   console.log(`    rawDataHash (Anchor) : ${encResult.rawDataHash}`);
 
-  // RFC Multihash CIDv0
+  // RFC Multihash CIDv0 calculated over authentic encrypted raw, summary, and metadata payloads
   const rawCid = await computeIpfsCidV0(encResult.payload);
-  const summaryCid = "QmZ4tDuvesekSs4qM5ZBKpXiZGun7S2CYtEZRB3DYXkjGx";
-  const metadataCid = "QmPZ9qBzzyAtRaQQQUZr6xHS6wVfETRR249s63UME18znJ";
+  const sampleSummaryEnc = await encryptGenomicData(
+    "GENOCHAIN LIVE SUMMARY REPORT\nCohort: ALDH2 / ACTN3 / HERC2 Benign Molecular Traits\n"
+  );
+  const summaryCid = await computeIpfsCidV0(sampleSummaryEnc.payload);
+  const sampleMetaBytes = Buffer.from(
+    JSON.stringify({ id: "genochain-live-e2e-meta", schema: "2.0.0", rawCid, summaryCid }),
+    "utf8"
+  );
+  const metadataCid = await computeIpfsCidV0(sampleMetaBytes);
   const tokenUri = `ipfs://${metadataCid}`;
-  console.log(`    Calculated IPFS CIDv0: ${rawCid}`);
+  console.log(`    Calculated IPFS CIDv0: raw=${rawCid}, summary=${summaryCid}, meta=${metadataCid}`);
 
   // --------------------------------------------------------------------------
   // STEP 3: REGISTER GENOMIC DATASET & MINT ERC-721 NFT ON-CHAIN
@@ -185,12 +192,18 @@ async function main() {
   console.log(`    Total Datasets On-Chain: ${dataCount.toString()} (New Data ID: #${currentDataId})`);
 
   // Verify GenomicData struct on-chain
+  // Tuple layout: [0]=dataId, [1]=tokenId, [2]=currentOwner, [3]=rawDataHash, [4]=rawCid, [5]=summaryCid, [6]=metadataCid, [7]=price, [8]=accessDuration, [9]=status
   const onChainData = await registryContract.getGenomicData(currentDataId);
+  const onChainOwner = onChainData.currentOwner || onChainData[2];
+  const onChainHashAnchored = onChainData.rawDataHash || onChainData[3];
   console.log(`    On-Chain Data ID     : #${onChainData.dataId || onChainData[0]}`);
-  console.log(`    On-Chain Owner       : ${onChainData.owner || onChainData[1]}`);
-  console.log(`    On-Chain rawDataHash : ${onChainData.rawDataHash || onChainData[2]}`);
+  console.log(`    On-Chain Owner       : ${onChainOwner}`);
+  console.log(`    On-Chain rawDataHash : ${onChainHashAnchored}`);
   console.log(`    On-Chain Price       : ${ethers.formatEther(onChainData.price || onChainData[7])} $GENO`);
   console.log(`    On-Chain Status      : ${onChainData.status ?? onChainData[9]} (0 = Active)`);
+  if (String(onChainOwner).toLowerCase() !== dataOwner.address.toLowerCase()) {
+    throw new Error(`On-chain currentOwner mismatch: ${onChainOwner} vs ${dataOwner.address}`);
+  }
 
   // --------------------------------------------------------------------------
   // STEP 4: RESEARCHER ASYMMETRIC KEY REGISTRATION
@@ -268,7 +281,7 @@ async function main() {
 
   // Verify hash before decryption
   const computedHash = await computeDataHash(encResult.payload);
-  const onChainHash = onChainData.rawDataHash || onChainData[2];
+  const onChainHash = onChainData.rawDataHash || onChainData[3];
   console.log(`    Downloaded Blob Hash : ${computedHash}`);
   console.log(`    On-Chain Anchor Hash : ${onChainHash}`);
   if (computedHash.toLowerCase() !== onChainHash.toLowerCase()) {

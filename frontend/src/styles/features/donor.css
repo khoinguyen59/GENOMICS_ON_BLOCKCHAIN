@@ -1244,6 +1244,11 @@ input.terminal-input[id*="salt"] {
   color: #b45309;
 }
 
+[data-theme="light"] .admin-bounty-badge.is-closed {
+  background: #f1f5f9;
+  color: #334155;
+}
+
 .admin-trait-hash-bar {
   display: flex;
   align-items: center;

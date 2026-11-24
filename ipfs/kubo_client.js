@@ -62,10 +62,13 @@ export function normalizeKuboEndpoint(raw, fallback = null) {
 }
 
 /**
- * Detect whether the Vite build explicitly targets a non-localhost EVM chain (chainId !== 31337).
+ * Detect whether the Vite build or runtime explicitly targets a non-localhost EVM chain (chainId !== 31337).
  * @returns {boolean}
  */
 export function isNonLocalConfiguredChain() {
+  if (typeof __GENOCHAIN_NON_LOCAL_CHAIN__ !== "undefined" && Boolean(__GENOCHAIN_NON_LOCAL_CHAIN__)) {
+    return true;
+  }
   try {
     if (typeof import.meta !== "undefined" && import.meta.env?.VITE_CHAIN_ID !== undefined) {
       const raw = String(import.meta.env.VITE_CHAIN_ID).trim();
@@ -77,6 +80,15 @@ export function isNonLocalConfiguredChain() {
       }
     }
   } catch (_) {}
+  if (typeof process !== "undefined" && process.env?.VITE_CHAIN_ID !== undefined) {
+    const raw = String(process.env.VITE_CHAIN_ID).trim();
+    if (raw !== "") {
+      const parsed = Number(raw);
+      if (Number.isInteger(parsed) && parsed > 0 && parsed !== 31337) {
+        return true;
+      }
+    }
+  }
   return false;
 }
 

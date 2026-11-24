@@ -1,5 +1,5 @@
 {
-  "scenarios_count": 40,
+  "scenarios_count": 42,
   "blocking_violations_total": 0,
   "overflow_failures_total": 0,
   "wcag_live_checks": {
@@ -29,6 +29,34 @@
       "donor": true,
       "admin": true,
       "modalBlocked": true,
+      "passed": true
+    },
+    "hoverContrastChecks": {
+      "btnClearPriceHover": {
+        "found": true,
+        "ratio": 6.47,
+        "minReq": 4.5,
+        "passed": true
+      },
+      "nftHoverInspectBtn": {
+        "found": true,
+        "cardHoverIconRatio": 17.79,
+        "cardHoverBorderRatio": 4.34,
+        "btnHoverIconRatio": 6.7,
+        "passed": true
+      },
+      "specBoxHover": {
+        "found": true,
+        "labelRatio": 9.45,
+        "valueRatio": 16.3,
+        "passed": true
+      },
+      "passed": true
+    },
+    "nonOwnerAssetModal": {
+      "tested": true,
+      "lightEnabledBuyBtn": true,
+      "darkEnabledBuyBtn": true,
       "passed": true
     }
   },
@@ -361,6 +389,28 @@
     {
       "scenario": "desktop_dark_vi_licensed_view",
       "passes_count": 36,
+      "violations_count": 0,
+      "axe_violations_count": 0,
+      "blocking_count": 0,
+      "overflow_px": 0,
+      "scroll_width": 1440,
+      "client_width": 1440,
+      "violations": []
+    },
+    {
+      "scenario": "desktop_light_vi_modal_non_owner",
+      "passes_count": 45,
+      "violations_count": 0,
+      "axe_violations_count": 0,
+      "blocking_count": 0,
+      "overflow_px": 0,
+      "scroll_width": 1440,
+      "client_width": 1440,
+      "violations": []
+    },
+    {
+      "scenario": "desktop_dark_vi_modal_non_owner",
+      "passes_count": 45,
       "violations_count": 0,
       "axe_violations_count": 0,
       "blocking_count": 0,

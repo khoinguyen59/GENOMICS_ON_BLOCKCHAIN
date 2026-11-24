@@ -221,7 +221,7 @@ export default function AssetDetailModal({ onPurchase }) {
             title={t("close")}
             aria-label={t("close") || "Close modal"}
           >
-            <CloseCrossIcon size={16} color="var(--text-muted)" />
+            <CloseCrossIcon size={16} color="currentColor" />
           </button>
         </div>
 
@@ -538,7 +538,7 @@ export default function AssetDetailModal({ onPurchase }) {
                       </>
                     ) : (
                       <>
-                        <VerifiedBadgeIcon size={16} color="var(--accent-emerald)" />
+                        <VerifiedBadgeIcon size={16} color="currentColor" />
                         <span>{t("btnPurchased")} • {t("viewLicensedTab") || "Xem & Giải Mã"}</span>
                       </>
                     )}

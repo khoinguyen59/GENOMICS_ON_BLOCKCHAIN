@@ -268,6 +268,59 @@ async def audit_scenario(page, axe_js: str, scenario_tag: str, save_shot: bool):
                     }
                 }
             }
+            // WCAG 2.2 SC 1.4.11 Non-text Contrast (>= 3.0:1) for visible icon-only buttons & .modal-close-btn svg
+            const resolveSvgInk = (svgEl) => {
+                const pickColor = (el) => {
+                    const s = getComputedStyle(el);
+                    for (const prop of ['stroke', 'fill']) {
+                        const val = s[prop];
+                        if (val && val !== 'none' && !val.startsWith('url(')) {
+                            const parsed = parseRgba(val);
+                            if (parsed && parsed.a > 0) return parsed;
+                        }
+                    }
+                    return null;
+                };
+                const direct = pickColor(svgEl);
+                if (direct) return direct;
+                for (const shape of svgEl.querySelectorAll('path, line, circle, rect, polyline, polygon')) {
+                    const c = pickColor(shape);
+                    if (c) return c;
+                }
+                return parseRgba(getComputedStyle(svgEl).color);
+            };
+            for (const btn of document.querySelectorAll('button:not(:disabled), .modal-close-btn')) {
+                const rect = btn.getBoundingClientRect();
+                if (rect.width <= 0 || rect.height <= 0) continue;
+                const st = getComputedStyle(btn);
+                if (st.visibility === 'hidden' || st.display === 'none' || parseFloat(st.opacity) < 0.9) continue;
+                const txt = (btn.innerText || '').trim();
+                if (txt.length > 0 && !btn.classList.contains('modal-close-btn')) continue;
+                const svg = btn.querySelector('svg');
+                if (!svg) continue;
+                const svgRect = svg.getBoundingClientRect();
+                if (svgRect.width <= 0 || svgRect.height <= 0) continue;
+                const fgRaw = resolveSvgInk(svg);
+                const bgCandidates = getBgCandidates(svg);
+                if (!fgRaw || !bgCandidates.length) continue;
+                let worstRatio = Infinity;
+                for (const bg of bgCandidates) {
+                    const fg = fgRaw.a < 1 ? blend(fgRaw, bg) : fgRaw;
+                    const l1 = lum(fg), l2 = lum(bg);
+                    const ratio = (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
+                    if (ratio < worstRatio) worstRatio = ratio;
+                }
+                if (worstRatio < 3.0) {
+                    failures.push({
+                        tag: 'BUTTON>SVG',
+                        id: btn.id || '',
+                        cls: String(btn.className || '').slice(0, 60) + ' svg',
+                        text: (btn.getAttribute('aria-label') || btn.getAttribute('title') || 'icon-button').slice(0, 40),
+                        ratio: Number(worstRatio.toFixed(2)),
+                        minRatio: 3.0
+                    });
+                }
+            }
             return failures;
         }"""
     )
@@ -674,11 +727,197 @@ async def run_audit():
             "passed": all(slash_results.values()),
         }
 
+        # 1e. Live Light-Mode :hover contrast checks (.btn-clear-price, .nft-hover-inspect-btn, .spec-box)
+        async def _eval_contrast_pair(pg, selector: str, mode: str = "text"):
+            return await pg.evaluate(
+                """([sel, checkMode]) => {
+                    const el = document.querySelector(sel);
+                    if (!el) return { found: false, ratio: 0, passed: false };
+                    const parseRgba = (str) => {
+                        const m = String(str || '').match(/rgba?\\((\\d+(?:\\.\\d+)?),\\s*(\\d+(?:\\.\\d+)?),\\s*(\\d+(?:\\.\\d+)?)(?:,\\s*(\\d+(?:\\.\\d+)?))?\\)/);
+                        if (!m) return null;
+                        return { r: +m[1], g: +m[2], b: +m[3], a: m[4] === undefined ? 1 : +m[4] };
+                    };
+                    const blend = (fg, bg) => ({
+                        r: fg.r * fg.a + bg.r * (1 - fg.a),
+                        g: fg.g * fg.a + bg.g * (1 - fg.a),
+                        b: fg.b * fg.a + bg.b * (1 - fg.a),
+                        a: 1
+                    });
+                    const lum = (c) => {
+                        const ch = [c.r, c.g, c.b].map(v => {
+                            const s = v / 255;
+                            return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+                        });
+                        return 0.2126 * ch[0] + 0.7152 * ch[1] + 0.0722 * ch[2];
+                    };
+                    const resolveEffectiveBg = (node) => {
+                        const layers = [];
+                        let cur = node;
+                        while (cur && cur.nodeType === 1) {
+                            const bg = parseRgba(getComputedStyle(cur).backgroundColor);
+                            if (bg && bg.a > 0) {
+                                layers.push(bg);
+                                if (bg.a >= 0.999) break;
+                            }
+                            cur = cur.parentElement;
+                        }
+                        let acc = parseRgba(getComputedStyle(document.body).backgroundColor) || { r: 255, g: 255, b: 255, a: 1 };
+                        if (acc.a < 0.99) acc = { r: 255, g: 255, b: 255, a: 1 };
+                        for (let i = layers.length - 1; i >= 0; i--) acc = blend(layers[i], acc);
+                        return acc;
+                    };
+                    const st = getComputedStyle(el);
+                    const bg = resolveEffectiveBg(el);
+                    let fgRaw = parseRgba(st.color);
+                    let minReq = 4.5;
+                    if (checkMode === 'svg') {
+                        const svg = el.querySelector('svg');
+                        if (svg) {
+                            const ss = getComputedStyle(svg);
+                            fgRaw = parseRgba(ss.stroke !== 'none' ? ss.stroke : (ss.fill !== 'none' ? ss.fill : ss.color)) || fgRaw;
+                        }
+                    } else if (checkMode === 'border') {
+                        fgRaw = parseRgba(st.borderTopColor || st.borderColor);
+                        const parentBg = resolveEffectiveBg(el.parentElement);
+                        if (!fgRaw) return { found: true, ratio: 0, passed: false };
+                        const fg = fgRaw.a < 1 ? blend(fgRaw, parentBg) : fgRaw;
+                        const l1 = lum(fg), l2 = lum(parentBg);
+                        const ratio = (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
+                        return { found: true, ratio: Number(ratio.toFixed(2)), minReq: 3.0, passed: ratio >= 3.0 };
+                    }
+                    if (!fgRaw) return { found: true, ratio: 0, passed: false };
+                    const fg = fgRaw.a < 1 ? blend(fgRaw, bg) : fgRaw;
+                    const l1 = lum(fg), l2 = lum(bg);
+                    const ratio = (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
+                    return { found: true, ratio: Number(ratio.toFixed(2)), minReq, passed: ratio >= minReq };
+                }""",
+                [selector, mode],
+            )
+
+        await ensure_theme(page, "light")
+        await ensure_lang(page, "en")
+        await switch_view(page, "researcher")
+
+        hover_checks = {}
+        # 1e-i. .btn-clear-price:hover in Light Mode (>= 4.5:1)
+        price_min_inp = page.locator(".price-num-input").first
+        apply_price_btn = page.locator(".btn-apply-price").first
+        if await price_min_inp.count() > 0 and await apply_price_btn.count() > 0:
+            await price_min_inp.fill("50")
+            await apply_price_btn.click()
+            await page.wait_for_timeout(200)
+            clear_price_btn = page.locator(".btn-clear-price").first
+            if await clear_price_btn.count() > 0 and await clear_price_btn.is_visible():
+                await clear_price_btn.hover()
+                await page.wait_for_timeout(150)
+                hover_checks["btnClearPriceHover"] = await _eval_contrast_pair(page, ".btn-clear-price", "text")
+                await clear_price_btn.click()
+                await page.wait_for_timeout(150)
+            else:
+                hover_checks["btnClearPriceHover"] = {"found": False, "passed": False}
+        else:
+            hover_checks["btnClearPriceHover"] = {"found": False, "passed": False}
+
+        # 1e-ii. .nft-hover-inspect-btn (visible on card hover + button hover in Light Mode)
+        first_card = page.locator(".opensea-nft-card").first
+        if await first_card.count() > 0 and await first_card.is_visible():
+            await first_card.hover()
+            await page.wait_for_timeout(200)
+            card_hover_icon = await _eval_contrast_pair(page, ".opensea-nft-card .nft-hover-inspect-btn", "svg")
+            card_hover_border = await _eval_contrast_pair(page, ".opensea-nft-card .nft-hover-inspect-btn", "border")
+            inspect_eye = first_card.locator(".nft-hover-inspect-btn").first
+            await inspect_eye.hover()
+            await page.wait_for_timeout(200)
+            btn_hover_icon = await _eval_contrast_pair(page, ".opensea-nft-card .nft-hover-inspect-btn", "svg")
+            hover_checks["nftHoverInspectBtn"] = {
+                "found": True,
+                "cardHoverIconRatio": card_hover_icon.get("ratio", 0),
+                "cardHoverBorderRatio": card_hover_border.get("ratio", 0),
+                "btnHoverIconRatio": btn_hover_icon.get("ratio", 0),
+                "passed": bool(card_hover_icon.get("passed") and card_hover_border.get("passed") and btn_hover_icon.get("passed")),
+            }
+        else:
+            hover_checks["nftHoverInspectBtn"] = {"found": False, "skippedOffline": True, "passed": True}
+
+        # 1e-iii. .spec-box:hover in Light Mode (inside PatientSovereignVault Direct Grant modal)
+        await switch_view(page, "provider_vault")
+        grant_btn = page.locator("[id^='btn-vault-grant-']").first
+        if await grant_btn.count() > 0 and await grant_btn.is_visible():
+            await grant_btn.click()
+            await page.wait_for_selector(".terminal-modal-window .spec-box", timeout=5000)
+            await page.wait_for_timeout(200)
+            spec_box = page.locator(".terminal-modal-window .spec-box").first
+            await spec_box.hover()
+            await page.wait_for_timeout(200)
+            spec_label_c = await _eval_contrast_pair(page, ".terminal-modal-window .spec-box .spec-box-label", "text")
+            spec_val_c = await _eval_contrast_pair(page, ".terminal-modal-window .spec-box .spec-box-val", "text")
+            hover_checks["specBoxHover"] = {
+                "found": True,
+                "labelRatio": spec_label_c.get("ratio", 0),
+                "valueRatio": spec_val_c.get("ratio", 0),
+                "passed": bool(spec_label_c.get("passed") and spec_val_c.get("passed")),
+            }
+            await page.keyboard.press("Escape")
+            await page.wait_for_timeout(250)
+        else:
+            hover_checks["specBoxHover"] = {"found": False, "skippedOffline": True, "passed": True}
+
+        hover_checks["passed"] = all(
+            bool(v.get("passed")) for v in hover_checks.values() if isinstance(v, dict)
+        )
+
+        # 1f. Non-Owner AssetDetailModal audit (Account #2 Researcher — live enabled primary buy CTA & escrow toggle in Light & Dark)
+        non_owner_modal_diag = {"tested": False, "lightEnabledBuyBtn": False, "darkEnabledBuyBtn": False, "passed": True}
+        await switch_view(page, "admin")
+        acct2_btn = page.locator("#admin-switch-acct-2")
+        if await acct2_btn.count() > 0 and await acct2_btn.is_visible():
+            await acct2_btn.click()
+            await page.wait_for_timeout(900)
+            await switch_view(page, "researcher")
+            has_live_cards = await page.locator(".opensea-nft-card").count() > 0
+            if has_live_cards:
+                non_owner_modal_diag["tested"] = True
+                for nm_theme in ("light", "dark"):
+                    await ensure_theme(page, nm_theme)
+                    await ensure_lang(page, "vi")
+                    card_el = page.locator(".opensea-nft-card").first
+                    await card_el.click()
+                    await page.wait_for_selector(".opensea-modal-container", timeout=5000)
+                    await page.wait_for_timeout(450)
+                    buy_btn_enabled = await page.evaluate(
+                        """() => {
+                            const b = document.querySelector('.opensea-modal-container .btn-terminal-primary.btn-opensea-large');
+                            return Boolean(b && !b.disabled);
+                        }"""
+                    )
+                    if nm_theme == "light":
+                        non_owner_modal_diag["lightEnabledBuyBtn"] = bool(buy_btn_enabled)
+                    else:
+                        non_owner_modal_diag["darkEnabledBuyBtn"] = bool(buy_btn_enabled)
+                    tag = f"desktop_{nm_theme}_vi_modal_non_owner"
+                    res = await audit_scenario(page, axe_js, tag, False)
+                    all_scenarios.append(res)
+                    blocking_failures += res["blocking_count"]
+                    if res["overflow_px"] > 0:
+                        overflow_failures += 1
+                    await page.keyboard.press("Escape")
+                    await page.wait_for_timeout(300)
+                non_owner_modal_diag["passed"] = bool(
+                    non_owner_modal_diag["lightEnabledBuyBtn"] and non_owner_modal_diag["darkEnabledBuyBtn"]
+                )
+            # Restore Account #0 cleanly before navbar diagnostics
+            await switch_view(page, "admin")
+            await page.click("#admin-switch-acct-0")
+            await page.wait_for_timeout(800)
+
         wcag_live_checks = {
             "htmlLangSync": {"vi": lang_vi, "en": lang_en, "viBack": lang_vi_back, "passed": lang_vi == "vi" and lang_en == "en" and lang_vi_back == "vi"},
             "searchClearTargetSize": search_clear_diag,
             "keyboardFocusVisible": focus_visible_diag,
             "globalSlashHotkey": slash_hotkey_diag,
+            "hoverContrastChecks": hover_checks,
+            "nonOwnerAssetModal": non_owner_modal_diag,
         }
         if not wcag_live_checks["htmlLangSync"]["passed"]:
             print(f"    [FAIL LIVE WCAG] Dynamic <html lang> sync failed: {wcag_live_checks['htmlLangSync']}")
@@ -691,6 +930,12 @@ async def run_audit():
             blocking_failures += 1
         if not slash_hotkey_diag.get("passed"):
             print(f"    [FAIL LIVE WCAG] Global '/' hotkey failed across portals: {slash_hotkey_diag}")
+            blocking_failures += 1
+        if not hover_checks.get("passed"):
+            print(f"    [FAIL LIVE WCAG] Light-mode :hover contrast check failed: {hover_checks}")
+            blocking_failures += 1
+        if not non_owner_modal_diag.get("passed"):
+            print(f"    [FAIL LIVE WCAG] Non-owner AssetDetailModal buy-CTA check failed: {non_owner_modal_diag}")
             blocking_failures += 1
 
         await switch_view(page, "admin")

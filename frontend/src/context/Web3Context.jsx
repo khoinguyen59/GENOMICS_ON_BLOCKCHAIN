@@ -363,6 +363,7 @@ export function Web3Provider({ children }) {
 
       if (accountRef.current && accountRef.current.toLowerCase() !== addr.toLowerCase()) {
         clearVaultMemoryCache();
+        clearLocalIpfsCache();
         setResearcherKeyPair(null);
         setIsPubKeyRegisteredOnChain(false);
       }
@@ -462,6 +463,7 @@ export function Web3Provider({ children }) {
           if (connectionEpochRef.current !== myEpoch) return null;
           if (accountRef.current && accountRef.current.toLowerCase() !== userAddr.toLowerCase()) {
             clearVaultMemoryCache();
+            clearLocalIpfsCache();
           }
           localAccountIndexRef.current = null;
           accountRef.current = userAddr;

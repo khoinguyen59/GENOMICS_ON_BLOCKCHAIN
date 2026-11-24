@@ -38,6 +38,7 @@ import {
   pinJsonToKubo,
   fetchFromKuboGateway,
   isPrivateIpfsGatewayConfigured,
+  isNonLocalConfiguredChain,
 } from "./kubo_client.js";
 
 export {
@@ -61,7 +62,7 @@ export {
   getExplicitKuboRpcEndpoint, getExplicitKuboGatewayEndpoint,
   getKuboRpcEndpoint, setKuboRpcEndpoint, getKuboGatewayEndpoint, setKuboGatewayEndpoint,
   buildSiweGatewayHeaders, uploadToPrivateGateway,
-  pinFileToKubo, pinJsonToKubo, fetchFromKuboGateway, isPrivateIpfsGatewayConfigured
+  pinFileToKubo, pinJsonToKubo, fetchFromKuboGateway, isPrivateIpfsGatewayConfigured, isNonLocalConfiguredChain
 };
 
 // Strictly bounded in-memory LRU storage cache (max 50 entries)
@@ -261,6 +262,25 @@ export async function retrieveFromIpfs(cid, gatewayUrl = "https://gateway.pinata
     );
     privateErr.privateGatewayFailClosed = true;
     throw privateErr;
+  }
+
+  // Teamwork L3-F3: On non-local builds (__GENOCHAIN_NON_LOCAL_CHAIN__ or VITE_CHAIN_ID != 31337)
+  // when VITE_KUBO_GATEWAY is omitted, fail closed on private/ciphertext fetches (and non-opted-in
+  // fetches) so private CIDs NEVER leak to public third-party gateways (pinata.cloud/dweb.link/ipfs.io/w3s.link).
+  if (isNonLocalConfiguredChain()) {
+    const isPublicMetadataOptIn =
+      Boolean(options?.allowPublicGatewayFallback) &&
+      Boolean(fastCatalog) &&
+      !options?.privatePayload &&
+      (options?.dataId === undefined || options?.dataId === null) &&
+      !options?.signer;
+    if (!isPublicMetadataOptIn) {
+      const nonLocalErr = new Error(
+        `Non-local build requires a configured Private IPFS Gateway (VITE_KUBO_GATEWAY) for CID ${cid}; public-gateway fallback is strictly disabled.`
+      );
+      nonLocalErr.privateGatewayFailClosed = true;
+      throw nonLocalErr;
+    }
   }
 
   const encodedCid = encodeURIComponent(cid);

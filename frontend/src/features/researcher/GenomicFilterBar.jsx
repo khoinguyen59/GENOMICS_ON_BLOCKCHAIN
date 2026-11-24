@@ -255,6 +255,7 @@ export default function GenomicFilterBar({ children, onPurchase }) {
             type="button"
             className={`btn-terminal ${showSidebar ? "btn-terminal-primary" : "btn-terminal-ghost"} filter-toggle-btn`}
             onClick={() => setShowSidebar(!showSidebar)}
+            aria-expanded={showSidebar}
             title={showSidebar ? t("filterSidebarClose") || "Hide Filters" : t("filterSidebarOpen") || "Show Filters"}
           >
             <FilterSlidersIcon size={15} />
@@ -471,6 +472,7 @@ export default function GenomicFilterBar({ children, onPurchase }) {
                 <button
                   type="button"
                   className="sidebar-accordion-header"
+                  aria-expanded={openSections.status}
                   onClick={() => toggleSection("status")}
                 >
                   <div className="accordion-header-left">
@@ -508,6 +510,7 @@ export default function GenomicFilterBar({ children, onPurchase }) {
                 <button
                   type="button"
                   className="sidebar-accordion-header"
+                  aria-expanded={openSections.price}
                   onClick={() => toggleSection("price")}
                 >
                   <div className="accordion-header-left">
@@ -582,6 +585,7 @@ export default function GenomicFilterBar({ children, onPurchase }) {
                 <button
                   type="button"
                   className="sidebar-accordion-header"
+                  aria-expanded={openSections.gene}
                   onClick={() => toggleSection("gene")}
                 >
                   <div className="accordion-header-left">
@@ -624,6 +628,7 @@ export default function GenomicFilterBar({ children, onPurchase }) {
                 <button
                   type="button"
                   className="sidebar-accordion-header"
+                  aria-expanded={openSections.chromosome}
                   onClick={() => toggleSection("chromosome")}
                 >
                   <div className="accordion-header-left">
@@ -655,6 +660,7 @@ export default function GenomicFilterBar({ children, onPurchase }) {
                 <button
                   type="button"
                   className="sidebar-accordion-header"
+                  aria-expanded={openSections.format}
                   onClick={() => toggleSection("format")}
                 >
                   <div className="accordion-header-left">
@@ -686,6 +692,7 @@ export default function GenomicFilterBar({ children, onPurchase }) {
                 <button
                   type="button"
                   className="sidebar-accordion-header"
+                  aria-expanded={openSections.zygosity}
                   onClick={() => toggleSection("zygosity")}
                 >
                   <div className="accordion-header-left">
@@ -722,6 +729,7 @@ export default function GenomicFilterBar({ children, onPurchase }) {
                 <button
                   type="button"
                   className="sidebar-accordion-header"
+                  aria-expanded={openSections.ancestry}
                   onClick={() => toggleSection("ancestry")}
                 >
                   <div className="accordion-header-left">
@@ -759,6 +767,7 @@ export default function GenomicFilterBar({ children, onPurchase }) {
                 <button
                   type="button"
                   className="sidebar-accordion-header"
+                  aria-expanded={openSections.bloodType}
                   onClick={() => toggleSection("bloodType")}
                 >
                   <div className="accordion-header-left">

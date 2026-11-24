@@ -445,7 +445,8 @@ async function main() {
   console.log("\n" + "=".repeat(88));
   console.log(`ADVERSARIAL STRESS SUITE SUMMARY: ${passCount} Passed, ${defectCount} Verified Defect Candidates Found`);
   console.log("=".repeat(88));
-  if (defectCount > 0) {
+  if (defectCount > 0 || passCount === 0) {
+    console.error(`[FAIL] Agent 3 exit check failed: passCount=${passCount}, defectCount=${defectCount}`);
     process.exit(1);
   }
 }

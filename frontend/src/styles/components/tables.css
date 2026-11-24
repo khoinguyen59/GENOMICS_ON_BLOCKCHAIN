@@ -70,21 +70,6 @@
   outline: none;
 }
 
-.search-shortcut-badge {
-  position: absolute;
-  right: 14px;
-  top: 50%;
-  transform: translateY(-50%);
-  padding: 2px 7px;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: var(--radius-xs);
-  font-family: var(--font-mono);
-  font-size: 10px;
-  color: #94a3b8;
-  pointer-events: none;
-}
-
 .filter-pills-row {
   display: flex;
   align-items: center;

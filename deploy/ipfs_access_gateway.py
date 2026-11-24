@@ -431,6 +431,8 @@ class UploadRateLimiter:
         self._rollback_guards: dict[str, tuple[str, str]] = {}
         self._commit_rollback_verdict: dict[str, bool] = {}
         self._commit_reject_reason: dict[str, str] = {}
+        self._deferred_rollback_cids: dict[str, set[str]] = {}
+        self._token_deferred_rollbacks: dict[str, list[tuple[str, str]]] = {}
         self._is_sha_revoked_fn = None
         self._res_seq = 0
         self._quota_epoch = 0
@@ -799,6 +801,55 @@ class UploadRateLimiter:
         with self._lock:
             return self._is_new_unshared_claim_locked(token, multihash)
 
+    def has_inflight_mh(self, multihash: str | None) -> bool:
+        """Return True if any upload reservation or rollback guard is currently in-flight for `multihash`."""
+        mh = str(multihash or "").strip()
+        if not mh:
+            return False
+        with self._lock:
+            claim = self._inflight_mh_claims.get(mh)
+            return bool(claim is not None and len(claim[1]) > 0)
+
+    def _collect_emptying_deferred_locked(self, token: str | None) -> list[tuple[str, str]]:
+        """
+        Collect deferred GDPR rollback (multihash, cid) pairs for every multihash where `token`
+        is the LAST active holder in `_inflight_mh_claims`, plus any pairs already staged for `token`.
+        """
+        if not token:
+            return []
+        collected: list[tuple[str, str]] = []
+        seen: set[tuple[str, str]] = set()
+        for pair in self._token_deferred_rollbacks.pop(token, []):
+            if pair not in seen:
+                seen.add(pair)
+                collected.append(pair)
+        for mh_key, (_owner_l, tokens) in self._inflight_mh_claims.items():
+            if token in tokens and len(tokens - {token}) == 0:
+                cids_set = self._deferred_rollback_cids.pop(mh_key, None)
+                if cids_set:
+                    for c in sorted(cids_set):
+                        pair = (mh_key, c)
+                        if pair not in seen:
+                            seen.add(pair)
+                            collected.append(pair)
+        return collected
+
+    def drain_deferred_rollbacks(self, token: str | None) -> list[tuple[str, str]]:
+        """
+        Atomically pop any deferred GDPR rollback (multihash, cid) pairs owed when `token` is the
+        last holder exiting `_inflight_mh_claims`, keeping a rollback guard active on `token`
+        until `release_rollback_guard(token)` completes.
+        """
+        if not token:
+            return []
+        with self._lock:
+            pending = self._collect_emptying_deferred_locked(token)
+            if pending and token not in self._rollback_guards:
+                info = self._inflight.get(token)
+                sha = str(info.get("content_sha256") or "") if isinstance(info, dict) else ""
+                self._rollback_guards[token] = (pending[0][0], sha)
+            return pending
+
     def acquire_rollback_eligibility(self, token: str, multihash: str | None) -> bool:
         """
         Atomically resolve whether `token` is permitted to roll back a Kubo pin after a commit()
@@ -812,8 +863,11 @@ class UploadRateLimiter:
             can_rb = self._is_new_unshared_claim_locked(token, mh)
             info = self._inflight.pop(token, None)
             sha = str(info.get("content_sha256") or "") if isinstance(info, dict) else ""
-            if can_rb and (mh or sha):
-                self._rollback_guards[token] = (mh, sha)
+            deferred = self._collect_emptying_deferred_locked(token)
+            if deferred:
+                self._token_deferred_rollbacks[token] = deferred
+            if (can_rb or deferred) and (mh or sha or deferred):
+                self._rollback_guards[token] = (mh or (deferred[0][0] if deferred else ""), sha)
             else:
                 self._release_mh_claim_locked(token)
             self._quota_epoch += 1
@@ -826,6 +880,7 @@ class UploadRateLimiter:
         with self._lock:
             self._commit_rollback_verdict.pop(token, None)
             self._commit_reject_reason.pop(token, None)
+            self._token_deferred_rollbacks.pop(token, None)
             if token in self._rollback_guards:
                 self._rollback_guards.pop(token, None)
                 self._release_mh_claim_locked(token)
@@ -1285,14 +1340,20 @@ class UploadRateLimiter:
                 can_rb = self._is_new_unshared_claim_locked(token, mh)
                 self._commit_rollback_verdict[token] = can_rb
                 self._inflight.pop(token, None)
-                if can_rb and (mh or sha):
-                    self._rollback_guards[token] = (mh, sha)
+                deferred = self._collect_emptying_deferred_locked(token)
+                if deferred:
+                    self._token_deferred_rollbacks[token] = deferred
+                if (can_rb or deferred) and (mh or sha or deferred):
+                    self._rollback_guards[token] = (mh or (deferred[0][0] if deferred else ""), sha)
                 else:
                     self._release_mh_claim_locked(token)
                 self._quota_epoch += 1
                 self._repo_stat_mono = 0.0
                 raise
             else:
+                if cid_committed and cid and mh:
+                    # Legitimate active commit supersedes any stale deferred rollback for this multihash
+                    self._deferred_rollback_cids.pop(mh, None)
                 if (not cid_committed) and sha_erased_blocked:
                     ex_claim = self._inflight_mh_claims.get(mh) if mh else None
                     has_other_tok = bool(ex_claim is not None and len(ex_claim[1] - {token}) > 0)
@@ -1300,28 +1361,76 @@ class UploadRateLimiter:
                     self._commit_rollback_verdict[token] = can_rb_gdpr
                     self._commit_reject_reason[token] = "gdpr_erased"
                     self._inflight.pop(token, None)
-                    if can_rb_gdpr and (mh or sha):
-                        self._rollback_guards[token] = (mh, sha)
-                    else:
+                    if has_other_tok:
+                        # BOOST-L3 / Swarm L3-F02: peer token still holds mh; record cid for deferred
+                        # rollback when the last holder exits via release() or commit() failure!
+                        if mh and cid:
+                            self._deferred_rollback_cids.setdefault(mh, set()).add(cid)
                         self._release_mh_claim_locked(token)
+                    else:
+                        deferred = self._collect_emptying_deferred_locked(token)
+                        if deferred:
+                            self._token_deferred_rollbacks[token] = deferred
+                        if mh or sha or deferred:
+                            self._rollback_guards[token] = (mh or (deferred[0][0] if deferred else ""), sha)
+                        else:
+                            self._release_mh_claim_locked(token)
                 else:
                     self._inflight.pop(token, None)
-                    self._release_mh_claim_locked(token)
+                    deferred = self._collect_emptying_deferred_locked(token)
+                    if deferred:
+                        self._token_deferred_rollbacks[token] = deferred
+                        self._rollback_guards[token] = (mh or deferred[0][0], sha)
+                    else:
+                        self._release_mh_claim_locked(token)
                 self._quota_epoch += 1
                 self._repo_stat_mono = 0.0
         return cid_committed
 
-    def release(self, token: str | None) -> None:
-        """Release an uncommitted in-flight reservation and any per-multihash/sha claim on error or abort."""
+    def release(self, token: str | None) -> list[str]:
+        """
+        Release an uncommitted in-flight reservation and any per-multihash/sha claim on error or abort.
+        If `token` is the last holder exiting a multihash with deferred GDPR rollbacks from a peer
+        token, unpins those deferred CIDs under rollback guard so zero Kubo pins are ever stranded.
+        Returns the list of deferred CIDs rolled back (empty list when none).
+        """
         if not token:
-            return
+            return []
         with self._lock:
             self._commit_rollback_verdict.pop(token, None)
             self._commit_reject_reason.pop(token, None)
-            self._rollback_guards.pop(token, None)
             self._inflight.pop(token, None)
-            self._release_mh_claim_locked(token)
-            self._quota_epoch += 1
+            deferred = self._collect_emptying_deferred_locked(token)
+            if deferred:
+                self._rollback_guards[token] = (deferred[0][0], "")
+            else:
+                self._rollback_guards.pop(token, None)
+                self._release_mh_claim_locked(token)
+                self._quota_epoch += 1
+                return []
+
+        rolled_back: list[str] = []
+        try:
+            unpin_fn = getattr(self._kubo_adapter, "unpin_cid", None)
+            for d_mh, d_cid in deferred:
+                if (not d_mh) or self.has_persisted_pin(d_mh) is False:
+                    rolled_back.append(d_cid)
+                    if callable(unpin_fn):
+                        try:
+                            unpin_fn(d_cid)
+                        except Exception:
+                            pass
+                    try:
+                        self.mark_gc_pending()
+                    except Exception:
+                        pass
+        finally:
+            with self._lock:
+                self._rollback_guards.pop(token, None)
+                self._token_deferred_rollbacks.pop(token, None)
+                self._release_mh_claim_locked(token)
+                self._quota_epoch += 1
+        return rolled_back
 
     def check_allowed(self, address: str, pending_bytes: int, now_ts: int) -> tuple[bool, str]:
         addr_key = str(address).lower()
@@ -3204,10 +3313,12 @@ class GdprErasureReconciler:
         orphan_pin_ttl_sec: int = DEFAULT_ORPHAN_PIN_TTL_SEC,
         now_fn=None,
         catalog_index: PublicMetadataCatalogIndex | None = None,
+        upload_limiter: UploadRateLimiter | None = None,
     ):
         self.registry_adapter = registry_adapter
         self.kubo_adapter = kubo_adapter
         self.catalog_index = catalog_index
+        self.upload_limiter = upload_limiter
         self.deployed_block = max(0, int(start_block))
         self._db_path = str(db_path or ":memory:")
         self._orphan_ttl = max(0, int(orphan_pin_ttl_sec))
@@ -3398,24 +3509,24 @@ class GdprErasureReconciler:
         shas: set[str] | None = None,
         purge_provenance: bool = False,
     ) -> None:
-        if not cids and not multihashes and not shas:
+        """
+        Delete tracked_pins / pending_uploads rows STRICTLY for the exact CIDs that were
+        actually unpinned (NEVER bulk-deleting tracked_pins/pending_uploads rows by sha256
+        or multihash whose CID was not unpinned — closes L3-F2 / Swarm L3-F01).
+        """
+        if not cids and not (purge_provenance and (multihashes or shas)):
             return
         with self._lock, _sqlite_write_tx(self._conn):
             if cids:
                 self._conn.executemany("DELETE FROM tracked_pins WHERE cid = ?", [(c,) for c in cids])
                 self._conn.executemany("DELETE FROM pending_uploads WHERE cid = ?", [(c,) for c in cids])
-            if multihashes:
-                self._conn.executemany("DELETE FROM tracked_pins WHERE multihash = ?", [(m,) for m in multihashes])
-                self._conn.executemany("DELETE FROM pending_uploads WHERE multihash = ?", [(m,) for m in multihashes])
-                if purge_provenance:
+            if purge_provenance:
+                if multihashes:
                     self._conn.executemany(
                         "DELETE FROM upload_provenance WHERE multihash = ?",
                         [(m,) for m in multihashes],
                     )
-            if shas:
-                self._conn.executemany("DELETE FROM tracked_pins WHERE sha256 = ?", [(s,) for s in shas])
-                self._conn.executemany("DELETE FROM pending_uploads WHERE sha256 = ?", [(s,) for s in shas])
-                if purge_provenance:
+                if shas:
                     self._conn.executemany(
                         "DELETE FROM upload_provenance WHERE sha256 = ?",
                         [(s,) for s in shas],
@@ -3604,20 +3715,21 @@ class GdprErasureReconciler:
             # Cryptographically gateway-hashed provenance exists for mh:
             # ONLY erase if its verified SHA-256 genuinely equals expected_sha!
             return prov_det[1] == expected_sha
-        # No sha_verified=1 row in SQLite: verify live Kubo content directly when supported
-        kubo_match = self._verify_kubo_cid_sha256(cid_str, expected_sha)
-        if kubo_match is True:
-            return True
-        if kubo_match is False:
-            return False
-        # Minimal test double without open_cid_stream/cat_cid:
-        # Fail closed if another active owner, provenance row, or first-registrant owns mh!
+        # Teamwork L3-F1: Enforce ownership guards BEFORE trusting live kubo_match == True!
+        # Blocks attacks where an attacker copies a legacy (metadataHash=0x0, sha_verified=0)
+        # victim active CID into summaryCid with its real SHA-256 in summaryHash and revokes.
         if mh in other_owner_active_mhs:
             return False
         if prov_det is not None and prov_det[0] and canonical_owners and prov_det[0] not in canonical_owners:
             return False
         first_m_owners = first_mh_owners.get(mh)
         if first_m_owners and canonical_owners and not (first_m_owners & canonical_owners):
+            return False
+        # No sha_verified=1 row in SQLite: verify live Kubo content directly when supported
+        kubo_match = self._verify_kubo_cid_sha256(cid_str, expected_sha)
+        if kubo_match is True:
+            return True
+        if kubo_match is False:
             return False
         return True
 
@@ -3887,6 +3999,40 @@ class GdprErasureReconciler:
                         found_mhs.add(m_s)
         return found_cids, found_mhs
 
+    def _collect_tracked_cids_for_targets(
+        self,
+        target_mhs: set[str],
+        target_shas: set[str],
+    ) -> list[tuple[str, str]]:
+        """Query (cid, multihash) pairs currently in tracked_pins or pending_uploads for target_mhs/target_shas."""
+        if not target_mhs and not target_shas:
+            return []
+        out: list[tuple[str, str]] = []
+        seen_cids: set[str] = set()
+        with self._lock:
+            for tbl in ("tracked_pins", "pending_uploads"):
+                for mh in target_mhs:
+                    for cid_val, mh_val in self._conn.execute(
+                        f"SELECT cid, multihash FROM {tbl} WHERE multihash = ?",
+                        (mh,),
+                    ).fetchall():
+                        c_s = str(cid_val or "").strip()
+                        m_s = str(mh_val or "").strip() or (_try_canonical_multihash(c_s) or "")
+                        if c_s and c_s not in seen_cids:
+                            seen_cids.add(c_s)
+                            out.append((c_s, m_s))
+                for sha in target_shas:
+                    for cid_val, mh_val in self._conn.execute(
+                        f"SELECT cid, multihash FROM {tbl} WHERE sha256 = ?",
+                        (sha,),
+                    ).fetchall():
+                        c_s = str(cid_val or "").strip()
+                        m_s = str(mh_val or "").strip() or (_try_canonical_multihash(c_s) or "")
+                        if c_s and c_s not in seen_cids:
+                            seen_cids.add(c_s)
+                            out.append((c_s, m_s))
+        return out
+
     def _queue_provenance_purges(
         self,
         multihashes: set[str] | dict[str, float],
@@ -4071,6 +4217,9 @@ class GdprErasureReconciler:
                     ).fetchone()
                 if cur_row is None or int(cur_row[0]) > cutoff:
                     continue
+                # Swarm L3-F03: Never unpin a multihash while an upload or rollback guard is in-flight!
+                if mh_s and self.upload_limiter is not None and self.upload_limiter.has_inflight_mh(mh_s):
+                    continue
                 try:
                     fresh_anchored_pre = self._collect_anchored_owners_by_mh()
                 except Exception:
@@ -4079,6 +4228,8 @@ class GdprErasureReconciler:
                 anchored_owners_by_mh = fresh_anchored_pre
                 if mh_s and expected_uploaders and (fresh_anchored_pre.get(mh_s, set()) & expected_uploaders):
                     done_anchored_rows.append((cid_s, obs_ts))
+                    continue
+                if mh_s and self.upload_limiter is not None and self.upload_limiter.has_inflight_mh(mh_s):
                     continue
                 try:
                     validate_cid(cid_s)
@@ -4093,9 +4244,10 @@ class GdprErasureReconciler:
                     for target_c in cids_to_unpin:
                         if self.kubo_adapter.unpin_cid(target_c):
                             unpinned_here.append(target_c)
-                    # L3-L2 + L3-01 post-unpin TOCTOU recovery: if an identical-CID re-upload OR an
-                    # on-chain registerGenomicData anchor landed during the Kubo unpin HTTP call,
-                    # restore EVERY unpinned alias immediately and skip tracked_pins deletion / provenance purge!
+                    # L3-L2 + L3-01 + Swarm L3-F03 post-unpin TOCTOU recovery: if an identical-CID
+                    # re-upload, an in-flight upload claim, OR an on-chain registerGenomicData anchor
+                    # landed during the Kubo unpin HTTP call, restore EVERY unpinned alias immediately
+                    # and skip tracked_pins deletion / provenance purge!
                     with self._lock:
                         post_pending = self._conn.execute(
                             "SELECT uploaded_at FROM pending_uploads WHERE cid = ?",
@@ -4109,9 +4261,12 @@ class GdprErasureReconciler:
                         (post_pending is not None and int(post_pending[0]) > cutoff)
                         or (post_tracked is not None and int(post_tracked[0]) > cutoff)
                     )
+                    concurrently_inflight = bool(
+                        mh_s and self.upload_limiter is not None and self.upload_limiter.has_inflight_mh(mh_s)
+                    )
                     concurrently_anchored = False
                     post_anchor_check_failed = False
-                    if not concurrently_refreshed and mh_s and expected_uploaders:
+                    if not concurrently_refreshed and not concurrently_inflight and mh_s and expected_uploaders:
                         try:
                             fresh_anchored_post = self._collect_anchored_owners_by_mh()
                             anchored_owners_by_mh = fresh_anchored_post
@@ -4120,7 +4275,7 @@ class GdprErasureReconciler:
                             )
                         except Exception:
                             post_anchor_check_failed = True
-                    if concurrently_refreshed or concurrently_anchored or post_anchor_check_failed:
+                    if concurrently_refreshed or concurrently_inflight or concurrently_anchored or post_anchor_check_failed:
                         pin_fn = getattr(self.kubo_adapter, "pin_cid", None)
                         repin_targets = list(unpinned_here) if unpinned_here else [cid_s]
                         repin_ok = True
@@ -4195,6 +4350,10 @@ class GdprErasureReconciler:
             item = self.registry_adapter.get_genomic_data(data_id)
             if int(item.get("status", -1)) != 2:
                 continue
+            # L3-F2 / Swarm L3-F01: Invalidate stale catalog cache IMMEDIATELY upon detecting a revoked
+            # dataset (BEFORE pin listing / unpinning) so concurrent uploads see status=2 immediately.
+            if self.catalog_index is not None:
+                self.catalog_index.invalidate()
             revoked_owner_l = str(item.get("currentOwner") or "").strip().lower()
             revoked_creator_l = _resolve_item_original_creator(self.registry_adapter, item)
             cids = []
@@ -4276,6 +4435,14 @@ class GdprErasureReconciler:
                 reconcile_incomplete = True
                 continue
             if target_shas:
+                # L3-F2 / Swarm L3-F01: Persist gdpr_erased_shas tombstone & invalidate catalog_index
+                # STRICTLY BEFORE collecting tracked pins / listing recursive pins / unpinning!
+                # SQLite BEGIN IMMEDIATE serializes this tombstone with UploadRateLimiter.commit(),
+                # ensuring any commit before this point is seen & unpinned below, and any commit after
+                # this point rejects with gdpr_erased and rolls back its own Kubo pin!
+                self._record_erased_shas(target_shas, revoked_creator_l or revoked_owner_l)
+                if self.catalog_index is not None:
+                    self.catalog_index.invalidate()
                 other_owner_active_mhs = sha_ctx.get("other_owner_active_mhs") or set()
                 first_mh_owners = sha_ctx.get("first_mh_owners") or {}
                 canonical_owners_by_sha = sha_ctx.get("canonical_owners_by_sha") or {}
@@ -4349,6 +4516,18 @@ class GdprErasureReconciler:
                     reconcile_incomplete = True
                     continue
 
+            protected_mhs = shared_mhs | same_owner_active_mhs
+            if target_mhs:
+                for tracked_c, tracked_mh in self._collect_tracked_cids_for_targets(target_mhs, set()):
+                    if tracked_mh and tracked_mh in protected_mhs:
+                        continue
+                    try:
+                        validate_cid(tracked_c)
+                    except ValueError:
+                        continue
+                    if tracked_c not in cids_to_unpin:
+                        cids_to_unpin.append(tracked_c)
+
             # Also unpin ANY pinned CIDv0/CIDv1 alias in Kubo sharing the exact canonical multihash.
             # NEVER silently swallow transient /api/v0/pin/ls errors: retry on next cycle instead of marking erased!
             if target_mhs and callable(list_pins_fn):
@@ -4363,6 +4542,7 @@ class GdprErasureReconciler:
                         cids_to_unpin.append(pinned_c)
 
             valid_unshared_cids = len(cids_to_unpin)
+            unpinned_ok_cids: list[str] = []
             unpin_failed = False
             for c in cids_to_unpin:
                 try:
@@ -4370,16 +4550,45 @@ class GdprErasureReconciler:
                         unpinned_now.append(c)
                         self.unpinned_cids_total += 1
                         self._gc_pending = True
+                    unpinned_ok_cids.append(c)
                 except Exception:
                     unpin_failed = True
+            # L3-F2 / Swarm L3-F01 post-unpin transition-window re-check: catch & unpin any pin
+            # committed to tracked_pins/pending_uploads during the transition window before deleting rows!
+            if not unpin_failed and (target_mhs or target_shas):
+                late_rows = self._collect_tracked_cids_for_targets(target_mhs, target_shas)
+                late_cids: list[str] = []
+                for lc, lmh in late_rows:
+                    if lmh and lmh in protected_mhs:
+                        continue
+                    try:
+                        validate_cid(lc)
+                    except ValueError:
+                        continue
+                    if (lc not in unpinned_ok_cids or not target_shas) and lc not in late_cids:
+                        late_cids.append(lc)
+                for lc in late_cids:
+                    try:
+                        if self.kubo_adapter.unpin_cid(lc):
+                            unpinned_now.append(lc)
+                            self.unpinned_cids_total += 1
+                            self._gc_pending = True
+                        if lc not in unpinned_ok_cids:
+                            unpinned_ok_cids.append(lc)
+                        lmh = _try_canonical_multihash(lc)
+                        if lmh:
+                            target_mhs.add(lmh)
+                    except Exception:
+                        unpin_failed = True
             if unpin_failed:
                 reconcile_incomplete = True
                 continue
-            if cids_to_unpin or target_mhs or target_shas:
-                # L3-L1: keep upload_provenance intact until AFTER Kubo repo/gc physically purges unpinned blocks!
-                self._remove_tracked_pins(cids_to_unpin, target_mhs, shas=target_shas, purge_provenance=False)
-                if target_shas:
-                    self._record_erased_shas(target_shas, revoked_creator_l or revoked_owner_l)
+            if unpinned_ok_cids or target_mhs:
+                # L3-L1 + L3-F2 / Swarm L3-F01: delete tracked_pins/pending_uploads ONLY for exact CIDs
+                # that were actually unpinned (NEVER bulk-deleting rows for un-unpinned CIDs), and keep
+                # upload_provenance intact until AFTER Kubo repo/gc physically purges unpinned blocks!
+                if unpinned_ok_cids:
+                    self._remove_tracked_pins(unpinned_ok_cids, purge_provenance=False)
                 if target_mhs:
                     self._queue_provenance_purges(target_mhs)
             if valid_unshared_cids > 0:
@@ -5011,6 +5220,29 @@ def create_gateway_server(
             hasher = hashlib.sha256()
             spool = tempfile.SpooledTemporaryFile(max_size=1024 * 1024, dir=spool_dir)
             committed = False
+            unpin_fn = getattr(kubo_adapter, "unpin_cid", None)
+
+            def _rollback_kubo_block(cid_to_undo: str | None) -> None:
+                if not cid_to_undo:
+                    return
+                if callable(unpin_fn):
+                    try:
+                        unpin_fn(cid_to_undo)
+                    except Exception:
+                        pass
+                try:
+                    upload_limiter.mark_gc_pending()
+                except Exception:
+                    pass
+
+            def _drain_and_rollback_deferred() -> None:
+                try:
+                    for d_mh, d_cid in upload_limiter.drain_deferred_rollbacks(res_token):
+                        if (not d_mh) or upload_limiter.has_persisted_pin(d_mh) is False:
+                            _rollback_kubo_block(d_cid)
+                except Exception:
+                    pass
+
             try:
                 if is_chunked:
                     actual_len, chunk_err_status, chunk_err_msg = _read_chunked_upload_body(
@@ -5064,7 +5296,6 @@ def create_gateway_server(
                 spool.seek(0)
                 add_fn = getattr(kubo_adapter, "add_stream", None)
                 pin_fn = getattr(kubo_adapter, "pin_cid", None)
-                unpin_fn = getattr(kubo_adapter, "unpin_cid", None)
                 if not callable(add_fn):
                     self._send_json(501, {"error": "Configured Kubo adapter does not support streaming uploads."})
                     return
@@ -5098,19 +5329,6 @@ def create_gateway_server(
                         metrics["requestsDenied"] += 1
                     self._send_json(502, {"error": f"Private Kubo upload failed: {exc}"})
                     return
-
-                def _rollback_kubo_block(cid_to_undo: str | None) -> None:
-                    if not cid_to_undo:
-                        return
-                    if callable(unpin_fn):
-                        try:
-                            unpin_fn(cid_to_undo)
-                        except Exception:
-                            pass
-                    try:
-                        upload_limiter.mark_gc_pending()
-                    except Exception:
-                        pass
 
                 pin_res = pre_res
                 pin_mh = _try_canonical_multihash(pre_res["cid"])
@@ -5198,29 +5416,31 @@ def create_gateway_server(
                     recovered_addr, nonce, now_ts=now_val, namespace="upload"
                 )
                 if consume_status == "saturated":
-                    if already_pinned:
-                        try:
-                            if (
-                                upload_limiter.acquire_rollback_eligibility(res_token, pin_mh)
-                                and upload_limiter.has_persisted_provenance_or_pin(pin_mh) is False
-                            ):
-                                _rollback_kubo_block(pre_res["cid"])
-                        finally:
-                            upload_limiter.release_rollback_guard(res_token)
+                    try:
+                        if (
+                            already_pinned
+                            and upload_limiter.acquire_rollback_eligibility(res_token, pin_mh)
+                            and upload_limiter.has_persisted_provenance_or_pin(pin_mh) is False
+                        ):
+                            _rollback_kubo_block(pre_res["cid"])
+                    finally:
+                        _drain_and_rollback_deferred()
+                        upload_limiter.release_rollback_guard(res_token)
                     with metrics_lock:
                         metrics["requestsDenied"] += 1
                     self._send_json(429, {"error": "Upload nonce bucket saturated; retry shortly."})
                     return
                 if consume_status != "ok":
-                    if already_pinned:
-                        try:
-                            if (
-                                upload_limiter.acquire_rollback_eligibility(res_token, pin_mh)
-                                and upload_limiter.has_persisted_provenance_or_pin(pin_mh) is False
-                            ):
-                                _rollback_kubo_block(pre_res["cid"])
-                        finally:
-                            upload_limiter.release_rollback_guard(res_token)
+                    try:
+                        if (
+                            already_pinned
+                            and upload_limiter.acquire_rollback_eligibility(res_token, pin_mh)
+                            and upload_limiter.has_persisted_provenance_or_pin(pin_mh) is False
+                        ):
+                            _rollback_kubo_block(pre_res["cid"])
+                    finally:
+                        _drain_and_rollback_deferred()
+                        upload_limiter.release_rollback_guard(res_token)
                     with metrics_lock:
                         metrics["requestsDenied"] += 1
                     self._send_json(401, {"error": "Nonce already used (replay rejected)."})
@@ -5234,6 +5454,8 @@ def create_gateway_server(
                         pin_res = add_fn(spool, filename, content_length, cid_version=1, pin=True)
                         wrote_or_pinned = True
                     except Exception as exc:
+                        _drain_and_rollback_deferred()
+                        upload_limiter.release_rollback_guard(res_token)
                         with metrics_lock:
                             metrics["requestsDenied"] += 1
                         self._send_json(502, {"error": f"Private Kubo pin failed: {exc}"})
@@ -5242,6 +5464,8 @@ def create_gateway_server(
                         actual_mh = _try_canonical_multihash(pin_res.get("cid"))
                         if upload_limiter.has_persisted_provenance_or_pin(actual_mh) is False:
                             _rollback_kubo_block(pin_res.get("cid"))
+                        _drain_and_rollback_deferred()
+                        upload_limiter.release_rollback_guard(res_token)
                         with metrics_lock:
                             metrics["requestsDenied"] += 1
                         self._send_json(502, {"error": "Kubo CID mismatch between only-hash precheck and pin."})
@@ -5264,6 +5488,7 @@ def create_gateway_server(
                                     except Exception:
                                         pass
                             finally:
+                                _drain_and_rollback_deferred()
                                 upload_limiter.release_rollback_guard(res_token)
                             self._send_json(502, {"error": f"Private Kubo pin failed: {exc}"})
                             return
@@ -5290,6 +5515,7 @@ def create_gateway_server(
                             if (not pin_mh) or upload_limiter.has_persisted_provenance_or_pin(pin_mh) is False:
                                 _rollback_kubo_block(pin_res["cid"])
                     finally:
+                        _drain_and_rollback_deferred()
                         upload_limiter.release_rollback_guard(res_token)
                     with metrics_lock:
                         metrics["requestsDenied"] += 1
@@ -5307,6 +5533,7 @@ def create_gateway_server(
                                 if (not pin_mh) or upload_limiter.has_persisted_pin(pin_mh) is False:
                                     _rollback_kubo_block(pin_res["cid"])
                         finally:
+                            _drain_and_rollback_deferred()
                             upload_limiter.release_rollback_guard(res_token)
                         with metrics_lock:
                             metrics["requestsDenied"] += 1
@@ -5319,6 +5546,8 @@ def create_gateway_server(
                         return
                     # Provenance belongs to another uploader (e.g. cross-process race): do NOT unpin their pin,
                     # simply fail closed 403 and never return 200 without tracking.
+                    _drain_and_rollback_deferred()
+                    upload_limiter.release_rollback_guard(res_token)
                     with metrics_lock:
                         metrics["requestsDenied"] += 1
                     self._send_json(
@@ -5329,6 +5558,7 @@ def create_gateway_server(
                     )
                     return
             finally:
+                _drain_and_rollback_deferred()
                 upload_limiter.release_rollback_guard(res_token)
                 if not committed:
                     upload_limiter.release(res_token)
@@ -5629,6 +5859,7 @@ def main():
         db_path=state_db_path,
         orphan_pin_ttl_sec=args.orphan_pin_ttl_sec,
         catalog_index=server.gateway_catalog_index,
+        upload_limiter=server.gateway_upload_limiter,
     )
     stop_event = threading.Event()
     shutdown_requested = False

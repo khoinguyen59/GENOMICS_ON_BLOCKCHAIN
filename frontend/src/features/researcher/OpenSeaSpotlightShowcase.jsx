@@ -307,6 +307,7 @@ export default function OpenSeaSpotlightShowcase({ onPurchase }) {
                 setSlideIdx(0);
               }}
               title={c.label}
+              aria-label={c.label}
             >
               {c.id === "all" ? (
                 <span>{lang === "vi" ? "Tất cả" : "All"}</span>

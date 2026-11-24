@@ -145,11 +145,6 @@
   color: var(--border-medium);
 }
 
-.collection-category {
-  color: var(--accent-emerald);
-  font-weight: 600;
-}
-
 .collection-contract-pill {
   display: inline-flex;
   align-items: center;
@@ -242,14 +237,6 @@
 
 .text-cyan {
   color: var(--accent-cyan);
-}
-
-.text-amber {
-  color: var(--accent-amber);
-}
-
-.text-emerald {
-  color: var(--accent-emerald);
 }
 
 /* ─── 2. Spotlight Showcase & Trending Leaderboard Grid ─── */
@@ -425,13 +412,6 @@
   margin-bottom: 8px;
 }
 
-.leaderboard-delta-sub {
-  font-size: 11px;
-  font-family: var(--font-mono);
-  color: var(--accent-emerald);
-  font-weight: 700;
-}
-
 .leaderboard-items-list {
   display: flex;
   flex-direction: column;
@@ -453,28 +433,6 @@
 .opensea-leaderboard-row:hover {
   background: var(--bg-surface-hover);
   transform: translateX(2px);
-}
-
-.opensea-rank-badge {
-  font-family: var(--font-mono);
-  font-size: 13px;
-  font-weight: 800;
-  color: var(--text-muted);
-  width: 22px;
-  text-align: center;
-  flex-shrink: 0;
-}
-
-.opensea-rank-badge.rank-1 {
-  color: #fbbf24;
-}
-
-.opensea-rank-badge.rank-2 {
-  color: #94a3b8;
-}
-
-.opensea-rank-badge.rank-3 {
-  color: #d97706;
 }
 
 .leaderboard-mini-avatar {
@@ -513,13 +471,6 @@
   align-items: center;
   gap: 4px;
   margin-top: 1px;
-}
-
-.leaderboard-delta-text {
-  font-size: 12px;
-  font-weight: 700;
-  font-family: var(--font-mono);
-  color: var(--accent-emerald);
 }
 
 .leaderboard-id-text {
@@ -1182,6 +1133,11 @@
 .btn-clear-price:hover {
   color: var(--accent-rose);
   border-color: var(--accent-rose);
+}
+
+[data-theme="light"] .btn-clear-price:hover {
+  color: var(--accent-rose-text);
+  border-color: var(--accent-rose-text);
 }
 
 /* Right Main Catalog Content */
@@ -1902,6 +1858,20 @@
   background: rgba(255, 255, 255, 0.96);
   border-color: #e2e8f0;
   color: #334155;
+}
+
+[data-theme="light"] .nft-hover-inspect-btn {
+  background: rgba(255, 255, 255, 0.96);
+  border-color: #64748b;
+  color: #0f172a;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.14);
+}
+
+[data-theme="light"] .nft-hover-inspect-btn:hover,
+[data-theme="light"] .nft-hover-inspect-btn:focus-visible {
+  background: #1d4ed8;
+  border-color: #1e40af;
+  color: #ffffff;
 }
 
 [data-theme="light"] .nft-card-footer {

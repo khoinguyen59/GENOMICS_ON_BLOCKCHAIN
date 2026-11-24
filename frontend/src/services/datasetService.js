@@ -908,7 +908,7 @@ export async function decryptDatasetPayload({ dataset, account, contracts, signe
     dataId: dataset.dataId
   });
   const downloadedBlob = await smartReadWithRetry(() =>
-    retrieveFromIpfs(dataset.rawCid, undefined, gatewayAuthOpts)
+    retrieveFromIpfs(dataset.rawCid, undefined, { ...gatewayAuthOpts, privatePayload: true })
   );
 
   // 2/4: Cryptographic integrity check against on-chain anchor
@@ -1081,7 +1081,7 @@ export async function decryptSummaryReport({ dataset, account, contracts, signer
     dataId: dataset.dataId
   });
   const downloadedBlob = await smartReadWithRetry(() =>
-    retrieveFromIpfs(dataset.summaryCid, undefined, gatewayAuthOpts)
+    retrieveFromIpfs(dataset.summaryCid, undefined, { ...gatewayAuthOpts, privatePayload: true })
   );
 
   // 1b. Cryptographic SHA-256 integrity check & Dual-Anchor Verification (Invariant 05 & DEF2-2-06)

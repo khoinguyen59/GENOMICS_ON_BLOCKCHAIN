@@ -4619,4 +4619,520 @@ print("R18_06Q_DISPATCHER_L304_OK")
     });
     expect(dispOut).to.include("R18_06Q_DISPATCHER_L304_OK");
   });
+
+  // =========================================================================
+  // R18-06r: Phase 9 Gateway Concurrency/Ownership Closure (L3-F1, L3-F2/L3-F01,
+  //          BOOST-L3/L3-F02, L3-F03) & Non-Local Fail-Closed retrieveFromIpfs (L3-F3)
+  // =========================================================================
+  it("R18-06r: closes L3-F1 legacy metadataHash=0x0 kubo_match guard, L3-F2/L3-F01 tombstone-before-unpin & exact tracked_pins removal, BOOST-L3/L3-F02 deferred peer rollback, L3-F03 orphan TTL vs inflight upload, and L3-F3 non-local fail-closed retrieveFromIpfs", async function () {
+    this.timeout(90000);
+    const pyPhase9Gateway = `
+import hashlib, json, os, sqlite3, sys, tempfile, threading, time, urllib.error, urllib.request
+from eth_account import Account
+from eth_account.messages import encode_defunct
+import deploy.ipfs_access_gateway as gw
+
+CHAIN_ID = 31337
+REGISTRY = "0x1111111111111111111111111111111111111111"
+VICTIM   = Account.from_key("0x" + "11" * 32)
+ATTACKER = Account.from_key("0x" + "22" * 32)
+ALICE    = Account.from_key("0x" + "33" * 32)
+
+META_BYTES   = b'{"id":"legacy-phenopacket","metaData":{"phenopacketSchemaVersion":"2.0.0"}}'
+META_SHA     = hashlib.sha256(META_BYTES).hexdigest()
+CID_V_META   = "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG"
+CID_V_RAW    = "QmZ4tDuvesekSs4qM5ZBKpXiZGun7S2CYtEZRB3DYXkjGx"
+CID_ATK_RAW  = "QmPZ9qBzzyAtRaQQQUZr6xHS6wVfETRR249s63UME18znJ"
+
+REV_BYTES    = b"PHASE9_L3F2_CONCURRENT_COMMIT_TRANSITION_WINDOW_BYTES"
+REV_SHA      = hashlib.sha256(REV_BYTES).hexdigest()
+CID_REV_V0   = "bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi"
+CID_REV_LATE = "bafybeihdwdcefgh4dqkjv67uzcmw7ojee6xedzdetojuzjevtenxquvyku"
+CID_REV_CONC = "bafybeibml5uieyxa5tufngvg7fgwbkwvlsuntwbxgtskoqynbt7wlchmfm"
+
+PEER_BYTES   = b"PHASE9_BOOST_L3_PEER_TOKEN_DEFERRED_ROLLBACK_BYTES"
+PEER_SHA     = hashlib.sha256(PEER_BYTES).hexdigest()
+CID_PEER     = "bafybeiczsscdsbs7ffqz55asqdf3smv6klcw3gofszvwlyarci47bgf354"
+
+ORPH_A_BYTES = b"PHASE9_L3F03_ORPHAN_PRE_INFLIGHT_SKIP_BYTES"
+ORPH_B_BYTES = b"PHASE9_L3F03_ORPHAN_POST_INFLIGHT_RECOVERY_BYTES"
+CID_ORPH_A   = "bafybeiemxf5abjwjbikoz4mc3a3dla6ual3jsgpdr4cjr3oz3evfyavhwq"
+CID_ORPH_B   = "bafybeigvgzoolc3drupxhlevdp2ugqcrbcsqfmcek2zxiw5wctk3xjpjwy"
+
+BYTES_TO_CID = {
+    META_BYTES:   CID_V_META,
+    REV_BYTES:    CID_REV_CONC,
+    PEER_BYTES:   CID_PEER,
+    ORPH_A_BYTES: CID_ORPH_A,
+    ORPH_B_BYTES: CID_ORPH_B,
+}
+CID_TO_BYTES = {
+    CID_V_META:   META_BYTES,
+    CID_REV_V0:   REV_BYTES,
+    CID_REV_LATE: REV_BYTES,
+    CID_REV_CONC: REV_BYTES,
+    CID_PEER:     PEER_BYTES,
+    CID_ORPH_A:   ORPH_A_BYTES,
+    CID_ORPH_B:   ORPH_B_BYTES,
+}
+
+def sign_upload(acct, payload_bytes, ts, nonce):
+    sha = hashlib.sha256(payload_bytes).hexdigest()
+    msg = gw.build_siwe_upload_message(CHAIN_ID, REGISTRY, sha, acct.address, ts, nonce)
+    sig = acct.sign_message(encode_defunct(text=msg)).signature.hex()
+    return {
+        "Content-Type": "application/octet-stream",
+        "X-GenoChain-Address": acct.address,
+        "X-GenoChain-Timestamp": str(ts),
+        "X-GenoChain-Nonce": nonce,
+        "X-GenoChain-Signature": sig if sig.startswith("0x") else "0x" + sig,
+        "X-GenoChain-Content-Sha256": sha,
+    }
+
+class P9Reg:
+    def __init__(self):
+        self.datasets = []
+        self.events = []
+    def is_connected(self): return True
+    def get_block_number(self): return 400
+    def get_all_datasets(self): return list(self.datasets)
+    def get_genomic_data(self, d):
+        for ds in self.datasets:
+            if ds["dataId"] == int(d): return ds
+        raise KeyError("DataNotFound")
+    def has_active_access(self, d, buyer): return False
+    def get_status_updated_events(self, a, b): return list(self.events)
+
+class P9Kubo:
+    def __init__(self):
+        self.pins = {}
+        self.written = {}
+        self.on_list_pins = None
+        self.on_unpin = None
+        self.on_pin_write = None
+    def health_check(self): return True
+    def add_stream(self, stream, filename, content_length, cid_version=1, pin=True, only_hash=False):
+        data = stream.read(content_length)
+        cid = BYTES_TO_CID[data]
+        if only_hash:
+            return {"cid": cid, "size": len(data)}
+        self.written[cid] = data
+        if pin:
+            self.pins[cid] = len(data)
+            if callable(self.on_pin_write):
+                self.on_pin_write(cid, data)
+        return {"cid": cid, "size": len(data)}
+    def pin_cid(self, cid):
+        self.pins[cid] = len(CID_TO_BYTES.get(cid, b"x"))
+        return True
+    def unpin_cid(self, cid):
+        if callable(self.on_unpin):
+            self.on_unpin(cid)
+        return self.pins.pop(cid, None) is not None
+    def list_recursive_pins(self):
+        if callable(self.on_list_pins):
+            self.on_list_pins()
+        return list(self.pins.keys())
+    def cat_cid(self, cid):
+        if cid in self.written:
+            return self.written[cid]
+        if cid in CID_TO_BYTES:
+            return CID_TO_BYTES[cid]
+        raise FileNotFoundError(cid)
+    def run_gc(self):
+        for c in list(self.written.keys()):
+            if c not in self.pins:
+                self.written.pop(c, None)
+        return True
+
+with tempfile.TemporaryDirectory() as td:
+    now_ts = int(time.time())
+
+    # ------------------------------------------------------------------
+    # 1. Teamwork L3-F1: Legacy registerGenomicData (metadataHash=0x0, sha_verified=0)
+    #    Attacker pairs summaryCid = Victim.metadataCid & summaryHash = sha256(Victim.metadataCid)
+    #    and revokes! Even though live Kubo cat_cid() matches META_SHA (kubo_match == True),
+    #    ownership guards MUST run BEFORE kubo_match and preserve Victim's active metadataCid!
+    # ------------------------------------------------------------------
+    db1 = os.path.join(td, "l3_f1.sqlite")
+    reg1 = P9Reg()
+    kubo1 = P9Kubo()
+    kubo1.pins = {CID_V_META: len(META_BYTES), CID_V_RAW: 100, CID_ATK_RAW: 50}
+    kubo1.written[CID_V_META] = META_BYTES
+    reg1.datasets = [
+        {
+            "dataId": 1, "tokenId": 1,
+            "currentOwner": VICTIM.address, "originalCreator": VICTIM.address,
+            "rawDataHash": "0x" + "11" * 32, "summaryHash": "", "metadataHash": "",
+            "rawCid": CID_V_RAW, "summaryCid": "", "metadataCid": CID_V_META, "status": 0,
+        },
+        {
+            "dataId": 2, "tokenId": 2,
+            "currentOwner": ATTACKER.address, "originalCreator": ATTACKER.address,
+            "rawDataHash": "0x" + "22" * 32, "summaryHash": "0x" + META_SHA, "metadataHash": "",
+            "rawCid": CID_ATK_RAW, "summaryCid": CID_V_META, "metadataCid": "", "status": 2,
+        },
+    ]
+    reg1.events = [{"dataId": 2, "newStatus": 2, "blockNumber": 399}]
+    lim1 = gw.UploadRateLimiter(db_path=db1, kubo_adapter=kubo1)
+    cat1 = gw.PublicMetadataCatalogIndex(
+        reg1,
+        provenance_lookup=lim1.get_upload_provenance,
+        provenance_backfill=lim1.backfill_upload_provenance,
+        sha_provenance_lookup=lim1.get_upload_provenance_by_sha,
+        erased_sha_lookup=lim1.get_erased_sha_owner,
+    )
+    cat1.refresh_now()
+    rec1 = gw.GdprErasureReconciler(reg1, kubo1, start_block=395, db_path=db1, catalog_index=cat1)
+    try:
+        rec1.reconcile_once()
+        assert CID_V_META in kubo1.pins, "L3-F1 FAILED: Attacker destroyed Victim's legacy metadataHash=0x0 active metadataCid via kubo_match!"
+        assert CID_ATK_RAW not in kubo1.pins, "L3-F1 sanity: Attacker's own revoked rawCid should be erased!"
+    finally:
+        rec1.close(); lim1.close()
+
+    # ------------------------------------------------------------------
+    # 2. Teamwork L3-F2 / Swarm L3-F01:
+    #    (a) Tombstone persisted & catalog_index invalidated BEFORE list_recursive_pins()/unpin_cid()
+    #    (b) Concurrent UploadRateLimiter.commit() during unpin_cid() rejects with gdpr_erased!
+    #    (c) Late transition-window pin in tracked_pins is swept & unpinned before cleanup!
+    #    (d) _remove_tracked_pins NEVER deletes rows for un-unpinned CIDs matching sha256/multihash!
+    # ------------------------------------------------------------------
+    db2 = os.path.join(td, "l3_f2.sqlite")
+    reg2 = P9Reg()
+    kubo2 = P9Kubo()
+    kubo2.pins = {CID_REV_V0: len(REV_BYTES), CID_REV_LATE: len(REV_BYTES)}
+    reg2.datasets = [
+        {
+            "dataId": 1, "tokenId": 1,
+            "currentOwner": ALICE.address, "originalCreator": ALICE.address,
+            "rawDataHash": "0x" + REV_SHA, "summaryHash": "", "metadataHash": "",
+            "rawCid": CID_REV_V0, "summaryCid": "", "metadataCid": "", "status": 2,
+        }
+    ]
+    reg2.events = [{"dataId": 1, "newStatus": 2, "blockNumber": 399}]
+    lim2 = gw.UploadRateLimiter(db_path=db2, kubo_adapter=kubo2)
+    cat2 = gw.PublicMetadataCatalogIndex(
+        reg2,
+        provenance_lookup=lim2.get_upload_provenance,
+        provenance_backfill=lim2.backfill_upload_provenance,
+        sha_provenance_lookup=lim2.get_upload_provenance_by_sha,
+        erased_sha_lookup=lim2.get_erased_sha_owner,
+    )
+    cat2.refresh_now()
+    assert cat2._last_refresh_mono > 0.0
+
+    # Prepare an in-flight upload token that passed try_claim_upload_provenance BEFORE reconciliation
+    mh_conc = gw.extract_canonical_multihash(CID_REV_CONC)
+    ok_r2, _, tok_conc = lim2.reserve(ALICE.address, len(REV_BYTES), now_ts)
+    assert ok_r2
+    ok_c2, _, _, canon2, allow2 = lim2.try_claim_upload_provenance(
+        tok_conc, mh_conc, ALICE.address, content_sha256=REV_SHA, now_ts=now_ts
+    )
+    assert ok_c2
+
+    observed = {"tombstone_before_list": False, "catalog_inv_before_list": False, "conc_commit_ok": None, "conc_reason": None}
+    late_injected = [False]
+    def _on_list_pins():
+        observed["tombstone_before_list"] = (lim2.get_erased_sha_owner(REV_SHA) == ALICE.address.lower())
+        observed["catalog_inv_before_list"] = (cat2._last_refresh_mono == 0.0)
+    def _on_unpin_l3f2(cid_u):
+        if cid_u == CID_REV_V0 and not late_injected[0]:
+            late_injected[0] = True
+            # Concurrent commit during unpin_cid MUST fail with gdpr_erased because tombstone is already persisted!
+            observed["conc_commit_ok"] = lim2.commit(
+                tok_conc, len(REV_BYTES), now_ts,
+                cid=CID_REV_CONC, multihash=mh_conc, content_sha256=REV_SHA,
+                verified_onchain_provenance=(True, canon2, allow2),
+            )
+            observed["conc_reason"] = lim2.pop_commit_reject_reason(tok_conc)
+            lim2.release_rollback_guard(tok_conc)
+            # Also simulate a raw transition-window row landing in tracked_pins/pending_uploads during unpin!
+            mh_late = gw.extract_canonical_multihash(CID_REV_LATE)
+            c_inj = sqlite3.connect(db2)
+            c_inj.execute(
+                "INSERT OR REPLACE INTO tracked_pins(cid, multihash, size_bytes, pinned_at, sha256) VALUES(?, ?, ?, ?, ?)",
+                (CID_REV_LATE, mh_late, len(REV_BYTES), now_ts, REV_SHA),
+            )
+            c_inj.commit()
+            c_inj.close()
+
+    kubo2.on_list_pins = _on_list_pins
+    kubo2.on_unpin = _on_unpin_l3f2
+    rec2 = gw.GdprErasureReconciler(reg2, kubo2, start_block=395, db_path=db2, catalog_index=cat2)
+    try:
+        rec2.reconcile_once()
+        assert observed["tombstone_before_list"] is True, f"L3-F2 FAILED: tombstone not written before list_recursive_pins: {observed}"
+        assert observed["catalog_inv_before_list"] is True, f"L3-F2 FAILED: catalog not invalidated before list_recursive_pins: {observed}"
+        assert observed["conc_commit_ok"] is False and observed["conc_reason"] == "gdpr_erased", f"L3-F2 FAILED: concurrent commit succeeded during unpin: {observed}"
+        assert CID_REV_V0 not in kubo2.pins and CID_REV_LATE not in kubo2.pins, f"L3-F2 FAILED: transition-window pin survived: {kubo2.pins}"
+
+        # Verify _remove_tracked_pins NEVER deletes a tracked_pins/pending_uploads row whose CID was NOT unpinned!
+        mh_keep = gw.extract_canonical_multihash(CID_REV_CONC)
+        with rec2._lock, gw._sqlite_write_tx(rec2._conn):
+            rec2._conn.execute(
+                "INSERT OR REPLACE INTO tracked_pins(cid, multihash, size_bytes, pinned_at, sha256) VALUES(?, ?, ?, ?, ?)",
+                (CID_REV_CONC, mh_keep, len(REV_BYTES), now_ts, REV_SHA),
+            )
+            rec2._conn.execute(
+                "INSERT OR REPLACE INTO pending_uploads(cid, multihash, uploader, size_bytes, uploaded_at, sha256) VALUES(?, ?, ?, ?, ?, ?)",
+                (CID_REV_CONC, mh_keep, ALICE.address.lower(), len(REV_BYTES), now_ts, REV_SHA),
+            )
+        rec2._remove_tracked_pins([CID_REV_V0], {mh_keep}, shas={REV_SHA}, purge_provenance=False)
+        with rec2._lock:
+            tp_left = rec2._conn.execute("SELECT cid FROM tracked_pins WHERE cid = ?", (CID_REV_CONC,)).fetchone()
+            pu_left = rec2._conn.execute("SELECT cid FROM pending_uploads WHERE cid = ?", (CID_REV_CONC,)).fetchone()
+        assert tp_left is not None and pu_left is not None, "L3-F2 FAILED: _remove_tracked_pins deleted un-unpinned CID row!"
+    finally:
+        rec2.close(); lim2.close()
+
+    # ------------------------------------------------------------------
+    # 3. Boost BOOST-L3 / Swarm L3-F02: Deferred rollback when T1 hits gdpr_erased
+    #    while same-owner peer T2 still holds _inflight_mh_claims[mh], and T2 later
+    #    exits via release() (e.g. 401 replay or add_fn error) — tested BOTH via
+    #    direct UploadRateLimiter API AND full concurrent HTTP do_POST!
+    # ------------------------------------------------------------------
+    db3 = os.path.join(td, "boost_l3.sqlite")
+    kubo3 = P9Kubo()
+    kubo3.pins[CID_PEER] = len(PEER_BYTES)
+    lim3 = gw.UploadRateLimiter(db_path=db3, kubo_adapter=kubo3)
+    try:
+        mh_peer = gw.extract_canonical_multihash(CID_PEER)
+        ok_t1, _, t1 = lim3.reserve(ALICE.address, len(PEER_BYTES), now_ts)
+        ok_t2, _, t2 = lim3.reserve(ALICE.address, len(PEER_BYTES), now_ts)
+        assert ok_t1 and ok_t2
+        c1_ok, _, _, p1, a1 = lim3.try_claim_upload_provenance(t1, mh_peer, ALICE.address, content_sha256=PEER_SHA, now_ts=now_ts)
+        c2_ok, _, _, p2, a2 = lim3.try_claim_upload_provenance(t2, mh_peer, ALICE.address, content_sha256=PEER_SHA, now_ts=now_ts)
+        assert c1_ok and c2_ok
+        # Mid-stream GDPR tombstone arrives
+        with lim3._lock, gw._sqlite_write_tx(lim3._conn):
+            lim3._conn.execute(
+                "INSERT INTO gdpr_erased_shas(sha256, canonical_owner, erased_at, erasure_rev) VALUES(?, ?, ?, 1)",
+                (PEER_SHA, ALICE.address.lower(), now_ts),
+            )
+        # T1 commits -> rejected with gdpr_erased, deferred because T2 still holds mh_peer!
+        res_t1 = lim3.commit(t1, len(PEER_BYTES), now_ts, cid=CID_PEER, multihash=mh_peer, content_sha256=PEER_SHA, verified_onchain_provenance=(True, p1, a1))
+        assert res_t1 is False and lim3.pop_commit_reject_reason(t1) == "gdpr_erased"
+        assert lim3.acquire_rollback_eligibility(t1, mh_peer) is False
+        lim3.release_rollback_guard(t1)
+        assert CID_PEER in kubo3.pins, "T1 wrongly unpinned while peer T2 still held claim!"
+        # T2 exits via release() (simulating 401 replay / 502 add_fn error) -> MUST roll back deferred CID_PEER!
+        rb_cids = lim3.release(t2)
+        assert CID_PEER in rb_cids and CID_PEER not in kubo3.pins, f"BOOST-L3 FAILED: peer T2 release() stranded pin! rb={rb_cids} pins={kubo3.pins}"
+        assert lim3.has_inflight_mh(mh_peer) is False
+    finally:
+        lim3.close()
+
+    # Live HTTP concurrent peer test: T1 pins & hits mid-stream gdpr_erased while T2 is in-flight
+    # and then T2 fails with 401 replay -> ZERO stranded pins in Kubo!
+    db3_http = os.path.join(td, "boost_l3_http.sqlite")
+    reg3h = P9Reg()
+    kubo3h = P9Kubo()
+    srv3 = gw.create_gateway_server(
+        host="127.0.0.1", port=0, chain_id=CHAIN_ID, registry_address=REGISTRY,
+        registry_adapter=reg3h, kubo_adapter=kubo3h, state_db_path=db3_http,
+        upload_policy="open-dev", now_fn=lambda: now_ts,
+    )
+    port3 = srv3.server_address[1]
+    t2_claimed = threading.Event()
+    t1_done = threading.Event()
+    orig_consume = srv3.gateway_nonce_store.consume_checked
+    def _coordinated_consume(addr, nonce, **kwargs):
+        if nonce == "p9-peer-t2-replay-0001":
+            # Signal T1 that T2 has acquired _inflight_mh_claims[mh_peer], wait for T1 to pin+403, then return replay!
+            t2_claimed.set()
+            t1_done.wait(timeout=5.0)
+            return "replay"
+        return orig_consume(addr, nonce, **kwargs)
+    srv3.gateway_nonce_store.consume_checked = _coordinated_consume
+
+    def _on_pin_t1(cid_w, _data):
+        if cid_w == CID_PEER:
+            # Wait until T2 holds the peer claim, then insert GDPR tombstone right before T1 commits!
+            t2_claimed.wait(timeout=5.0)
+            with srv3.gateway_upload_limiter._lock, gw._sqlite_write_tx(srv3.gateway_upload_limiter._conn):
+                srv3.gateway_upload_limiter._conn.execute(
+                    "INSERT OR REPLACE INTO gdpr_erased_shas(sha256, canonical_owner, erased_at, erasure_rev) VALUES(?, ?, ?, 1)",
+                    (PEER_SHA, ALICE.address.lower(), now_ts),
+                )
+    kubo3h.on_pin_write = _on_pin_t1
+    threading.Thread(target=srv3.serve_forever, daemon=True).start()
+    try:
+        http_res = {}
+        def _send_peer(key_name, nonce_val):
+            req = urllib.request.Request(
+                f"http://127.0.0.1:{port3}/api/v0/upload",
+                data=PEER_BYTES, headers=sign_upload(ALICE, PEER_BYTES, now_ts, nonce_val), method="POST",
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=10) as r:
+                    http_res[key_name] = r.status
+            except urllib.error.HTTPError as e:
+                http_res[key_name] = e.code
+            if key_name == "t1":
+                t1_done.set()
+        th2 = threading.Thread(target=_send_peer, args=("t2", "p9-peer-t2-replay-0001"))
+        th1 = threading.Thread(target=_send_peer, args=("t1", "p9-peer-t1-gdpr-000001"))
+        th2.start()
+        assert t2_claimed.wait(timeout=5.0), "T2 never reached consume_checked"
+        th1.start()
+        th1.join(timeout=10.0)
+        th2.join(timeout=10.0)
+        assert http_res.get("t1") == 403 and http_res.get("t2") == 401, f"BOOST-L3 HTTP unexpected statuses: {http_res}"
+        assert CID_PEER not in kubo3h.pins, f"BOOST-L3 HTTP FAILED: Kubo pin stranded after T2 401 replay exit: {kubo3h.pins}"
+    finally:
+        srv3.shutdown(); srv3.server_close()
+
+    # ------------------------------------------------------------------
+    # 4. Swarm L3-F03: Orphan-Pin TTL GC vs In-Flight Same-Owner Re-Upload
+    #    (a) Pre-unpin skip when upload_limiter.has_inflight_mh(mh) is True
+    #    (b) Post-unpin TOCTOU re-pin recovery when upload arrives during unpin_cid()
+    # ------------------------------------------------------------------
+    db4 = os.path.join(td, "l3_f03.sqlite")
+    reg4 = P9Reg()
+    kubo4 = P9Kubo()
+    kubo4.pins = {CID_ORPH_A: len(ORPH_A_BYTES), CID_ORPH_B: len(ORPH_B_BYTES)}
+    lim4 = gw.UploadRateLimiter(db_path=db4, kubo_adapter=kubo4)
+    try:
+        lim4.record_pending_upload(CID_ORPH_A, ALICE.address, len(ORPH_A_BYTES), now_ts - 4000)
+        lim4.record_pending_upload(CID_ORPH_B, ALICE.address, len(ORPH_B_BYTES), now_ts - 4000)
+        mh_oa = gw.extract_canonical_multihash(CID_ORPH_A)
+        mh_ob = gw.extract_canonical_multihash(CID_ORPH_B)
+        # Hold an active in-flight upload claim on CID_ORPH_A BEFORE orphan GC starts
+        ok_oa, _, tok_oa = lim4.reserve(ALICE.address, len(ORPH_A_BYTES), now_ts)
+        assert ok_oa
+        c_oa, _, _, _, _ = lim4.try_claim_upload_provenance(tok_oa, mh_oa, ALICE.address, now_ts=now_ts)
+        assert c_oa
+
+        # Simulate a concurrent upload acquiring mh_ob DURING kubo4.unpin_cid(CID_ORPH_B)!
+        tok_ob_box = [None]
+        unpin_calls_4 = []
+        def _on_unpin_4(cid_u):
+            unpin_calls_4.append(cid_u)
+            if cid_u == CID_ORPH_B and tok_ob_box[0] is None:
+                ok_ob, _, t_ob = lim4.reserve(ALICE.address, len(ORPH_B_BYTES), now_ts)
+                assert ok_ob
+                c_ob, _, _, _, _ = lim4.try_claim_upload_provenance(t_ob, mh_ob, ALICE.address, now_ts=now_ts)
+                assert c_ob
+                tok_ob_box[0] = t_ob
+        kubo4.on_unpin = _on_unpin_4
+
+        rec4 = gw.GdprErasureReconciler(
+            reg4, kubo4, start_block=400, db_path=db4,
+            orphan_pin_ttl_sec=3600, now_fn=lambda: now_ts, upload_limiter=lim4,
+        )
+        try:
+            unp4 = rec4.reconcile_orphan_uploads()
+            assert CID_ORPH_A not in unpin_calls_4 and CID_ORPH_A in kubo4.pins, f"L3-F03 pre-unpin skip failed: calls={unpin_calls_4}"
+            assert CID_ORPH_B not in unp4 and CID_ORPH_B in kubo4.pins, f"L3-F03 post-unpin recovery failed: unp={unp4} pins={kubo4.pins}"
+        finally:
+            rec4.close()
+        lim4.release(tok_oa)
+        if tok_ob_box[0]:
+            lim4.release(tok_ob_box[0])
+    finally:
+        lim4.close()
+
+print("R18_06R_GATEWAY_CONCURRENCY_OK")
+`;
+    const pyOut = execFileSync(resolvePythonBin(), ["-c", pyPhase9Gateway], {
+      encoding: "utf8",
+      timeout: 60000,
+    });
+    expect(pyOut).to.include("R18_06R_GATEWAY_CONCURRENCY_OK");
+
+    // Teamwork L3-F3: Non-local build fail-closed retrieveFromIpfs when VITE_KUBO_GATEWAY is omitted
+    const origFetch = globalThis.fetch;
+    const origViteChainId = process.env.VITE_CHAIN_ID;
+    const origIpfsGw = process.env.IPFS_GATEWAY;
+    const origKuboGw = process.env.KUBO_GATEWAY;
+    const origIpfsRpc = process.env.IPFS_RPC;
+    const origKuboRpc = process.env.KUBO_RPC;
+    const origCompileFlag = globalThis.__GENOCHAIN_NON_LOCAL_CHAIN__;
+    try {
+      delete process.env.IPFS_GATEWAY;
+      delete process.env.KUBO_GATEWAY;
+      delete process.env.IPFS_RPC;
+      delete process.env.KUBO_RPC;
+      const CID_TEST = "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG";
+
+      for (const mode of ["env-sepolia", "compile-flag"]) {
+        if (mode === "env-sepolia") {
+          process.env.VITE_CHAIN_ID = "11155111";
+          delete globalThis.__GENOCHAIN_NON_LOCAL_CHAIN__;
+        } else {
+          delete process.env.VITE_CHAIN_ID;
+          globalThis.__GENOCHAIN_NON_LOCAL_CHAIN__ = true;
+        }
+        const fetchCalls = [];
+        globalThis.fetch = async (url) => {
+          fetchCalls.push(String(url));
+          return new Response(new Uint8Array([1, 2, 3]), { status: 200 });
+        };
+        clearKuboLocalRefsCache();
+        clearLocalIpfsCache();
+
+        // 1. Private ciphertext fetch (dataId + privatePayload) MUST fail closed with 0 public gateway calls
+        let err1 = null;
+        try {
+          await retrieveFromIpfs(CID_TEST, "https://gateway.pinata.cloud/ipfs", { dataId: 1, privatePayload: true });
+        } catch (e) {
+          err1 = e;
+        }
+        expect(err1, `${mode} private ciphertext should fail closed`).to.not.equal(null);
+        expect(err1.privateGatewayFailClosed).to.equal(true);
+        expect(fetchCalls.length, `${mode} leaked fetch calls: ${fetchCalls}`).to.equal(0);
+
+        // 2. Default retrieveFromIpfs without allowPublicGatewayFallback MUST fail closed with 0 public calls
+        let err2 = null;
+        try {
+          await retrieveFromIpfs(CID_TEST);
+        } catch (e) {
+          err2 = e;
+        }
+        expect(err2, `${mode} default retrieve should fail closed`).to.not.equal(null);
+        expect(err2.privateGatewayFailClosed).to.equal(true);
+        expect(fetchCalls.length).to.equal(0);
+
+        // 3. Even with allowPublicGatewayFallback: true, private dataId fetch MUST STILL fail closed!
+        let err3 = null;
+        try {
+          await retrieveFromIpfs(CID_TEST, "https://gateway.pinata.cloud/ipfs", {
+            fastCatalog: true,
+            dataId: 1,
+            allowPublicGatewayFallback: true,
+          });
+        } catch (e) {
+          err3 = e;
+        }
+        expect(err3, `${mode} private dataId opt-in bypass must fail closed`).to.not.equal(null);
+        expect(err3.privateGatewayFailClosed).to.equal(true);
+        expect(fetchCalls.length).to.equal(0);
+
+        // 4. Explicit non-private metadata opt-in (fastCatalog + allowPublicGatewayFallback, no dataId/signer) succeeds
+        const optInBytes = await retrieveFromIpfs(CID_TEST, "https://gateway.pinata.cloud/ipfs", {
+          fastCatalog: true,
+          allowPublicGatewayFallback: true,
+        });
+        expect(optInBytes.length).to.equal(3);
+        expect(fetchCalls.length).to.equal(1);
+      }
+    } finally {
+      globalThis.fetch = origFetch;
+      if (origViteChainId === undefined) delete process.env.VITE_CHAIN_ID;
+      else process.env.VITE_CHAIN_ID = origViteChainId;
+      if (origIpfsGw === undefined) delete process.env.IPFS_GATEWAY;
+      else process.env.IPFS_GATEWAY = origIpfsGw;
+      if (origKuboGw === undefined) delete process.env.KUBO_GATEWAY;
+      else process.env.KUBO_GATEWAY = origKuboGw;
+      if (origIpfsRpc === undefined) delete process.env.IPFS_RPC;
+      else process.env.IPFS_RPC = origIpfsRpc;
+      if (origKuboRpc === undefined) delete process.env.KUBO_RPC;
+      else process.env.KUBO_RPC = origKuboRpc;
+      if (origCompileFlag === undefined) delete globalThis.__GENOCHAIN_NON_LOCAL_CHAIN__;
+      else globalThis.__GENOCHAIN_NON_LOCAL_CHAIN__ = origCompileFlag;
+      clearKuboLocalRefsCache();
+      clearLocalIpfsCache();
+    }
+  });
 });

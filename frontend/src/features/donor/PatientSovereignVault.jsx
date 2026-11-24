@@ -959,8 +959,9 @@ export default function PatientSovereignVault({
                         style={{ padding: "2px 6px", minWidth: "24px", minHeight: "24px", height: "24px" }}
                         onClick={() => handleSavePrice(d.dataId)}
                         title={t("confirm")}
+                        aria-label={t("confirm")}
                       >
-                        <CheckCircleIcon size={12} color="#10b981" />
+                        <CheckCircleIcon size={12} color="var(--accent-emerald-text)" />
                       </button>
                       <button
                         type="button"
@@ -968,8 +969,9 @@ export default function PatientSovereignVault({
                         style={{ padding: "2px 6px", minWidth: "24px", minHeight: "24px", height: "24px" }}
                         onClick={() => setEditingPriceDataId(null)}
                         title={t("cancel")}
+                        aria-label={t("cancel")}
                       >
-                        <CloseCrossIcon size={11} color="#94a3b8" />
+                        <CloseCrossIcon size={11} color="var(--text-secondary)" />
                       </button>
                     </div>
                   ) : (
@@ -982,6 +984,7 @@ export default function PatientSovereignVault({
                           style={{ padding: "2px 4px", minWidth: "24px", minHeight: "24px", height: "24px" }}
                           onClick={() => handleStartEditPrice(d)}
                           title={t("btnEditPrice")}
+                          aria-label={t("btnEditPrice")}
                         >
                           <EditPencilIcon size={11} color="var(--accent-cyan)" />
                         </button>
@@ -1015,6 +1018,7 @@ export default function PatientSovereignVault({
                     {d.status === "Active" && (
                       <>
                         <button
+                          id={`btn-vault-grant-${d.dataId}`}
                           className="btn-terminal btn-terminal-ghost"
                           onClick={() => setGrantModalData(d)}
                           title={t("btnGrantAccess")}

@@ -200,7 +200,7 @@ export default function Navbar() {
                     : t("faucetClaimTitle")
               }
             >
-              <GenoTokenIcon size={14} color="#fbbf24" />
+              <GenoTokenIcon size={14} color="var(--accent-amber-text)" />
               <span>{t("faucetClaim")}</span>
             </button>
 
@@ -346,7 +346,7 @@ export default function Navbar() {
           >
             <div className="modal-header-bar" role="region" aria-label={t("faucetVoucherModalTitle")}>
               <div className="modal-title-left">
-                <GenoTokenIcon size={16} color="#fbbf24" />
+                <GenoTokenIcon size={16} color="var(--accent-amber-text)" />
                 <h2 id="faucet-voucher-modal-title" style={{ fontSize: "14px", fontWeight: 700, margin: 0 }}>
                   {t("faucetVoucherModalTitle")}
                 </h2>
@@ -358,7 +358,7 @@ export default function Navbar() {
                 aria-label={t("close")}
                 onClick={() => setShowFaucetVoucherModal(false)}
               >
-                <CloseCrossIcon size={16} color="#94a3b8" />
+                <CloseCrossIcon size={16} color="var(--text-secondary)" />
               </button>
             </div>
 

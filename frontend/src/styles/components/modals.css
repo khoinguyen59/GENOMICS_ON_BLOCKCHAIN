@@ -221,21 +221,6 @@
   gap: 6px;
 }
 
-.opensea-overlay-chip {
-  background: rgba(4, 7, 17, 0.85);
-  border: 1px solid var(--border-subtle);
-  backdrop-filter: blur(10px);
-  border-radius: var(--radius-full);
-  padding: 3px 9px;
-  font-size: 11px;
-  font-family: var(--font-mono);
-  font-weight: 700;
-  color: var(--text-secondary);
-  display: flex;
-  align-items: center;
-  gap: 5px;
-}
-
 /* Accordion Panel (On-Chain Contract Details) */
 .opensea-accordion-panel {
   background: var(--bg-surface-elevated);
@@ -706,7 +691,7 @@
 [data-theme="light"] .modal-close-btn {
   background: #f1f5f9;
   border-color: var(--border-subtle);
-  color: var(--text-muted);
+  color: var(--text-secondary);
 }
 
 [data-theme="light"] .modal-close-btn:hover {
@@ -719,6 +704,11 @@
 [data-theme="light"] .opensea-buybox-container {
   background: #f8fafc;
   border-color: var(--border-subtle);
+}
+
+[data-theme="light"] .spec-box:hover {
+  background: #f1f5f9;
+  border-color: rgba(37, 99, 235, 0.35);
 }
 
 [data-theme="light"] .opensea-trait-card {
@@ -752,14 +742,14 @@
   color: #475569;
 }
 
-[data-theme="light"] .btn-opensea-large {
+[data-theme="light"] .btn-terminal-primary.btn-opensea-large {
   background: #2563eb;
   color: #ffffff;
   border: 1px solid #1d4ed8;
   box-shadow: 0 4px 14px rgba(37, 99, 235, 0.3);
 }
 
-[data-theme="light"] .btn-opensea-large:hover {
+[data-theme="light"] .btn-terminal-primary.btn-opensea-large:hover:not(:disabled) {
   background: #1d4ed8;
   box-shadow: 0 6px 20px rgba(37, 99, 235, 0.45);
 }

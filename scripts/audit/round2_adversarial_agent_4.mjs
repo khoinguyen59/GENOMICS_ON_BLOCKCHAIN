@@ -99,7 +99,7 @@ async function runAdversarialAgent4Suite() {
   const price = ethers.parseUnits("200", 18);
   const duration = 86400; // 1 day
 
-  await registry.connect(sellerAlice).registerGenomicData(
+  const regTx = await registry.connect(sellerAlice).registerGenomicData(
     rawHash,
     rawCid,
     sumCid,
@@ -109,6 +109,7 @@ async function runAdversarialAgent4Suite() {
     duration,
     1000
   );
+  const regReceipt = await regTx.wait();
 
   // Buyer Bob purchases access with Escrow
   await registry.connect(buyerBob).grantAccessWithEscrow(1, 86400);
@@ -416,10 +417,15 @@ async function runAdversarialAgent4Suite() {
     recordPass("AssetDetailModal strings are 100% localized via t()");
   }
 
-  // Test 4.2: Web3.py Tx Hash 0x prefix integrity
-  const sampleHash = "0x" + "a".repeat(64);
-  assert(sampleHash.startsWith("0x") && sampleHash.length === 66, "Tx Hash strict 0x prefix and 66 chars");
-  recordPass("Academic Hygiene Invariant 12: Tx Hash strict 0x prefix and 66 characters validated");
+  // Test 4.2: Live EVM Tx Hash 0x prefix integrity & Web3.py 0x preservation
+  const liveTxHash = String(regReceipt?.hash || "");
+  assert(/^0x[0-9a-fA-F]{64}$/.test(liveTxHash), `Live mined EVM tx hash malformed: ${liveTxHash}`);
+  const web3DemoSrc = fs.readFileSync(path.join(process.cwd(), "scripts", "demo", "web3_demo.py"), "utf8");
+  assert(
+    web3DemoSrc.includes("0x{raw_data_hash.hex()}") && web3DemoSrc.includes("0x{downloaded_hash.hex()}"),
+    "web3_demo.py missing explicit 0x hex prefix formatting"
+  );
+  recordPass("Academic Hygiene Invariant 12: Live mined EVM tx hash & Web3.py 0x prefix formatting validated", liveTxHash);
 
   // ==============================================================================
   // EXECUTION SUMMARY

@@ -57,7 +57,7 @@ export default function IpfsSettingsModal() {
             title={t("close")}
             aria-label={t("close") || "Close"}
           >
-            <CloseCrossIcon size={16} color="#94a3b8" />
+            <CloseCrossIcon size={16} color="var(--text-secondary)" />
           </button>
         </div>
 

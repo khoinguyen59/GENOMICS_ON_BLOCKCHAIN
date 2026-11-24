@@ -928,6 +928,7 @@ export default function DragDropMintingStudio({ onPublishSuccess }) {
             <button
               id="btn-toggle-privacy-telemetry"
               type="button"
+              aria-expanded={showTelemetry}
               onClick={() => setShowTelemetry(!showTelemetry)}
               style={{
                 width: "100%",

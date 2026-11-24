@@ -1,5 +1,5 @@
 {
-  "scenarios_count": 38,
+  "scenarios_count": 40,
   "blocking_violations_total": 0,
   "overflow_failures_total": 0,
   "wcag_live_checks": {
@@ -249,6 +249,17 @@
       "violations": []
     },
     {
+      "scenario": "desktop_dark_vi_modal",
+      "passes_count": 44,
+      "violations_count": 0,
+      "axe_violations_count": 0,
+      "blocking_count": 0,
+      "overflow_px": 0,
+      "scroll_width": 1440,
+      "client_width": 1440,
+      "violations": []
+    },
+    {
       "scenario": "desktop_light_vi_vault_tags_modal",
       "passes_count": 45,
       "violations_count": 0,
@@ -470,6 +481,17 @@
     },
     {
       "scenario": "mobile_light_vi_modal",
+      "passes_count": 44,
+      "violations_count": 0,
+      "axe_violations_count": 0,
+      "blocking_count": 0,
+      "overflow_px": 0,
+      "scroll_width": 390,
+      "client_width": 390,
+      "violations": []
+    },
+    {
+      "scenario": "mobile_dark_vi_modal",
       "passes_count": 44,
       "violations_count": 0,
       "axe_violations_count": 0,

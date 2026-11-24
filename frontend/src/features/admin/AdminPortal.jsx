@@ -958,7 +958,7 @@ export default function AdminPortal() {
                 <button
                   id="admin-switch-acct-0"
                   type="button"
-                  className={`btn-terminal ${localAccountIndex === 0 ? "btn-terminal-primary" : ""}`}
+                  className={`btn-terminal ${localAccountIndex === 0 ? "btn-terminal-primary" : "btn-terminal-ghost"}`}
                   style={{ padding: "5px 10px", fontSize: "12px" }}
                   title={t("adminAcct0")}
                   onClick={() => connectLocalAccount(0)}
@@ -969,7 +969,7 @@ export default function AdminPortal() {
                 <button
                   id="admin-switch-acct-1"
                   type="button"
-                  className={`btn-terminal ${localAccountIndex === 1 ? "btn-terminal-primary" : ""}`}
+                  className={`btn-terminal ${localAccountIndex === 1 ? "btn-terminal-primary" : "btn-terminal-ghost"}`}
                   style={{ padding: "5px 10px", fontSize: "12px" }}
                   title={t("adminAcct1")}
                   onClick={() => connectLocalAccount(1)}
@@ -980,7 +980,7 @@ export default function AdminPortal() {
                 <button
                   id="admin-switch-acct-2"
                   type="button"
-                  className={`btn-terminal ${localAccountIndex === 2 ? "btn-terminal-primary" : ""}`}
+                  className={`btn-terminal ${localAccountIndex === 2 ? "btn-terminal-primary" : "btn-terminal-ghost"}`}
                   style={{ padding: "5px 10px", fontSize: "12px" }}
                   title={t("adminAcct2")}
                   onClick={() => connectLocalAccount(2)}
@@ -995,7 +995,7 @@ export default function AdminPortal() {
           <button
             id="admin-open-ipfs-btn"
             type="button"
-            className="btn-terminal"
+            className="btn-terminal btn-terminal-ghost"
             style={{ padding: "5px 10px", fontSize: "12px" }}
             title={t("adminOpenIpfs")}
             onClick={() => setShowIpfsSettings(true)}
@@ -1006,7 +1006,7 @@ export default function AdminPortal() {
           <button
             id="admin-refresh-telemetry-btn"
             type="button"
-            className="btn-terminal"
+            className="btn-terminal btn-terminal-ghost"
             style={{ padding: "5px 10px", fontSize: "12px" }}
             title={t("adminRefreshTelemetry")}
             onClick={loadAdminTelemetry}
@@ -1140,7 +1140,7 @@ export default function AdminPortal() {
                 <button
                   id="admin-timelock-copy-exec-btn"
                   type="button"
-                  className="btn-terminal"
+                  className="btn-terminal btn-terminal-ghost"
                   title={t("adminTimelockCopyExecBtn")}
                   onClick={() => copyAddr(encodedTimelockProposal.executeCalldata)}
                 >
@@ -1791,7 +1791,7 @@ export default function AdminPortal() {
                       <button
                         id={`admin-close-bounty-${b.bountyId}`}
                         type="button"
-                        className="btn-terminal"
+                        className="btn-terminal btn-terminal-ghost"
                         style={{ padding: "5px 10px", fontSize: "11.5px", minHeight: "28px" }}
                         title={t("adminBountyCloseBtn")}
                         disabled={busyAction === `close-${b.bountyId}`}

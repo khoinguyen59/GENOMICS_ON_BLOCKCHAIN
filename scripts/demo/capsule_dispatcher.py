@@ -1622,6 +1622,7 @@ def main():
                             # so they are NEVER silently dropped once >5 blocks elapse before unpause!
                             keep_paused_order = False
                             paused_is_escrow = bool(task["isEscrow"])
+                            needs_new_paused_escrow = False
                             try:
                                 latest_ts_paused = int(w3.eth.get_block("latest")["timestamp"])
                                 dep_p_raw = registry.functions.escrowDeposits(data_id, buyer).call()
@@ -1637,6 +1638,7 @@ def main():
                                         keep_paused_order = False
                                     else:
                                         keep_paused_order = True
+                                        needs_new_paused_escrow = not p_deliv
                                 else:
                                     grant_raw = registry.functions.accessGrants(data_id, buyer).call()
                                     grant_f = unpack_abi_outputs(registry_abi, "accessGrants", grant_raw)
@@ -1645,9 +1647,12 @@ def main():
                                     keep_paused_order = g_granted and g_exp > latest_ts_paused
                             except Exception:
                                 keep_paused_order = bool(task["confirmedOrder"])
+                                needs_new_paused_escrow = bool(task["isEscrow"])
 
                             if keep_paused_order:
-                                if not is_already_delivered_same_key(dispatched_keys, order_key, buyer):
+                                # Always track an unfulfilled paused escrow (capsuleDelivered=False) even if
+                                # dispatched_keys holds a prior completed purchase under the same pubkey!
+                                if needs_new_paused_escrow or not is_already_delivered_same_key(dispatched_keys, order_key, buyer):
                                     mark_pending_order(
                                         pending_orders,
                                         order_key,
@@ -1759,7 +1764,9 @@ def main():
                                     buyer=buyer,
                                     optedOut=opted_out,
                                 )
-                                if not is_already_delivered_same_key(dispatched_keys, order_key, buyer):
+                                # Always track an unfulfilled escrow (capsuleDelivered=False) even if
+                                # dispatched_keys holds a prior completed purchase under the same pubkey!
+                                if (is_pending_escrow and not escrow_delivered) or not is_already_delivered_same_key(dispatched_keys, order_key, buyer):
                                     mark_pending_order(
                                         pending_orders,
                                         order_key,

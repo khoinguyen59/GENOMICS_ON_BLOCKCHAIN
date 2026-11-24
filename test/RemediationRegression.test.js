@@ -3902,4 +3902,579 @@ print("R18_06P_PHASE7_GATEWAY_INVARIANTS_OK")
     });
     expect(out).to.include("R18_06P_PHASE7_GATEWAY_INVARIANTS_OK");
   });
+
+  // =========================================================================
+  // R18-06q: Phase 8 BOOST-H01 (V1/V2A/V2B + Mid-Stream GDPR Commit Rollback + sha_verified Migration),
+  //          BOOST-L01 (4 MiB Early-Abort Socket Hygiene), L3-01 (Orphan TTL Recheck) & L3-04 (Dispatcher Renewed Paused/Opt-Out Escrow)
+  // =========================================================================
+  it("R18-06q: blocks BOOST-H01 V1/V2A/V2B & mid-stream GDPR commit bypass, enforces 4 MiB early-abort JSON hygiene, orphan TTL anchor recheck & dispatcher renewed paused/opted-out escrow tracking", async function () {
+    this.timeout(120000);
+    const seedBytes = new Uint8Array(12 * 1024);
+    for (let i = 0; i < seedBytes.length; i++) seedBytes[i] = (i * 29 + 5) & 0xff;
+    const seedCidV0 = await computeIpfsCidV0(seedBytes);
+    const seedCidV1 = await computeIpfsCidV1(seedBytes, 0x55, MULTIHASH_SHA2_256);
+    expect(seedCidV0).to.not.equal(seedCidV1);
+
+    const pyPhase8Gateway = `
+import hashlib, http.client, io, json, os, sqlite3, sys, tempfile, threading, time, urllib.error, urllib.request
+from eth_account import Account
+from eth_account.messages import encode_defunct
+import deploy.ipfs_access_gateway as gw
+
+SEED_CID_V0, SEED_CID_V1 = sys.argv[1:3]
+CHAIN_ID = 31337
+REGISTRY = "0x1111111111111111111111111111111111111111"
+ALICE    = Account.from_key("0x" + "11" * 32)
+VICTIM   = Account.from_key("0x" + "22" * 32)
+ATTACKER = Account.from_key("0x" + "33" * 32)
+
+SEED_BYTES   = bytes((i * 29 + 5) & 0xff for i in range(12 * 1024))
+V1_BYTES     = b"BOOST_H01_V1_VICTIM_PENDING_CIPHERTEXT_PAYLOAD"
+V2A_BYTES    = b"BOOST_H01_V2A_VICTIM_ACTIVE_CIPHERTEXT_PAYLOAD"
+ATK_D_BYTES  = b"BOOST_H01_ATTACKER_DUMMY_UPLOAD_BYTES_DIFF_HASH"
+MID_BYTES    = b"BOOST_H01_MIDSTREAM_GDPR_COMMIT_ROLLBACK_BYTES"
+ORPH1_BYTES  = b"TEAMWORK_L301_ORPHAN_PRE_UNPIN_ANCHORED_BYTES"
+ORPH2_BYTES  = b"TEAMWORK_L301_ORPHAN_POST_UNPIN_ANCHORED_BYTES"
+
+SEED_SHA  = hashlib.sha256(SEED_BYTES).hexdigest()
+V1_SHA    = hashlib.sha256(V1_BYTES).hexdigest()
+V2A_SHA   = hashlib.sha256(V2A_BYTES).hexdigest()
+ATK_D_SHA = hashlib.sha256(ATK_D_BYTES).hexdigest()
+MID_SHA   = hashlib.sha256(MID_BYTES).hexdigest()
+
+CID_V1        = "bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi"
+CID_V2A       = "bafybeihdwdcefgh4dqkjv67uzcmw7ojee6xedzdetojuzjevtenxquvyku"
+CID_ATK_D     = "bafybeibml5uieyxa5tufngvg7fgwbkwvlsuntwbxgtskoqynbt7wlchmfm"
+CID_MID       = "bafybeiczsscdsbs7ffqz55asqdf3smv6klcw3gofszvwlyarci47bgf354"
+CID_DUMMY_UNP = "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG"
+CID_DUMMY_2A  = "QmZ4tDuvesekSs4qM5ZBKpXiZGun7S2CYtEZRB3DYXkjGx"
+CID_DUMMY_2B  = "QmPZ9qBzzyAtRaQQQUZr6xHS6wVfETRR249s63UME18znJ"
+CID_ORPH1     = "bafybeiemxf5abjwjbikoz4mc3a3dla6ual3jsgpdr4cjr3oz3evfyavhwq"
+CID_ORPH2     = "bafybeigvgzoolc3drupxhlevdp2ugqcrbcsqfmcek2zxiw5wctk3xjpjwy"
+
+BYTES_TO_CID = {
+    SEED_BYTES:  SEED_CID_V1,
+    V1_BYTES:    CID_V1,
+    V2A_BYTES:   CID_V2A,
+    ATK_D_BYTES: CID_ATK_D,
+    MID_BYTES:   CID_MID,
+    ORPH1_BYTES: CID_ORPH1,
+    ORPH2_BYTES: CID_ORPH2,
+}
+CID_TO_BYTES = {v: k for k, v in BYTES_TO_CID.items()}
+CID_TO_BYTES[SEED_CID_V0] = SEED_BYTES
+
+def sign_upload(acct, payload_bytes, ts, nonce):
+    sha = hashlib.sha256(payload_bytes).hexdigest()
+    msg = gw.build_siwe_upload_message(CHAIN_ID, REGISTRY, sha, acct.address, ts, nonce)
+    sig = acct.sign_message(encode_defunct(text=msg)).signature.hex()
+    return {
+        "Content-Type": "application/octet-stream",
+        "X-GenoChain-Address": acct.address,
+        "X-GenoChain-Timestamp": str(ts),
+        "X-GenoChain-Nonce": nonce,
+        "X-GenoChain-Signature": sig if sig.startswith("0x") else "0x" + sig,
+        "X-GenoChain-Content-Sha256": sha,
+    }
+
+class P8Reg:
+    def __init__(self):
+        self.datasets = []
+        self.events = []
+        self.on_get_all = None
+    def is_connected(self): return True
+    def get_block_number(self): return 300
+    def get_all_datasets(self):
+        if callable(self.on_get_all):
+            self.on_get_all()
+        return list(self.datasets)
+    def get_genomic_data(self, d):
+        for ds in self.datasets:
+            if ds["dataId"] == int(d): return ds
+        raise KeyError("DataNotFound")
+    def has_active_access(self, d, buyer): return False
+    def get_status_updated_events(self, a, b): return list(self.events)
+
+class P8Kubo:
+    def __init__(self):
+        self.pins = {}
+        self.written = {}
+        self.write_calls = 0
+        self.gc_runs = 0
+        self.on_pin_write = None
+        self.on_unpin = None
+    def health_check(self): return True
+    def add_stream(self, stream, filename, content_length, cid_version=1, pin=True, only_hash=False):
+        data = stream.read(content_length)
+        cid = BYTES_TO_CID[data]
+        if only_hash:
+            return {"cid": cid, "size": len(data)}
+        self.write_calls += 1
+        self.written[cid] = data
+        if pin:
+            self.pins[cid] = len(data)
+            if callable(self.on_pin_write):
+                self.on_pin_write(cid, data)
+        return {"cid": cid, "size": len(data)}
+    def pin_cid(self, cid):
+        self.pins[cid] = len(CID_TO_BYTES.get(cid, b"x"))
+        return True
+    def unpin_cid(self, cid):
+        res = self.pins.pop(cid, None) is not None
+        if callable(self.on_unpin):
+            self.on_unpin(cid)
+        return res
+    def list_recursive_pins(self):
+        return list(self.pins.keys())
+    def cat_cid(self, cid):
+        if cid in self.written:
+            return self.written[cid]
+        if cid in self.pins and cid in CID_TO_BYTES:
+            return CID_TO_BYTES[cid]
+        raise FileNotFoundError(cid)
+    def run_gc(self):
+        self.gc_runs += 1
+        for c in list(self.written.keys()):
+            if c not in self.pins:
+                self.written.pop(c, None)
+        return True
+
+with tempfile.TemporaryDirectory() as td:
+    # ------------------------------------------------------------------
+    # 0. Legacy SQLite migration: pre-Phase-8 upload_provenance WITHOUT sha_verified
+    #    marks rows matching tracked_pins as sha_verified=1 and backfills as sha_verified=0!
+    # ------------------------------------------------------------------
+    mig_db = os.path.join(td, "legacy_p7.sqlite")
+    mc = sqlite3.connect(mig_db)
+    mc.execute("CREATE TABLE tracked_pins (cid TEXT PRIMARY KEY, multihash TEXT NOT NULL, size_bytes INTEGER NOT NULL, pinned_at INTEGER NOT NULL, sha256 TEXT NOT NULL DEFAULT '')")
+    mc.execute("CREATE TABLE pending_uploads (cid TEXT PRIMARY KEY, multihash TEXT NOT NULL, uploader TEXT NOT NULL, size_bytes INTEGER NOT NULL, uploaded_at INTEGER NOT NULL, sha256 TEXT NOT NULL DEFAULT '')")
+    mc.execute("CREATE TABLE upload_provenance (multihash TEXT PRIMARY KEY, uploader TEXT NOT NULL, created_at REAL NOT NULL, sha256 TEXT NOT NULL DEFAULT '')")
+    mh_gw = gw.extract_canonical_multihash(CID_V1)
+    mh_bf = gw.extract_canonical_multihash(CID_DUMMY_2B)
+    mc.execute("INSERT INTO tracked_pins VALUES(?, ?, ?, ?, ?)", (CID_V1, mh_gw, 100, 1000, V1_SHA))
+    mc.execute("INSERT INTO upload_provenance VALUES(?, ?, ?, ?)", (mh_gw, VICTIM.address.lower(), 1000.0, V1_SHA))
+    mc.execute("INSERT INTO upload_provenance VALUES(?, ?, ?, ?)", (mh_bf, ATTACKER.address.lower(), 1001.0, SEED_SHA))
+    mc.commit()
+    mc.close()
+    lim_mig = gw.UploadRateLimiter(db_path=mig_db)
+    try:
+        rows_mig = dict(lim_mig._conn.execute("SELECT multihash, sha_verified FROM upload_provenance").fetchall())
+        assert rows_mig[mh_gw] == 1, f"Legacy gateway-uploaded row lost sha_verified=1: {rows_mig}"
+        assert rows_mig[mh_bf] == 0, f"Legacy unverified backfill row wrongly promoted to sha_verified=1: {rows_mig}"
+    finally:
+        lim_mig.close()
+
+    db_path = os.path.join(td, "phase8_gateway.sqlite")
+    reg = P8Reg()
+    kubo = P8Kubo()
+    now_ts = int(time.time())
+
+    # Seed #1 owned by ALICE (cold-seeded into Kubo as dag-pb CIDv0, NOT uploaded through gateway)
+    reg.datasets = [
+        {
+            "dataId": 1, "tokenId": 1,
+            "currentOwner": ALICE.address, "originalCreator": ALICE.address,
+            "rawDataHash": "0x" + SEED_SHA, "summaryHash": "", "metadataHash": "",
+            "rawCid": SEED_CID_V0, "summaryCid": "", "metadataCid": "", "status": 0,
+        },
+        {
+            "dataId": 2, "tokenId": 2,
+            "currentOwner": ALICE.address, "originalCreator": ALICE.address,
+            "rawDataHash": "0x" + MID_SHA, "summaryHash": "", "metadataHash": "",
+            "rawCid": CID_DUMMY_UNP, "summaryCid": "", "metadataCid": "", "status": 0,
+        },
+    ]
+    kubo.pins[SEED_CID_V0] = len(SEED_BYTES)
+    kubo.written[SEED_CID_V0] = SEED_BYTES
+
+    srv = gw.create_gateway_server(
+        host="127.0.0.1", port=0, chain_id=CHAIN_ID, registry_address=REGISTRY,
+        registry_adapter=reg, kubo_adapter=kubo, state_db_path=db_path,
+        upload_policy="open-dev", now_fn=lambda: now_ts, min_forced_refresh_sec=0.1,
+    )
+    port = srv.server_address[1]
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        def post_upload(acct, payload, nonce):
+            req = urllib.request.Request(
+                f"http://127.0.0.1:{port}/api/v0/upload",
+                data=payload, headers=sign_upload(acct, payload, now_ts, nonce), method="POST",
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    return resp.status, json.loads(resp.read().decode("utf-8"))
+            except urllib.error.HTTPError as e:
+                return e.code, json.loads(e.read().decode("utf-8"))
+
+        # ------------------------------------------------------------------
+        # 1. BOOST-H01 V1: Mempool Front-Run Revoke Before Victim Lands On-Chain
+        #    (covers unpinned dummy CID, attacker-uploaded dummy CID, AND Victim-CID copy!)
+        # ------------------------------------------------------------------
+        st_v1, _ = post_upload(VICTIM, V1_BYTES, "p8-v1-victim-upload-0001")
+        assert st_v1 == 200 and CID_V1 in kubo.pins
+        # Attacker also uploads their own unrelated dummy bytes D so CID_ATK_D IS pinned in Kubo
+        st_ad, _ = post_upload(ATTACKER, ATK_D_BYTES, "p8-v1-atk-dummy-0000001")
+        assert st_ad == 200 and CID_ATK_D in kubo.pins
+        # Attacker front-runs & revokes 3 dummy datasets claiming rawDataHash=V1_SHA before Victim lands
+        reg.datasets.extend([
+            {
+                "dataId": 10, "tokenId": 10, "currentOwner": ATTACKER.address, "originalCreator": ATTACKER.address,
+                "rawDataHash": "0x" + V1_SHA, "summaryHash": "", "metadataHash": "",
+                "rawCid": CID_DUMMY_UNP, "summaryCid": "", "metadataCid": "", "status": 2,
+            },
+            {
+                "dataId": 11, "tokenId": 11, "currentOwner": ATTACKER.address, "originalCreator": ATTACKER.address,
+                "rawDataHash": "0x" + V1_SHA, "summaryHash": "", "metadataHash": "",
+                "rawCid": CID_ATK_D, "summaryCid": "", "metadataCid": "", "status": 2,
+            },
+            {
+                "dataId": 12, "tokenId": 12, "currentOwner": ATTACKER.address, "originalCreator": ATTACKER.address,
+                "rawDataHash": "0x" + V1_SHA, "summaryHash": "", "metadataHash": "",
+                "rawCid": CID_V1, "summaryCid": "", "metadataCid": "", "status": 2,
+            },
+        ])
+        reg.events.extend([
+            {"dataId": 10, "newStatus": 2, "blockNumber": 295},
+            {"dataId": 11, "newStatus": 2, "blockNumber": 296},
+            {"dataId": 12, "newStatus": 2, "blockNumber": 297},
+        ])
+        rec1 = gw.GdprErasureReconciler(
+            reg, kubo, start_block=290, db_path=db_path, catalog_index=srv.gateway_catalog_index
+        )
+        try:
+            rec1.reconcile_once()
+        finally:
+            rec1.close()
+        assert CID_V1 in kubo.pins, f"BOOST-H01 V1 FAILED: Attacker front-run revoke destroyed Victim's pending pin!"
+        assert srv.gateway_upload_limiter.get_erased_sha_owner(V1_SHA) is None, "BOOST-H01 V1 FAILED: gdpr_erased_shas poisoned!"
+        srv.gateway_catalog_index.refresh_now()
+        assert srv.gateway_catalog_index.is_revoked_sha(V1_SHA) is False, "BOOST-H01 V1 FAILED: _revoked_shas poisoned!"
+        # Victim retains 200; Attacker remains 403 with 0 Kubo writes
+        st_v1_re, _ = post_upload(VICTIM, V1_BYTES, "p8-v1-victim-reup-000001")
+        assert st_v1_re == 200, f"BOOST-H01 V1 FAILED: Victim locked out with {st_v1_re}!"
+        w_before_v1_atk = kubo.write_calls
+        st_v1_atk, _ = post_upload(ATTACKER, V1_BYTES, "p8-v1-atk-reup-00000001")
+        assert st_v1_atk == 403 and kubo.write_calls == w_before_v1_atk
+
+        # ------------------------------------------------------------------
+        # 2. BOOST-H01 V2A: Active Front-Run summaryHash + Backfill + Revoke Against Active Victim Dataset
+        # ------------------------------------------------------------------
+        st_v2a, _ = post_upload(VICTIM, V2A_BYTES, "p8-v2a-victim-up-000001")
+        assert st_v2a == 200 and CID_V2A in kubo.pins
+        reg.datasets.extend([
+            {
+                "dataId": 18, "tokenId": 18, "currentOwner": ATTACKER.address, "originalCreator": ATTACKER.address,
+                "rawDataHash": "0x" + "ab" * 32, "summaryHash": "0x" + V2A_SHA, "metadataHash": "",
+                "rawCid": CID_DUMMY_UNP, "summaryCid": CID_DUMMY_2A, "metadataCid": "", "status": 0,
+            },
+            {
+                "dataId": 19, "tokenId": 19, "currentOwner": VICTIM.address, "originalCreator": VICTIM.address,
+                "rawDataHash": "0x" + V2A_SHA, "summaryHash": "", "metadataHash": "",
+                "rawCid": CID_V2A, "summaryCid": "", "metadataCid": "", "status": 0,
+            },
+        ])
+        srv.gateway_catalog_index.refresh_now()
+        # Verify catalog backfill NEVER attached V2A_SHA or sha_verified=1 to Attacker's dummy CID_DUMMY_2A!
+        mh_d2a = gw.extract_canonical_multihash(CID_DUMMY_2A)
+        chk_c = sqlite3.connect(db_path)
+        row_d2a = chk_c.execute("SELECT uploader, sha256, sha_verified FROM upload_provenance WHERE multihash = ?", (mh_d2a,)).fetchone()
+        chk_c.close()
+        assert row_d2a is not None and row_d2a[1] == "" and row_d2a[2] == 0, f"BOOST-H01 V2A backfill poisoned upload_provenance: {row_d2a}"
+        # Attacker now revokes dataId=18 -> Victim's ACTIVE dataId=19 pin MUST survive 100%!
+        for ds in reg.datasets:
+            if ds["dataId"] == 18:
+                ds["status"] = 2
+        reg.events.append({"dataId": 18, "newStatus": 2, "blockNumber": 298})
+        rec2a = gw.GdprErasureReconciler(
+            reg, kubo, start_block=298, db_path=db_path, catalog_index=srv.gateway_catalog_index
+        )
+        try:
+            rec2a.reconcile_once()
+        finally:
+            rec2a.close()
+        assert CID_V2A in kubo.pins, "BOOST-H01 V2A FAILED: Attacker summaryHash revoke destroyed Victim's ACTIVE Kubo pin!"
+        assert srv.gateway_upload_limiter.get_erased_sha_owner(V2A_SHA) is None, "BOOST-H01 V2A FAILED: gdpr_erased_shas poisoned!"
+        srv.gateway_catalog_index.refresh_now()
+        assert srv.gateway_catalog_index.is_revoked_sha(V2A_SHA) is False
+
+        # Cold-SQLite V2A variant: fresh empty DB where Victim's dataId=19 is Active and Attacker's dataId=18 is Revoked
+        cold_db = os.path.join(td, "cold_v2a.sqlite")
+        rec_cold = gw.GdprErasureReconciler(reg, kubo, start_block=298, db_path=cold_db)
+        try:
+            rec_cold.reconcile_once()
+        finally:
+            rec_cold.close()
+        assert CID_V2A in kubo.pins, "BOOST-H01 Cold-SQLite V2A FAILED: Attacker dummy revoke wiped Victim's ACTIVE pin!"
+
+        # ------------------------------------------------------------------
+        # 3. BOOST-H01 V2B: Zero-Race Cross-Codec Provenance Bypass Against Existing Active Seed #1
+        # ------------------------------------------------------------------
+        w_pre_2b = kubo.write_calls
+        st_2b_0, _ = post_upload(ATTACKER, SEED_BYTES, "p8-v2b-atk-init-0000001")
+        assert st_2b_0 == 403 and kubo.write_calls == w_pre_2b
+        # Attacker registers Active dataId=20 with summaryHash=SEED_SHA + fresh dummy summaryCid
+        reg.datasets.append({
+            "dataId": 20, "tokenId": 20, "currentOwner": ATTACKER.address, "originalCreator": ATTACKER.address,
+            "rawDataHash": "0x" + "ef" * 32, "summaryHash": "0x" + SEED_SHA, "metadataHash": "",
+            "rawCid": CID_DUMMY_UNP, "summaryCid": CID_DUMMY_2B, "metadataCid": "", "status": 0,
+        })
+        srv.gateway_catalog_index.refresh_now()
+        st_2b_1, _ = post_upload(ATTACKER, SEED_BYTES, "p8-v2b-atk-after-bf-001")
+        assert st_2b_1 == 403 and SEED_CID_V1 not in kubo.pins and kubo.write_calls == w_pre_2b, f"BOOST-H01 V2B FAILED: got {st_2b_1}!"
+        # Defense-in-depth: even if a raw unverified (sha_verified=0) backfill row is forced into SQLite, STILL 403!
+        mh_d2b = gw.extract_canonical_multihash(CID_DUMMY_2B)
+        with srv.gateway_upload_limiter._lock, gw._sqlite_write_tx(srv.gateway_upload_limiter._conn):
+            srv.gateway_upload_limiter._conn.execute(
+                "INSERT OR REPLACE INTO upload_provenance(multihash, uploader, created_at, sha256, sha_verified) VALUES(?, ?, ?, ?, 0)",
+                (mh_d2b, ATTACKER.address.lower(), float(now_ts), SEED_SHA),
+            )
+        st_2b_2, _ = post_upload(ATTACKER, SEED_BYTES, "p8-v2b-atk-raw-bf-00001")
+        assert st_2b_2 == 403 and SEED_CID_V1 not in kubo.pins and kubo.write_calls == w_pre_2b, f"BOOST-H01 V2B raw sha_verified=0 bypass: {st_2b_2}!"
+
+        # ------------------------------------------------------------------
+        # 4. Mid-Stream UploadRateLimiter.commit() GDPR Erasure Recheck & Clean Rollback
+        # ------------------------------------------------------------------
+        def _midstream_gdpr(cid_written, _data):
+            if cid_written == CID_MID:
+                with srv.gateway_upload_limiter._lock, gw._sqlite_write_tx(srv.gateway_upload_limiter._conn):
+                    srv.gateway_upload_limiter._conn.execute(
+                        "INSERT OR REPLACE INTO gdpr_erased_shas(sha256, canonical_owner, erased_at) VALUES(?, ?, ?)",
+                        (MID_SHA, ALICE.address.lower(), now_ts + 1),
+                    )
+        kubo.on_pin_write = _midstream_gdpr
+        try:
+            st_mid, body_mid = post_upload(ALICE, MID_BYTES, "p8-midstream-gdpr-00001")
+            assert st_mid == 403, f"Mid-stream GDPR commit expected 403, got {st_mid} ({body_mid})"
+            assert CID_MID not in kubo.pins, "Mid-stream GDPR rollback failed to unpin newly pinned CID!"
+        finally:
+            kubo.on_pin_write = None
+
+        # ------------------------------------------------------------------
+        # 5. BOOST-L01 / L3-02: 4096 KiB (4 MiB) Invalid-Nonce Upload Returns Clean HTTP 401 JSON (Zero TCP RST!)
+        #    + Chunked Unterminated/Oversized Trailer Returns HTTP 400
+        # ------------------------------------------------------------------
+        big_4mib = b"A" * (4 * 1024 * 1024)
+        bad_hdrs = sign_upload(ALICE, big_4mib, now_ts, "short")  # invalid nonce (<16 chars) -> early 401!
+        req_4m = urllib.request.Request(
+            f"http://127.0.0.1:{port}/api/v0/upload",
+            data=big_4mib, headers=bad_hdrs, method="POST",
+        )
+        st_4m = None
+        body_4m = None
+        try:
+            urllib.request.urlopen(req_4m, timeout=15)
+        except urllib.error.HTTPError as e:
+            st_4m = e.code
+            body_4m = json.loads(e.read().decode("utf-8"))
+        assert st_4m == 401 and isinstance(body_4m, dict) and "error" in body_4m, f"BOOST-L01 4MiB early-abort failed: {(st_4m, body_4m)}"
+
+        # Oversized chunked trailer line (> 4096 bytes) MUST fail closed with HTTP 400
+        chunk_body_bytes = b"OK_CHUNK"
+        chunk_sha = hashlib.sha256(chunk_body_bytes).hexdigest()
+        ch_hdrs = sign_upload(ALICE, chunk_body_bytes, now_ts, "p8-chunk-bad-trailer-01")
+        cc = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+        cc.putrequest("POST", "/api/v0/upload")
+        cc.putheader("Transfer-Encoding", "chunked")
+        for hk, hv in ch_hdrs.items():
+            cc.putheader(hk, hv)
+        cc.endheaders()
+        cc.send(f"{len(chunk_body_bytes):x}\\r\\n".encode("ascii") + chunk_body_bytes + b"\\r\\n0\\r\\n" + (b"X" * 5000) + b"\\r\\n\\r\\n")
+        resp_ch = cc.getresponse()
+        st_ch = resp_ch.status
+        resp_ch.read()
+        cc.close()
+        assert st_ch == 400, f"Malformed oversized chunked trailer expected 400, got {st_ch}"
+
+        # ------------------------------------------------------------------
+        # 6. Teamwork L3-01: Orphan-Pin TTL Recheck (Pre-Unpin & Post-Unpin Concurrent On-Chain Anchor)
+        # ------------------------------------------------------------------
+        st_o1, _ = post_upload(VICTIM, ORPH1_BYTES, "p8-l301-orphan-pre-0001")
+        st_o2, _ = post_upload(VICTIM, ORPH2_BYTES, "p8-l301-orphan-post-001")
+        assert st_o1 == 200 and st_o2 == 200
+        assert CID_ORPH1 in kubo.pins and CID_ORPH2 in kubo.pins
+
+        # Simulate: initial _collect_anchored_owners_by_mh() sees neither anchored;
+        # on the 2nd get_all_datasets() call (pre-unpin recheck for CID_ORPH1), CID_ORPH1 becomes anchored;
+        # during unpin_cid(CID_ORPH2), CID_ORPH2 becomes anchored on-chain -> post-unpin recheck restores pin!
+        get_all_calls = [0]
+        def _on_get_all():
+            get_all_calls[0] += 1
+            if get_all_calls[0] == 2:
+                reg.datasets.append({
+                    "dataId": 30, "tokenId": 30, "currentOwner": VICTIM.address, "originalCreator": VICTIM.address,
+                    "rawCid": CID_ORPH1, "summaryCid": "", "metadataCid": "", "status": 0,
+                })
+        def _on_unpin_orphan(cid_u):
+            if cid_u == CID_ORPH2:
+                reg.datasets.append({
+                    "dataId": 31, "tokenId": 31, "currentOwner": VICTIM.address, "originalCreator": VICTIM.address,
+                    "rawCid": CID_ORPH2, "summaryCid": "", "metadataCid": "", "status": 0,
+                })
+        reg.on_get_all = _on_get_all
+        kubo.on_unpin = _on_unpin_orphan
+        rec_orp = gw.GdprErasureReconciler(
+            reg, kubo, start_block=300, db_path=db_path, orphan_pin_ttl_sec=3600, now_fn=lambda: now_ts + 4000
+        )
+        try:
+            unp_list = rec_orp.reconcile_orphan_uploads()
+        finally:
+            reg.on_get_all = None
+            kubo.on_unpin = None
+            rec_orp.close()
+        assert CID_ORPH1 not in unp_list and CID_ORPH1 in kubo.pins, f"L3-01 pre-unpin anchor recheck failed: {unp_list}"
+        assert CID_ORPH2 not in unp_list and CID_ORPH2 in kubo.pins, f"L3-01 post-unpin anchor recovery failed: {unp_list}"
+        assert srv.gateway_upload_limiter.get_upload_provenance(gw.extract_canonical_multihash(CID_ORPH1)) == VICTIM.address.lower()
+        assert srv.gateway_upload_limiter.get_upload_provenance(gw.extract_canonical_multihash(CID_ORPH2)) == VICTIM.address.lower()
+    finally:
+        srv.shutdown(); srv.server_close()
+
+print("R18_06Q_GATEWAY_OK")
+`;
+    const gwOut = execFileSync(resolvePythonBin(), ["-c", pyPhase8Gateway, seedCidV0, seedCidV1], {
+      encoding: "utf8",
+      timeout: 60000,
+    });
+    expect(gwOut).to.include("R18_06Q_GATEWAY_OK");
+
+    // Teamwork L3-04: capsule_dispatcher.py MUST track renewed unfulfilled escrows (capsuleDelivered=False)
+    // in pendingOrders when dataset is Paused OR worker is opted-out, EVEN IF dispatchedKeys has a prior
+    // completed purchase under the EXACT SAME RSA public key!
+    const nodeExec = process.execPath;
+    const hhCli = path.resolve("node_modules/hardhat/dist/src/cli.js");
+    const pyPhase8Dispatcher = `
+import hashlib, json, os, secrets, socket, subprocess, sys, tempfile, time
+from cryptography.hazmat.primitives.asymmetric import rsa, padding
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from cryptography.hazmat.primitives import serialization, hashes
+from web3 import Web3
+
+sock = socket.socket()
+sock.bind(("127.0.0.1", 0))
+rpc_port = sock.getsockname()[1]
+sock.close()
+
+node_proc = subprocess.Popen(
+    [sys.argv[1], sys.argv[2], "node", "--hostname", "127.0.0.1", "--port", str(rpc_port)],
+    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+)
+try:
+    rpc_url = f"http://127.0.0.1:{rpc_port}"
+    w3 = Web3(Web3.HTTPProvider(rpc_url))
+    for _ in range(80):
+        if w3.is_connected():
+            break
+        time.sleep(0.25)
+    assert w3.is_connected(), "Ephemeral Hardhat node failed to boot"
+    deployer, provider, buyer = w3.eth.accounts[0], w3.eth.accounts[1], w3.eth.accounts[2]
+
+    def deploy(rel, *args):
+        art = json.load(open(os.path.join("artifacts", "contracts", rel), encoding="utf-8"))
+        c = w3.eth.contract(abi=art["abi"], bytecode=art["bytecode"])
+        rc = w3.eth.wait_for_transaction_receipt(c.constructor(*args).transact({"from": deployer}))
+        return w3.eth.contract(address=rc.contractAddress, abi=art["abi"])
+
+    tok = deploy("GenomicToken.sol/GenomicToken.json", deployer)
+    nft = deploy("GenomicNFT.sol/GenomicNFT.json", deployer, 1000)
+    reg = deploy("GenomicsRegistry.sol/GenomicsRegistry.json", tok.address, nft.address, deployer)
+    w3.eth.wait_for_transaction_receipt(nft.functions.setRegistryContract(reg.address).transact({"from": deployer}))
+    w3.eth.wait_for_transaction_receipt(reg.functions.setCapsuleDispatcher(deployer).transact({"from": deployer}))
+    w3.eth.wait_for_transaction_receipt(tok.functions.transfer(buyer, 10000 * 10**18).transact({"from": deployer}))
+    w3.eth.wait_for_transaction_receipt(tok.functions.approve(reg.address, 10000 * 10**18).transact({"from": buyer}))
+
+    priv = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    pub_pem = priv.public_key().public_bytes(
+        serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo
+    ).decode("utf-8")
+    pk_hash = hashlib.sha256(pub_pem.strip().encode("utf-8")).hexdigest()
+    w3.eth.wait_for_transaction_receipt(reg.functions.registerResearcherPublicKey(pub_pem).transact({"from": buyer}))
+
+    c1 = "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG"
+    c2 = "QmZ4tDuvesekSs4qM5ZBKpXiZGun7S2CYtEZRB3DYXkjGx"
+    c3 = "QmPZ9qBzzyAtRaQQQUZr6xHS6wVfETRR249s63UME18znJ"
+    # ds1: will be PAUSED after renewed escrow opens; ds2: will be OPTED-OUT when renewed escrow opens
+    for idx in (1, 2):
+        w3.eth.wait_for_transaction_receipt(
+            reg.functions.registerGenomicData(Web3.keccak(text=f"disp-l304-{idx}"), c1, c2, c3, "ipfs://" + c3, 100 * 10**18, 3600, 1000).transact({"from": provider})
+        )
+        w3.eth.wait_for_transaction_receipt(reg.functions.grantAccess(idx).transact({"from": buyer}))
+    # Advance past 3600s grant expiry -> Buyer opens NEW renewed escrows (capsuleDelivered=False) with SAME pubkey!
+    w3.provider.make_request("evm_increaseTime", [4000])
+    w3.provider.make_request("evm_mine", [])
+    w3.eth.wait_for_transaction_receipt(reg.functions.grantAccessWithEscrow(1, 7200).transact({"from": buyer}))
+    w3.eth.wait_for_transaction_receipt(reg.functions.grantAccessWithEscrow(2, 7200).transact({"from": buyer}))
+    # Pause ds1 and opt-out ds2 BEFORE dispatcher runs
+    w3.eth.wait_for_transaction_receipt(reg.functions.updateDataStatus(1, 1).transact({"from": provider}))
+    w3.eth.wait_for_transaction_receipt(reg.functions.setDispatcherOptOut(2, True).transact({"from": provider}))
+
+    with tempfile.TemporaryDirectory() as td:
+        vault_file = os.path.join(td, "vault.json")
+        cp_file = os.path.join(td, "cp.json")
+        vault_key_hex = secrets.token_hex(32)
+        with open(os.path.join(td, "dispatcher_vault.key"), "w", encoding="utf-8") as kf:
+            kf.write(vault_key_hex)
+        aes_raw = secrets.token_bytes(32)
+        iv = secrets.token_bytes(12)
+        env_hex = (iv + AESGCM(bytes.fromhex(vault_key_hex)).encrypt(iv, aes_raw, None)).hex()
+        with open(vault_file, "w", encoding="utf-8") as vf:
+            json.dump({"seeds": [
+                {"dataId": 1, "encryptedKeyEnvelopeHex": env_hex},
+                {"dataId": 2, "encryptedKeyEnvelopeHex": env_hex},
+            ]}, vf)
+        k1 = f"1:{buyer.lower()}"
+        k2 = f"2:{buyer.lower()}"
+        # Pre-seed dispatchedKeys with the EXACT SAME pubkeyHash from Buyer's earlier expired purchase!
+        with open(cp_file, "w", encoding="utf-8") as cpf:
+            json.dump({
+                "lastBlock": 1,
+                "dispatchedKeys": {
+                    k1: {"dataId": 1, "buyer": buyer, "isEscrow": False, "pubkeyHash": pk_hash},
+                    k2: {"dataId": 2, "buyer": buyer, "isEscrow": False, "pubkeyHash": pk_hash},
+                },
+                "quarantined": {},
+                "pendingOrders": {},
+            }, cpf)
+
+        def run_disp():
+            r = subprocess.run(
+                [
+                    sys.executable, os.path.join("scripts", "demo", "capsule_dispatcher.py"),
+                    "--unlocked-local-signer", "--rpc-url", rpc_url,
+                    "--registry-address", reg.address, "--deployed-block", "1",
+                    "--vault-file", vault_file, "--checkpoint", cp_file,
+                ],
+                capture_output=True, text=True, timeout=30,
+            )
+            assert r.returncode == 0, f"capsule_dispatcher failed: rc={r.returncode}\\n{r.stderr}"
+
+        # Cycle 1: BOTH renewed unfulfilled escrows MUST be tracked in pendingOrders despite same-key dispatchedKeys!
+        run_disp()
+        cp1 = json.load(open(cp_file, encoding="utf-8"))
+        assert k1 in cp1["pendingOrders"] and cp1["pendingOrders"][k1]["reason"] == "dataset_paused_status_1", f"L3-04 paused renewed escrow dropped: {cp1['pendingOrders']}"
+        assert k2 in cp1["pendingOrders"] and cp1["pendingOrders"][k2]["reason"] == "opted_out", f"L3-04 opted-out renewed escrow dropped: {cp1['pendingOrders']}"
+
+        # Advance >5 blocks, unpause ds1 & re-enable dispatcher on ds2 -> Cycle 2 MUST deliver BOTH!
+        for _ in range(8):
+            w3.provider.make_request("evm_mine", [])
+        w3.eth.wait_for_transaction_receipt(reg.functions.updateDataStatus(1, 0).transact({"from": provider}))
+        w3.eth.wait_for_transaction_receipt(reg.functions.setDispatcherOptOut(2, False).transact({"from": provider}))
+        run_disp()
+        cp2 = json.load(open(cp_file, encoding="utf-8"))
+        assert cp2["pendingOrders"] == {}, f"L3-04 pendingOrders not cleared after delivery: {cp2['pendingOrders']}"
+        assert reg.functions.escrowDeposits(1, buyer).call()[3] is True, "L3-04 unpaused renewed escrow not delivered!"
+        assert reg.functions.escrowDeposits(2, buyer).call()[3] is True, "L3-04 re-authorized renewed escrow not delivered!"
+finally:
+    node_proc.terminate()
+    try:
+        node_proc.wait(timeout=5)
+    except Exception:
+        node_proc.kill()
+
+print("R18_06Q_DISPATCHER_L304_OK")
+`;
+    const dispOut = execFileSync(resolvePythonBin(), ["-c", pyPhase8Dispatcher, nodeExec, hhCli], {
+      encoding: "utf8",
+      timeout: 80000,
+    });
+    expect(dispOut).to.include("R18_06Q_DISPATCHER_L304_OK");
+  });
 });

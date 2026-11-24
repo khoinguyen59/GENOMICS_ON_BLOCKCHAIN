@@ -41,6 +41,7 @@ import sys
 import json
 import time
 import base64
+import socket
 import secrets
 import signal
 import hashlib
@@ -76,6 +77,8 @@ DEFAULT_LOG_CHUNK_SIZE = 5000
 MAX_STREAM_BYTES = 525 * 1024 * 1024  # 525 MiB (550,502,400 B; accommodates 500 MiB plaintext + GNC2 framing overhead)
 MAX_UPLOAD_BYTES = 525 * 1024 * 1024  # 525 MiB bounded streaming upload cap matching Caddyfile max_size
 STREAM_CHUNK_BYTES = 65_536     # 64 KiB streaming chunk size
+EARLY_ABORT_DRAIN_MAX_BYTES = 8 * 1024 * 1024  # 8 MiB bounded drain cap on early-abort POST rejections (prevents TCP RST / WinError 10053)
+EARLY_ABORT_DRAIN_TIMEOUT_SEC = 2.0            # Short socket timeout for bounded early-abort drain (anti-slowloris)
 CHUNK_QUOTA_BATCH_BYTES = 256 * 1024  # 256 KiB batched SQLite quota re-check interval for chunked uploads
 DEFAULT_MAX_WORKERS = 64
 REORG_LOOKBACK_BLOCKS = 5
@@ -238,11 +241,46 @@ def _normalize_sha256_hex(val) -> str:
     return ""
 
 
-def _ensure_column(conn: sqlite3.Connection, table: str, column: str, col_def: str) -> None:
+def _ensure_column(conn: sqlite3.Connection, table: str, column: str, col_def: str) -> bool:
     """Backward-compatible SQLite ALTER TABLE migration helper for upgraded persistent state DBs."""
     cols = {r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()}
     if column not in cols:
         conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_def}")
+        return True
+    return False
+
+
+def _migrate_upload_provenance_sha_verified(conn: sqlite3.Connection) -> None:
+    """
+    Ensure upload_provenance.sha_verified exists (1 = cryptographically gateway-hashed bytes,
+    0 = unverified on-chain backfill). When migrating legacy DBs, ONLY mark rows whose
+    (multihash, sha256) already exist in tracked_pins or pending_uploads as sha_verified = 1.
+    """
+    added = _ensure_column(conn, "upload_provenance", "sha_verified", "INTEGER NOT NULL DEFAULT 0")
+    if added:
+        conn.execute(
+            """
+            UPDATE upload_provenance
+            SET sha_verified = 1
+            WHERE sha256 != ''
+              AND (
+                EXISTS (
+                    SELECT 1 FROM tracked_pins tp
+                    WHERE tp.multihash = upload_provenance.multihash
+                      AND tp.sha256 = upload_provenance.sha256
+                )
+                OR EXISTS (
+                    SELECT 1 FROM pending_uploads pu
+                    WHERE pu.multihash = upload_provenance.multihash
+                      AND pu.sha256 = upload_provenance.sha256
+                )
+              )
+            """
+        )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_upload_provenance_sha_verified "
+        "ON upload_provenance(sha256, sha_verified, created_at)"
+    )
 
 
 def validate_cid(cid: str) -> str:
@@ -315,11 +353,19 @@ def _read_chunked_upload_body(
             return total, 400, "Malformed chunked transfer-encoding chunk size (strict hex required)."
         chunk_size = int(size_str, 16)
         if chunk_size == 0:
-            # Consume optional trailers up to terminating CRLF (strictly bounded)
+            # Consume optional trailers up to terminating CRLF (strictly bounded, fail-closed)
+            terminated = False
             for _ in range(32):
                 trailer = rfile.readline(4096)
-                if not trailer or trailer in (b"\r\n", b"\n"):
+                if not trailer:
+                    return total, 400, "Incomplete chunked upload trailers (missing terminating CRLF)."
+                if not trailer.endswith(b"\n"):
+                    return total, 400, "Malformed chunked upload trailer line (too long)."
+                if trailer in (b"\r\n", b"\n"):
+                    terminated = True
                     break
+            if not terminated:
+                return total, 400, "Malformed chunked upload (too many trailer lines)."
             break
         if total + chunk_size > max_bytes:
             return total, 413, f"Upload exceeds maximum allowed size ({max_bytes} bytes)."
@@ -384,6 +430,8 @@ class UploadRateLimiter:
         self._inflight_sha_claims: dict[str, tuple[str, set[str]]] = {}
         self._rollback_guards: dict[str, tuple[str, str]] = {}
         self._commit_rollback_verdict: dict[str, bool] = {}
+        self._commit_reject_reason: dict[str, str] = {}
+        self._is_sha_revoked_fn = None
         self._res_seq = 0
         self._quota_epoch = 0
         with self._lock, _sqlite_write_tx(self._conn):
@@ -454,7 +502,8 @@ class UploadRateLimiter:
                     multihash TEXT PRIMARY KEY,
                     uploader TEXT NOT NULL,
                     created_at REAL NOT NULL,
-                    sha256 TEXT NOT NULL DEFAULT ''
+                    sha256 TEXT NOT NULL DEFAULT '',
+                    sha_verified INTEGER NOT NULL DEFAULT 0
                 )
                 """
             )
@@ -462,6 +511,7 @@ class UploadRateLimiter:
             self._conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_upload_provenance_sha256 ON upload_provenance(sha256)"
             )
+            _migrate_upload_provenance_sha_verified(self._conn)
             self._conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS pending_provenance_purges (
@@ -542,6 +592,16 @@ class UploadRateLimiter:
     def set_first_registrant_lookup(self, lookup_fn) -> None:
         with self._lock:
             self._first_registrant_lookup = lookup_fn
+
+    def set_sha_revoked_lookup(self, lookup_fn) -> None:
+        with self._lock:
+            self._is_sha_revoked_fn = lookup_fn
+
+    def pop_commit_reject_reason(self, token: str | None) -> str | None:
+        if not token:
+            return None
+        with self._lock:
+            return self._commit_reject_reason.pop(token, None)
 
     def _resolve_onchain_provenance_for_mh(self, mh: str, addr_key: str) -> tuple[bool, str | None, set[str]]:
         """
@@ -763,10 +823,35 @@ class UploadRateLimiter:
             return
         with self._lock:
             self._commit_rollback_verdict.pop(token, None)
+            self._commit_reject_reason.pop(token, None)
             if token in self._rollback_guards:
                 self._rollback_guards.pop(token, None)
                 self._release_mh_claim_locked(token)
                 self._quota_epoch += 1
+
+    def has_persisted_pin(self, multihash: str | None) -> bool | None:
+        """
+        Check whether `multihash` currently has a persisted active pin row in tracked_pins or pending_uploads.
+        Returns True if persisted, False if absent, or None if SQLite could not be queried (fail-closed).
+        """
+        mh = str(multihash or "").strip()
+        if not mh:
+            return False
+        try:
+            with self._lock:
+                t_row = self._conn.execute(
+                    "SELECT 1 FROM tracked_pins WHERE multihash = ? LIMIT 1",
+                    (mh,),
+                ).fetchone()
+                if t_row is not None:
+                    return True
+                p_row = self._conn.execute(
+                    "SELECT 1 FROM pending_uploads WHERE multihash = ? LIMIT 1",
+                    (mh,),
+                ).fetchone()
+                return p_row is not None
+        except Exception:
+            return None
 
     def has_persisted_provenance_or_pin(self, multihash: str | None) -> bool | None:
         """
@@ -870,11 +955,13 @@ class UploadRateLimiter:
                     )
 
             # 1. Cross-codec content SHA-256 provenance & GDPR tombstone enforcement
-            # (blocks dag-pb CIDv0 <-> raw-leaves CIDv1 bypass AND post-GC front-runner resurrection)
-            existing_sha_owners: set[str] = set()
+            # (blocks dag-pb CIDv0 <-> raw-leaves CIDv1 bypass, V2B unverified backfill poisoning,
+            #  and post-GC front-runner resurrection)
+            pre_stream_erased_at: int | None = None
+            earliest_verified_sha_owner: str | None = None
             if sha:
                 erased_row = self._conn.execute(
-                    "SELECT canonical_owner FROM gdpr_erased_shas WHERE sha256 = ?",
+                    "SELECT canonical_owner, erased_at FROM gdpr_erased_shas WHERE sha256 = ?",
                     (sha,),
                 ).fetchone()
                 if erased_row is not None:
@@ -892,29 +979,40 @@ class UploadRateLimiter:
                             erased_owner or None,
                             set(),
                         )
+                    pre_stream_erased_at = int(erased_row[1]) if erased_row[1] is not None else 0
+                # BOOST-H01 defense: ONLY consult cryptographically gateway-verified (sha_verified = 1)
+                # rows ordered earliest-first; NEVER union unverified on-chain backfills into eff_sha_allowed!
                 sha_rows = self._conn.execute(
-                    "SELECT uploader FROM upload_provenance WHERE sha256 = ?",
+                    "SELECT uploader FROM upload_provenance WHERE sha256 = ? AND sha_verified = 1 "
+                    "ORDER BY created_at ASC, rowid ASC",
                     (sha,),
                 ).fetchall()
-                existing_sha_owners = {str(r[0]).strip().lower() for r in sha_rows if r and r[0]}
+                verified_sha_uploaders = [str(r[0]).strip().lower() for r in sha_rows if r and r[0]]
+                earliest_verified_sha_owner = verified_sha_uploaders[0] if verified_sha_uploaders else None
                 if first_sha_info is not None:
-                    eff_sha_allowed = {a for a in (*existing_sha_owners, sha_canonical_prov, *sha_allowed_owners) if a}
+                    if earliest_verified_sha_owner is not None:
+                        if earliest_verified_sha_owner in sha_allowed_owners:
+                            eff_sha_allowed = {a for a in (sha_canonical_prov, *sha_allowed_owners) if a}
+                        else:
+                            # Gateway-verified uploader strictly beats unverified on-chain hash claims
+                            eff_sha_allowed = {earliest_verified_sha_owner}
+                    else:
+                        eff_sha_allowed = {a for a in (sha_canonical_prov, *sha_allowed_owners) if a}
                     if eff_sha_allowed and caller_l not in eff_sha_allowed:
                         return (
                             False,
                             403,
                             "Content SHA-256 is already anchored on-chain by another dataset owner (cross-codec provenance hijack rejected).",
-                            sha_canonical_prov,
+                            earliest_verified_sha_owner or sha_canonical_prov,
                             eff_sha_allowed,
                         )
-                elif existing_sha_owners and caller_l not in existing_sha_owners:
-                    owner_hit = sorted(existing_sha_owners)[0]
+                elif earliest_verified_sha_owner is not None and caller_l != earliest_verified_sha_owner:
                     return (
                         False,
                         403,
                         "Content SHA-256 upload provenance already belongs to another authenticated uploader (cross-codec hijack rejected).",
-                        owner_hit,
-                        existing_sha_owners,
+                        earliest_verified_sha_owner,
+                        {earliest_verified_sha_owner},
                     )
                 existing_sha_claim = self._inflight_sha_claims.get(sha)
                 if existing_sha_claim is not None and existing_sha_claim[0] != caller_l:
@@ -1005,6 +1103,7 @@ class UploadRateLimiter:
             if cur_info is not None:
                 cur_info["is_new_pin_claim"] = is_new_pin_claim
                 cur_info["content_sha256"] = sha
+                cur_info["pre_stream_erased_at"] = pre_stream_erased_at
 
             return True, 200, "ok", eff_canonical_prov, eff_allowed_owners
 
@@ -1035,6 +1134,8 @@ class UploadRateLimiter:
             sha = _normalize_sha256_hex(
                 content_sha256 if content_sha256 is not None else (info.get("content_sha256") if info else "")
             )
+            pre_stream_erased_at = info.get("pre_stream_erased_at") if isinstance(info, dict) else None
+            sha_rev_lookup = self._is_sha_revoked_fn
         mh = (multihash or (_try_canonical_multihash(cid) if cid else "") or "").strip()
         can_claim_cid = True
         canonical_prov: str | None = None
@@ -1045,7 +1146,16 @@ class UploadRateLimiter:
             else:
                 can_claim_cid, canonical_prov, allowed_owners = self._resolve_onchain_provenance_for_mh(mh, addr_key)
 
+        # Check live in-memory revoked_shas outside self._lock (0 extra RPCs, zero lock-order inversion)
+        sha_revoked_midstream = False
+        if cid and sha and callable(sha_rev_lookup):
+            try:
+                sha_revoked_midstream = bool(sha_rev_lookup(sha))
+            except Exception:
+                sha_revoked_midstream = False
+
         cid_committed = True
+        sha_erased_blocked = False
         with self._lock:
             try:
                 with _sqlite_write_tx(self._conn):
@@ -1063,28 +1173,36 @@ class UploadRateLimiter:
                             ).fetchone()
                             if row and row[0]:
                                 existing_prov = str(row[0]).strip().lower()
-                        existing_sha_owners: set[str] = set()
-                        sha_erased_blocked = False
+                        earliest_verified_sha: str | None = None
                         if sha:
                             s_rows = self._conn.execute(
-                                "SELECT uploader FROM upload_provenance WHERE sha256 = ?",
+                                "SELECT uploader FROM upload_provenance WHERE sha256 = ? AND sha_verified = 1 "
+                                "ORDER BY created_at ASC, rowid ASC",
                                 (sha,),
                             ).fetchall()
-                            existing_sha_owners = {str(r[0]).strip().lower() for r in s_rows if r and r[0]}
+                            verified_sha_owners = [str(r[0]).strip().lower() for r in s_rows if r and r[0]]
+                            earliest_verified_sha = verified_sha_owners[0] if verified_sha_owners else None
                             er_row = self._conn.execute(
-                                "SELECT canonical_owner FROM gdpr_erased_shas WHERE sha256 = ?",
+                                "SELECT canonical_owner, erased_at FROM gdpr_erased_shas WHERE sha256 = ?",
                                 (sha,),
                             ).fetchone()
-                            if er_row is not None:
-                                er_owner = str(er_row[0] or "").strip().lower()
-                                if not (bool(allowed_owners) and (not er_owner or er_owner in allowed_owners)):
+                            if sha_revoked_midstream:
+                                sha_erased_blocked = True
+                            elif er_row is not None:
+                                cur_erased_at = int(er_row[1]) if er_row[1] is not None else 0
+                                # Never bypass a newly recorded mid-stream GDPR tombstone with stale pre-stream allowed_owners!
+                                if pre_stream_erased_at is None or cur_erased_at > int(pre_stream_erased_at):
                                     sha_erased_blocked = True
                         sha_allows_caller = (
                             (not sha_erased_blocked)
                             and (
-                                (not existing_sha_owners)
-                                or (addr_key in existing_sha_owners)
-                                or (bool(allowed_owners) and addr_key in allowed_owners)
+                                (earliest_verified_sha is None)
+                                or (addr_key == earliest_verified_sha)
+                                or (
+                                    bool(allowed_owners)
+                                    and earliest_verified_sha in allowed_owners
+                                    and addr_key in allowed_owners
+                                )
                             )
                         )
                         prov_allows_caller = (
@@ -1131,16 +1249,18 @@ class UploadRateLimiter:
                             if mh and eff_prov_owner:
                                 self._conn.execute(
                                     """
-                                    INSERT INTO upload_provenance(multihash, uploader, created_at, sha256)
-                                    VALUES(?, ?, ?, ?)
+                                    INSERT INTO upload_provenance(multihash, uploader, created_at, sha256, sha_verified)
+                                    VALUES(?, ?, ?, ?, ?)
                                     ON CONFLICT(multihash) DO UPDATE SET
                                         created_at = MAX(upload_provenance.created_at, excluded.created_at),
                                         sha256 = CASE
+                                            WHEN excluded.sha_verified = 1 AND excluded.sha256 != '' THEN excluded.sha256
                                             WHEN upload_provenance.sha256 = '' AND excluded.sha256 != '' THEN excluded.sha256
                                             ELSE upload_provenance.sha256
-                                        END
+                                        END,
+                                        sha_verified = MAX(upload_provenance.sha_verified, excluded.sha_verified)
                                     """,
-                                    (mh, eff_prov_owner, float(now), sha),
+                                    (mh, eff_prov_owner, float(now), sha, 1 if sha else 0),
                                 )
                             if mh:
                                 self._conn.execute(
@@ -1161,8 +1281,20 @@ class UploadRateLimiter:
                 self._repo_stat_mono = 0.0
                 raise
             else:
-                self._inflight.pop(token, None)
-                self._release_mh_claim_locked(token)
+                if (not cid_committed) and sha_erased_blocked:
+                    ex_claim = self._inflight_mh_claims.get(mh) if mh else None
+                    has_other_tok = bool(ex_claim is not None and len(ex_claim[1] - {token}) > 0)
+                    can_rb_gdpr = not has_other_tok
+                    self._commit_rollback_verdict[token] = can_rb_gdpr
+                    self._commit_reject_reason[token] = "gdpr_erased"
+                    self._inflight.pop(token, None)
+                    if can_rb_gdpr and (mh or sha):
+                        self._rollback_guards[token] = (mh, sha)
+                    else:
+                        self._release_mh_claim_locked(token)
+                else:
+                    self._inflight.pop(token, None)
+                    self._release_mh_claim_locked(token)
                 self._quota_epoch += 1
                 self._repo_stat_mono = 0.0
         return cid_committed
@@ -1173,6 +1305,7 @@ class UploadRateLimiter:
             return
         with self._lock:
             self._commit_rollback_verdict.pop(token, None)
+            self._commit_reject_reason.pop(token, None)
             self._rollback_guards.pop(token, None)
             self._inflight.pop(token, None)
             self._release_mh_claim_locked(token)
@@ -1233,28 +1366,32 @@ class UploadRateLimiter:
                 ).fetchone()
                 if row and row[0]:
                     existing_prov = str(row[0]).strip().lower()
-            existing_sha_owners: set[str] = set()
+            earliest_verified_sha: str | None = None
             sha_erased_blocked = False
             if sha:
                 s_rows = self._conn.execute(
-                    "SELECT uploader FROM upload_provenance WHERE sha256 = ?",
+                    "SELECT uploader FROM upload_provenance WHERE sha256 = ? AND sha_verified = 1 "
+                    "ORDER BY created_at ASC, rowid ASC",
                     (sha,),
                 ).fetchall()
-                existing_sha_owners = {str(r[0]).strip().lower() for r in s_rows if r and r[0]}
+                verified_sha_owners = [str(r[0]).strip().lower() for r in s_rows if r and r[0]]
+                earliest_verified_sha = verified_sha_owners[0] if verified_sha_owners else None
                 er_row = self._conn.execute(
                     "SELECT canonical_owner FROM gdpr_erased_shas WHERE sha256 = ?",
                     (sha,),
                 ).fetchone()
                 if er_row is not None:
-                    er_owner = str(er_row[0] or "").strip().lower()
-                    if not (bool(allowed_owners) and (not er_owner or er_owner in allowed_owners)):
-                        sha_erased_blocked = True
+                    sha_erased_blocked = True
             sha_allows = (
                 (not sha_erased_blocked)
                 and (
-                    (not existing_sha_owners)
-                    or (up_l in existing_sha_owners)
-                    or (bool(allowed_owners) and up_l in allowed_owners)
+                    (earliest_verified_sha is None)
+                    or (up_l == earliest_verified_sha)
+                    or (
+                        bool(allowed_owners)
+                        and earliest_verified_sha in allowed_owners
+                        and up_l in allowed_owners
+                    )
                 )
             )
             prov_allows_caller = (
@@ -1302,16 +1439,18 @@ class UploadRateLimiter:
             if mh and eff_prov_owner:
                 self._conn.execute(
                     """
-                    INSERT INTO upload_provenance(multihash, uploader, created_at, sha256)
-                    VALUES(?, ?, ?, ?)
+                    INSERT INTO upload_provenance(multihash, uploader, created_at, sha256, sha_verified)
+                    VALUES(?, ?, ?, ?, ?)
                     ON CONFLICT(multihash) DO UPDATE SET
                         created_at = MAX(upload_provenance.created_at, excluded.created_at),
                         sha256 = CASE
+                            WHEN excluded.sha_verified = 1 AND excluded.sha256 != '' THEN excluded.sha256
                             WHEN upload_provenance.sha256 = '' AND excluded.sha256 != '' THEN excluded.sha256
                             ELSE upload_provenance.sha256
-                        END
+                        END,
+                        sha_verified = MAX(upload_provenance.sha_verified, excluded.sha_verified)
                     """,
-                    (mh, eff_prov_owner, float(ts), sha),
+                    (mh, eff_prov_owner, float(ts), sha, 1 if sha else 0),
                 )
             if mh:
                 self._conn.execute(
@@ -1337,14 +1476,15 @@ class UploadRateLimiter:
                 elif not seen[mh_s][1] and sha_s:
                     seen[mh_s] = (seen[mh_s][0], sha_s)
         for mh_s, (up_s, sha_s) in seen.items():
-            rows.append((mh_s, up_s, ts, sha_s))
+            # BOOST-H01: on-chain metadata backfills are ALWAYS sha_verified = 0!
+            rows.append((mh_s, up_s, ts, sha_s, 0))
         if not rows:
             return
         with self._lock, _sqlite_write_tx(self._conn):
             self._conn.executemany(
                 """
-                INSERT INTO upload_provenance(multihash, uploader, created_at, sha256)
-                VALUES(?, ?, ?, ?)
+                INSERT INTO upload_provenance(multihash, uploader, created_at, sha256, sha_verified)
+                VALUES(?, ?, ?, ?, ?)
                 ON CONFLICT(multihash) DO UPDATE SET
                     sha256 = CASE
                         WHEN upload_provenance.sha256 = '' AND excluded.sha256 != '' THEN excluded.sha256
@@ -1361,6 +1501,7 @@ class UploadRateLimiter:
         created_at: float | None = None,
         *,
         content_sha256: str | None = None,
+        sha_verified: bool = True,
     ) -> None:
         mh = str(multihash or "").strip()
         up = str(uploader or "").strip().lower()
@@ -1368,18 +1509,21 @@ class UploadRateLimiter:
         if not mh or not up:
             return
         ts = float(time.time() if created_at is None else created_at)
+        sha_v = 1 if (sha and sha_verified) else 0
         with self._lock, _sqlite_write_tx(self._conn):
             self._conn.execute(
                 """
-                INSERT INTO upload_provenance(multihash, uploader, created_at, sha256)
-                VALUES(?, ?, ?, ?)
+                INSERT INTO upload_provenance(multihash, uploader, created_at, sha256, sha_verified)
+                VALUES(?, ?, ?, ?, ?)
                 ON CONFLICT(multihash) DO UPDATE SET
                     sha256 = CASE
+                        WHEN excluded.sha_verified = 1 AND excluded.sha256 != '' THEN excluded.sha256
                         WHEN upload_provenance.sha256 = '' AND excluded.sha256 != '' THEN excluded.sha256
                         ELSE upload_provenance.sha256
-                    END
+                    END,
+                    sha_verified = MAX(upload_provenance.sha_verified, excluded.sha_verified)
                 """,
-                (mh, up, ts, sha),
+                (mh, up, ts, sha, sha_v),
             )
 
     def get_upload_provenance(self, multihash: str) -> str | None:
@@ -1396,12 +1540,14 @@ class UploadRateLimiter:
         return None
 
     def get_upload_provenance_by_sha(self, sha256_hex: str) -> str | None:
+        """Return earliest cryptographically gateway-verified (sha_verified = 1) uploader for sha256_hex."""
         sha = _normalize_sha256_hex(sha256_hex)
         if not sha:
             return None
         with self._lock:
             row = self._conn.execute(
-                "SELECT uploader FROM upload_provenance WHERE sha256 = ? ORDER BY created_at ASC LIMIT 1",
+                "SELECT uploader FROM upload_provenance WHERE sha256 = ? AND sha_verified = 1 "
+                "ORDER BY created_at ASC, rowid ASC LIMIT 1",
                 (sha,),
             ).fetchone()
         if row and row[0]:
@@ -2270,36 +2416,9 @@ class PublicMetadataCatalogIndex:
                         sum_sha = sum_sha or _normalize_sha256_hex(ah_res[1])
                         meta_sha = meta_sha or _normalize_sha256_hex(ah_res[2])
 
-                # REV-02 defense: only provenance/first-registrant-authorized datasets can classify
-                # rawCid/summaryCid into private_mhs or claim first_reg (blocks cross-owner metadata censorship).
-                for priv_mh, priv_sha in ((raw_mh, raw_sha), (sum_mh, sum_sha)):
-                    if not priv_mh:
-                        continue
-                    if not _is_ds_authorized_for_mh(ds, d_id, owner_l, priv_mh):
-                        continue
-                    private_mhs.add(priv_mh)
-                    if priv_mh not in first_reg_details:
-                        orig_c = _get_orig_creator(ds, d_id)
-                        first_reg_details[priv_mh] = (d_id, owner_l, orig_c)
-                        first_reg[priv_mh] = (d_id, owner_l)
-                        if status != 2:
-                            canon_p = orig_c or owner_l
-                            if canon_p and (_lookup_prov(priv_mh) is None or priv_sha):
-                                backfill_pairs.append((priv_mh, canon_p, priv_sha))
-
-                if meta_mh and _is_ds_authorized_for_mh(ds, d_id, owner_l, meta_mh):
-                    if meta_mh not in first_reg_details:
-                        orig_c = _get_orig_creator(ds, d_id)
-                        first_reg_details[meta_mh] = (d_id, owner_l, orig_c)
-                        first_reg[meta_mh] = (d_id, owner_l)
-                        if status != 2:
-                            canon_p = orig_c or owner_l
-                            if canon_p and (_lookup_prov(meta_mh) is None or meta_sha):
-                                backfill_pairs.append((meta_mh, canon_p, meta_sha))
-                    if status == 0:
-                        active_meta_mhs.add(meta_mh)
-
-                # Cross-codec SHA-256 content-hash provenance & GDPR revocation index
+                # 1. Cross-codec SHA-256 content-hash provenance & GDPR revocation index FIRST
+                #    so backfill_pairs below knows the authoritative first registrant for each SHA!
+                orig_c_cached: str | None = None
                 for field_kind, sha_val, field_cid in (
                     ("raw", raw_sha, ds.get("rawCid")),
                     ("summary", sum_sha, ds.get("summaryCid")),
@@ -2307,12 +2426,13 @@ class PublicMetadataCatalogIndex:
                 ):
                     if not sha_val:
                         continue
-                    orig_c = _get_orig_creator(ds, d_id)
+                    if orig_c_cached is None:
+                        orig_c_cached = _get_orig_creator(ds, d_id)
                     datasets_by_sha.setdefault(sha_val, []).append(
                         {
                             "dataId": d_id,
                             "owner": owner_l,
-                            "originalCreator": orig_c,
+                            "originalCreator": orig_c_cached,
                             "status": status,
                             "cid": str(field_cid or "").strip(),
                             "kind": field_kind,
@@ -2324,22 +2444,70 @@ class PublicMetadataCatalogIndex:
                         # A persistent GDPR erasure tombstone's canonical owner strictly overrides any
                         # stale/unauthorized pre-existing upload_provenance row for the same SHA-256.
                         auth_sha_prov = (erased_owner_l if erased_owner_l else None) or sha_prov_l
-                        if not auth_sha_prov or owner_l == auth_sha_prov or (bool(orig_c) and orig_c == auth_sha_prov):
-                            first_reg_details_by_sha[sha_val] = (d_id, owner_l, orig_c, status)
+                        if not auth_sha_prov or owner_l == auth_sha_prov or (bool(orig_c_cached) and orig_c_cached == auth_sha_prov):
+                            first_reg_details_by_sha[sha_val] = (d_id, owner_l, orig_c_cached, status)
+
+                # 2. REV-02 + BOOST-H01 defense: only provenance/first-registrant-authorized datasets
+                #    can classify rawCid/summaryCid into private_mhs or claim first_reg.
+                #    backfill_pairs ALWAYS writes sha_verified=0, and ONLY attaches a SHA-256 when
+                #    d_id IS the first registrant of that SHA AND no gateway-verified (sha_verified=1)
+                #    provenance exists for that SHA (blocks V2A & V2B summaryHash backfill poisoning!).
+                def _eligible_backfill_sha(sha_candidate: str) -> str:
+                    if not sha_candidate:
+                        return ""
+                    if _lookup_sha_prov(sha_candidate) is not None:
+                        return ""
+                    first_s_hit = first_reg_details_by_sha.get(sha_candidate)
+                    if first_s_hit is not None and first_s_hit[0] == d_id:
+                        return sha_candidate
+                    return ""
+
+                for priv_mh, priv_sha in ((raw_mh, raw_sha), (sum_mh, sum_sha)):
+                    if not priv_mh:
+                        continue
+                    if not _is_ds_authorized_for_mh(ds, d_id, owner_l, priv_mh):
+                        continue
+                    private_mhs.add(priv_mh)
+                    if priv_mh not in first_reg_details:
+                        orig_c = orig_c_cached if orig_c_cached is not None else _get_orig_creator(ds, d_id)
+                        first_reg_details[priv_mh] = (d_id, owner_l, orig_c)
+                        first_reg[priv_mh] = (d_id, owner_l)
+                        if status != 2:
+                            canon_p = orig_c or owner_l
+                            bf_sha = _eligible_backfill_sha(priv_sha)
+                            if canon_p and (_lookup_prov(priv_mh) is None or bf_sha):
+                                backfill_pairs.append((priv_mh, canon_p, bf_sha))
+
+                if meta_mh and _is_ds_authorized_for_mh(ds, d_id, owner_l, meta_mh):
+                    if meta_mh not in first_reg_details:
+                        orig_c = orig_c_cached if orig_c_cached is not None else _get_orig_creator(ds, d_id)
+                        first_reg_details[meta_mh] = (d_id, owner_l, orig_c)
+                        first_reg[meta_mh] = (d_id, owner_l)
+                        if status != 2:
+                            canon_p = orig_c or owner_l
+                            bf_sha = _eligible_backfill_sha(meta_sha)
+                            if canon_p and (_lookup_prov(meta_mh) is None or bf_sha):
+                                backfill_pairs.append((meta_mh, canon_p, bf_sha))
+                    if status == 0:
+                        active_meta_mhs.add(meta_mh)
 
             for sha_val, ds_entries in datasets_by_sha.items():
                 first_s = first_reg_details_by_sha.get(sha_val)
                 erased_owner_l = _lookup_erased_sha(sha_val)
+                sha_prov_l = _lookup_sha_prov(sha_val)
                 if erased_owner_l:
                     auth_owners = {erased_owner_l}
                     if first_s is not None and erased_owner_l in {first_s[1], first_s[2]}:
                         auth_owners.update(a for a in (first_s[1], first_s[2]) if a)
+                elif first_s is not None:
+                    auth_owners = {a for a in (first_s[1], first_s[2]) if a}
+                elif sha_prov_l:
+                    # BOOST-H01 V1 defense: if a front-runner registered & revoked a dummy dataset
+                    # BEFORE the verified SIWE uploader landed on-chain, first_s is None — anchoring
+                    # auth_owners to {sha_prov_l} prevents poisoning revoked_shas against Victim!
+                    auth_owners = {sha_prov_l}
                 else:
-                    auth_owners = (
-                        {a for a in (first_s[1], first_s[2]) if a}
-                        if first_s is not None
-                        else set()
-                    )
+                    auth_owners = set()
                 has_revoked_auth = erased_owner_l is not None
                 has_active_auth = False
                 for ent in ds_entries:
@@ -3099,7 +3267,8 @@ class GdprErasureReconciler:
                         multihash TEXT PRIMARY KEY,
                         uploader TEXT NOT NULL,
                         created_at REAL NOT NULL,
-                        sha256 TEXT NOT NULL DEFAULT ''
+                        sha256 TEXT NOT NULL DEFAULT '',
+                        sha_verified INTEGER NOT NULL DEFAULT 0
                     )
                     """
                 )
@@ -3107,6 +3276,7 @@ class GdprErasureReconciler:
                 self._conn.execute(
                     "CREATE INDEX IF NOT EXISTS idx_upload_provenance_sha256 ON upload_provenance(sha256)"
                 )
+                _migrate_upload_provenance_sha_verified(self._conn)
                 self._conn.execute(
                     """
                     CREATE TABLE IF NOT EXISTS pending_provenance_purges (
@@ -3309,20 +3479,140 @@ class GdprErasureReconciler:
                     referenced_mhs.add(mh)
         return referenced_mhs
 
-    def _get_sha_provenance_uploaders(self, shas: set[str]) -> dict[str, set[str]]:
+    def _get_sha_provenance_uploaders(self, shas: set[str]) -> dict[str, list[str]]:
+        """
+        Return ONLY cryptographically gateway-verified (sha_verified = 1) uploaders per content SHA-256,
+        ordered by earliest upload (created_at ASC, rowid ASC). Unverified on-chain backfills are excluded.
+        """
         if not shas:
             return {}
-        out: dict[str, set[str]] = {}
+        out: dict[str, list[str]] = {}
         with self._lock:
             for sha in shas:
                 rows = self._conn.execute(
-                    "SELECT uploader FROM upload_provenance WHERE sha256 = ?",
+                    "SELECT uploader FROM upload_provenance WHERE sha256 = ? AND sha_verified = 1 "
+                    "ORDER BY created_at ASC, rowid ASC",
                     (sha,),
                 ).fetchall()
-                ups = {str(r[0]).strip().lower() for r in rows if r and r[0]}
+                ups: list[str] = []
+                for r in rows:
+                    if r and r[0]:
+                        u = str(r[0]).strip().lower()
+                        if u and u not in ups:
+                            ups.append(u)
                 if ups:
                     out[sha] = ups
         return out
+
+    def _get_upload_provenance_details(self, multihash: str) -> tuple[str, str, int] | None:
+        mh = str(multihash or "").strip()
+        if not mh:
+            return None
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT uploader, sha256, sha_verified FROM upload_provenance WHERE multihash = ?",
+                (mh,),
+            ).fetchone()
+        if not row:
+            return None
+        return (
+            str(row[0] or "").strip().lower(),
+            _normalize_sha256_hex(row[1]),
+            int(row[2] or 0),
+        )
+
+    def _verify_kubo_cid_sha256(self, cid: str, expected_sha: str) -> bool | None:
+        """
+        Cryptographically verify whether Kubo's content for `cid` hashes to `expected_sha`.
+        Returns True/False when kubo_adapter supports streaming/cat, or None for minimal test doubles.
+        """
+        open_stream_fn = getattr(self.kubo_adapter, "open_cid_stream", None)
+        if callable(open_stream_fn):
+            try:
+                resp = open_stream_fn(cid)
+            except Exception:
+                return False
+            try:
+                h = hashlib.sha256()
+                total = 0
+                while True:
+                    chunk = resp.read(STREAM_CHUNK_BYTES)
+                    if not chunk:
+                        break
+                    total += len(chunk)
+                    if total > MAX_STREAM_BYTES:
+                        return False
+                    h.update(chunk)
+                return h.hexdigest() == expected_sha
+            except Exception:
+                return False
+            finally:
+                try:
+                    resp.close()
+                except Exception:
+                    pass
+        cat_fn = getattr(self.kubo_adapter, "cat_cid", None)
+        if callable(cat_fn):
+            try:
+                data = cat_fn(cid)
+                if data is None or len(data) > MAX_STREAM_BYTES:
+                    return False
+                return hashlib.sha256(bytes(data)).hexdigest() == expected_sha
+            except Exception:
+                return False
+        return None
+
+    def _verify_dataset_cids_back_sha(
+        self,
+        paired_cids: list[str],
+        expected_sha: str,
+        ds_idents: set[str],
+        first_mh_owners: dict[str, set[str]],
+        get_recursive_pins,
+    ) -> bool:
+        """
+        Verify whether a dataset genuinely anchors real Kubo content matching `expected_sha`
+        (used ONLY on conflicts between an un-provenanced on-chain claim and either a sha_verified=1
+        gateway uploader or another owner's active dataset). Blocks V1 & cold-SQLite V2A spoofing
+        while allowing genuine cold-seeded owners (e.g. R18-06n Step 7) to erase unauthorized aliases.
+        Propagates transient list_recursive_pins() exceptions so reconcile_once() retries safely.
+        """
+        if not paired_cids:
+            return False
+        pins_list = get_recursive_pins()
+        if pins_list is None:
+            return False
+        pinned_mhs = {
+            mh for mh in (_try_canonical_multihash(p) for p in pins_list) if mh
+        }
+        for c in paired_cids:
+            try:
+                validate_cid(c)
+                mh = extract_canonical_multihash(c)
+            except ValueError:
+                continue
+            prov_det = self._get_upload_provenance_details(mh)
+            if prov_det is not None:
+                p_up, p_sha, p_ver = prov_det
+                if p_up and p_up not in ds_idents:
+                    continue
+                if p_ver == 1 and p_sha != expected_sha:
+                    continue
+            first_owners = first_mh_owners.get(mh)
+            if first_owners and not (first_owners & ds_idents):
+                continue
+            if mh not in pinned_mhs:
+                continue
+            # Prefer live Kubo cryptographic SHA-256 verification when adapter supports open_cid_stream/cat_cid
+            kubo_match = self._verify_kubo_cid_sha256(c, expected_sha)
+            if kubo_match is True:
+                return True
+            if kubo_match is False:
+                continue
+            # Minimal test double without open_cid_stream/cat_cid (e.g. R18-06n Step 7):
+            # CID is pinned in Kubo, owned by ds_idents, and has no conflicting sha_verified=1 hash.
+            return True
+        return False
 
     def _record_erased_shas(self, shas: set[str], canonical_owner: str) -> None:
         if not shas:
@@ -3350,11 +3640,15 @@ class GdprErasureReconciler:
         revoked_owner_lower: str,
         revoked_creator_lower: str,
         candidate_shas: set[str],
+        *,
+        get_recursive_pins=None,
     ) -> tuple[set[str], set[str], list[dict]]:
         """
         Determine which candidate content SHA-256 digests of `excluding_data_id` are BOTH:
-        1. Canonically owned by `{revoked_owner_lower, revoked_creator_lower}` (blocking third-party
-           public `rawDataHash` spoofing from erasing or wiping another owner's pins/tracked_pins), AND
+        1. Canonically owned by `{revoked_owner_lower, revoked_creator_lower}` — prioritizing
+           cryptographically gateway-verified (`sha_verified = 1`) provenance BEFORE unverified
+           on-chain claims (blocking BOOST-H01 V1 mempool front-run revoke & V2A summaryHash
+           backfill sabotage against pending/active Victim pins), AND
         2. Not shared by any OTHER non-revoked (`status != 2`) dataset owned/created by the canonical owner.
         Returns (erasable_shas, same_owner_active_mhs, all_datasets).
         """
@@ -3366,22 +3660,28 @@ class GdprErasureReconciler:
         revoked_identities = {a for a in (revoked_owner_lower, revoked_creator_lower) if a}
         artifact_hash_getter = getattr(self.registry_adapter, "get_artifact_hashes", None)
 
-        ds_meta: list[tuple[int, int, set[str], set[str], set[str]]] = []
+        if not callable(get_recursive_pins):
+            list_pins_fn = getattr(self.kubo_adapter, "list_recursive_pins", None)
+            pins_box: dict[str, list[str] | None] = {"loaded": False, "val": None}
+
+            def get_recursive_pins():
+                if not pins_box["loaded"]:
+                    pins_box["val"] = list(list_pins_fn() or []) if callable(list_pins_fn) else None
+                    pins_box["loaded"] = True
+                return pins_box["val"]
+
+        ds_meta: list[tuple[int, int, set[str], set[str], set[str], dict[str, list[str]]]] = []
+        first_mh_owners: dict[str, set[str]] = {}
         for ds in sorted_ds:
             ds_id = int(ds.get("dataId", 0))
             st = int(ds.get("status", -1))
             o_l = str(ds.get("currentOwner") or "").strip().lower()
             c_l = _resolve_item_original_creator(self.registry_adapter, ds)
             idents = {a for a in (o_l, c_l) if a}
-            shas_here = {
-                h
-                for h in (
-                    _normalize_sha256_hex(ds.get("rawDataHash")),
-                    _normalize_sha256_hex(ds.get("summaryHash") or ds.get("summaryDataHash")),
-                    _normalize_sha256_hex(ds.get("metadataHash")),
-                )
-                if h
-            }
+
+            raw_h = _normalize_sha256_hex(ds.get("rawDataHash"))
+            sum_h = _normalize_sha256_hex(ds.get("summaryHash") or ds.get("summaryDataHash"))
+            meta_h = _normalize_sha256_hex(ds.get("metadataHash"))
             if (
                 ds_id > 0
                 and "summaryHash" not in ds
@@ -3390,23 +3690,36 @@ class GdprErasureReconciler:
             ):
                 ah_res = artifact_hash_getter(ds_id)
                 if ah_res and len(ah_res) >= 3:
-                    for h in ah_res:
-                        nh = _normalize_sha256_hex(h)
-                        if nh:
-                            shas_here.add(nh)
-            mhs_here = {
-                mh
-                for mh in (
-                    _try_canonical_multihash(ds.get("rawCid")),
-                    _try_canonical_multihash(ds.get("summaryCid")),
-                    _try_canonical_multihash(ds.get("metadataCid")),
-                )
-                if mh
-            }
-            ds_meta.append((ds_id, st, idents, shas_here, mhs_here))
+                    raw_h = raw_h or _normalize_sha256_hex(ah_res[0])
+                    sum_h = sum_h or _normalize_sha256_hex(ah_res[1])
+                    meta_h = meta_h or _normalize_sha256_hex(ah_res[2])
+
+            paired_cids_by_sha: dict[str, list[str]] = {}
+            shas_here: set[str] = set()
+            for h_val, cid_val in (
+                (raw_h, str(ds.get("rawCid") or "").strip()),
+                (sum_h, str(ds.get("summaryCid") or "").strip()),
+                (meta_h, str(ds.get("metadataCid") or "").strip()),
+            ):
+                if h_val:
+                    shas_here.add(h_val)
+                    if cid_val:
+                        paired_cids_by_sha.setdefault(h_val, [])
+                        if cid_val not in paired_cids_by_sha[h_val]:
+                            paired_cids_by_sha[h_val].append(cid_val)
+
+            mhs_here: set[str] = set()
+            for field in ("rawCid", "summaryCid", "metadataCid"):
+                mh = _try_canonical_multihash(ds.get(field))
+                if mh:
+                    mhs_here.add(mh)
+                    if mh not in first_mh_owners and idents:
+                        first_mh_owners[mh] = set(idents)
+
+            ds_meta.append((ds_id, st, idents, shas_here, mhs_here, paired_cids_by_sha))
 
         same_owner_active_mhs: set[str] = set()
-        for ds_id, st, idents, _, mhs_here in ds_meta:
+        for ds_id, st, idents, _, mhs_here, _ in ds_meta:
             if ds_id != excluding_data_id and st != 2 and (idents & revoked_identities):
                 same_owner_active_mhs.update(mhs_here)
 
@@ -3416,25 +3729,57 @@ class GdprErasureReconciler:
         sha_prov_map = self._get_sha_provenance_uploaders(candidate_shas)
         erasable_shas: set[str] = set()
         for sha_val in candidate_shas:
-            matching = [(ds_id, st, idents) for ds_id, st, idents, shas_h, _ in ds_meta if sha_val in shas_h]
-            prov_ups = sha_prov_map.get(sha_val, set())
-            prov_backed = [m for m in matching if m[2] & prov_ups]
-            if prov_backed:
-                canonical_owners = set(prov_backed[0][2])
-            elif matching:
-                canonical_owners = set(matching[0][2])
-            else:
-                canonical_owners = set(prov_ups)
+            matching = [
+                (ds_id, st, idents, paired_map.get(sha_val, []))
+                for ds_id, st, idents, shas_h, _, paired_map in ds_meta
+                if sha_val in shas_h
+            ]
+            prov_ups = sha_prov_map.get(sha_val, [])
+            earliest_verified = prov_ups[0] if prov_ups else None
 
-            # Enforce First-Registrant / Provenance ownership on SHA-256 erasure:
-            # an unauthorized dummy dataset copying another owner's public rawDataHash can NEVER erase or wipe their pins!
+            if earliest_verified is not None:
+                # Cryptographically gateway-verified (sha_verified = 1) uploader takes strict priority
+                # over unverified on-chain claims (blocks V1 pending-upload front-run & V2A backfill).
+                verified_matching = [m for m in matching if earliest_verified in m[2]]
+                if verified_matching:
+                    canonical_owners = set(verified_matching[0][2]) | {earliest_verified}
+                else:
+                    canonical_owners = {earliest_verified}
+                    # Only override an unbacked sha_verified=1 row if matching[0] (owned by the
+                    # revoking identity) genuinely anchors real Kubo content matching sha_val
+                    # (preserves cold-seeded R18-06n Step 7 while blocking V1 dummy front-runs).
+                    if matching and (revoked_identities & matching[0][2]):
+                        first_m = matching[0]
+                        if self._verify_dataset_cids_back_sha(
+                            first_m[3], sha_val, first_m[2], first_mh_owners, get_recursive_pins
+                        ):
+                            canonical_owners = set(first_m[2])
+            elif matching:
+                first_m = matching[0]
+                canonical_owners = set(first_m[2])
+                # Cold-SQLite V2A defense: if matching[0] is revoked while ANOTHER owner holds an
+                # active dataset for sha_val, verify matching[0]'s paired CID genuinely backs sha_val in Kubo.
+                has_other_owner_active = any(
+                    ds_id != excluding_data_id and st != 2 and not (idents & canonical_owners)
+                    for ds_id, st, idents, _ in matching
+                )
+                if has_other_owner_active and (revoked_identities & canonical_owners):
+                    if not self._verify_dataset_cids_back_sha(
+                        first_m[3], sha_val, first_m[2], first_mh_owners, get_recursive_pins
+                    ):
+                        continue
+            else:
+                canonical_owners = set()
+
+            # Enforce First-Registrant / Verified-Provenance ownership on SHA-256 erasure:
+            # an unauthorized dummy dataset copying another owner's hash can NEVER erase their pins!
             if canonical_owners and not (revoked_identities & canonical_owners):
                 continue
 
             auth_group = canonical_owners | revoked_identities
             shared_by_active_auth = any(
                 ds_id != excluding_data_id and st != 2 and (not auth_group or bool(idents & auth_group))
-                for ds_id, st, idents in matching
+                for ds_id, st, idents, _ in matching
             )
             if not shared_by_active_auth:
                 erasable_shas.add(sha_val)
@@ -3644,13 +3989,22 @@ class GdprErasureReconciler:
                 done_anchored_rows.append((cid_s, obs_ts))
                 continue
             if obs_ts <= cutoff:
-                # L3-L2 TOCTOU re-check: verify row was not concurrently refreshed by an identical-CID re-upload
+                # L3-L2 + Teamwork L3-01 TOCTOU re-check: verify row was not concurrently refreshed
+                # by an identical-CID re-upload OR newly anchored on-chain right at the 1h TTL boundary!
                 with self._lock:
                     cur_row = self._conn.execute(
                         "SELECT uploaded_at FROM pending_uploads WHERE cid = ?",
                         (cid_s,),
                     ).fetchone()
                 if cur_row is None or int(cur_row[0]) > cutoff:
+                    continue
+                try:
+                    fresh_anchored_pre = self._collect_anchored_owners_by_mh()
+                except Exception:
+                    # Fail closed on RPC outage: never unpin an upload we cannot verify is unanchored
+                    continue
+                if mh_s and expected_uploaders and (fresh_anchored_pre.get(mh_s, set()) & expected_uploaders):
+                    done_anchored_rows.append((cid_s, obs_ts))
                     continue
                 try:
                     validate_cid(cid_s)
@@ -3665,9 +4019,9 @@ class GdprErasureReconciler:
                     for target_c in cids_to_unpin:
                         if self.kubo_adapter.unpin_cid(target_c):
                             unpinned_here.append(target_c)
-                    # L3-L2 post-unpin TOCTOU recovery: if an identical-CID re-upload raced during the
-                    # Kubo unpin HTTP call and refreshed pending_uploads/tracked_pins (> cutoff), restore
-                    # the pin immediately and skip SQLite deletion / provenance purge!
+                    # L3-L2 + L3-01 post-unpin TOCTOU recovery: if an identical-CID re-upload OR an
+                    # on-chain registerGenomicData anchor landed during the Kubo unpin HTTP call,
+                    # restore the pin immediately and skip tracked_pins deletion / provenance purge!
                     with self._lock:
                         post_pending = self._conn.execute(
                             "SELECT uploaded_at FROM pending_uploads WHERE cid = ?",
@@ -3681,13 +4035,25 @@ class GdprErasureReconciler:
                         (post_pending is not None and int(post_pending[0]) > cutoff)
                         or (post_tracked is not None and int(post_tracked[0]) > cutoff)
                     )
-                    if concurrently_refreshed:
+                    concurrently_anchored = False
+                    post_anchor_check_failed = False
+                    if not concurrently_refreshed and mh_s and expected_uploaders:
+                        try:
+                            fresh_anchored_post = self._collect_anchored_owners_by_mh()
+                            concurrently_anchored = bool(
+                                fresh_anchored_post.get(mh_s, set()) & expected_uploaders
+                            )
+                        except Exception:
+                            post_anchor_check_failed = True
+                    if concurrently_refreshed or concurrently_anchored or post_anchor_check_failed:
                         pin_fn = getattr(self.kubo_adapter, "pin_cid", None)
                         if callable(pin_fn):
                             try:
                                 pin_fn(cid_s)
                             except Exception:
                                 pass
+                        if concurrently_anchored:
+                            done_anchored_rows.append((cid_s, obs_ts))
                         continue
                     for target_c in unpinned_here:
                         orphan_unpinned.append(target_c)
@@ -3800,9 +4166,30 @@ class GdprErasureReconciler:
                 if ah_item and len(ah_item) >= 3:
                     item_shas.extend(_normalize_sha256_hex(h) for h in ah_item)
             candidate_shas = {h for h in item_shas if h}
-            target_shas, same_owner_active_mhs, all_ds = self._resolve_authorized_erasable_shas(
-                data_id, revoked_owner_l, revoked_creator_l, candidate_shas
-            )
+            # Lazily load recursive pins once per revoked dataset so both _resolve_authorized_erasable_shas
+            # and cross-codec alias expansion share one Kubo /api/v0/pin/ls call and fail closed on outage.
+            pins_cache_box: dict[str, list[str] | None] = {"loaded": False, "val": None}
+
+            def _get_recursive_pins_once():
+                if not pins_cache_box["loaded"]:
+                    if callable(list_pins_fn):
+                        pins_cache_box["val"] = list(list_pins_fn() or [])
+                    else:
+                        pins_cache_box["val"] = None
+                    pins_cache_box["loaded"] = True
+                return pins_cache_box["val"]
+
+            try:
+                target_shas, same_owner_active_mhs, all_ds = self._resolve_authorized_erasable_shas(
+                    data_id,
+                    revoked_owner_l,
+                    revoked_creator_l,
+                    candidate_shas,
+                    get_recursive_pins=_get_recursive_pins_once,
+                )
+            except Exception:
+                reconcile_incomplete = True
+                continue
             if target_shas:
                 sha_cids, sha_mhs = self._collect_cross_codec_pins_for_shas(target_shas)
                 for sc in sha_cids:
@@ -3861,7 +4248,7 @@ class GdprErasureReconciler:
             # NEVER silently swallow transient /api/v0/pin/ls errors: retry on next cycle instead of marking erased!
             if target_mhs and callable(list_pins_fn):
                 try:
-                    recursive_pins = list(list_pins_fn() or [])
+                    recursive_pins = _get_recursive_pins_once() or []
                 except Exception:
                     reconcile_incomplete = True
                     continue
@@ -4097,6 +4484,7 @@ def create_gateway_server(
         erased_sha_lookup=upload_limiter.get_erased_sha_owner,
     )
     upload_limiter.set_first_registrant_lookup(catalog_index.get_first_registrant_info)
+    upload_limiter.set_sha_revoked_lookup(catalog_index.is_revoked_sha)
     metrics_lock = threading.Lock()
     metrics = {
         "rpcConnected": True,
@@ -4159,15 +4547,74 @@ def create_gateway_server(
                 )
                 self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 
-        def _send_json(self, status: int, payload: dict, *, send_body: bool = True):
+        def _drain_bounded_unread_post_body(self) -> bool:
+            """
+            Drain a bounded (<= EARLY_ABORT_DRAIN_MAX_BYTES) fixed-length POST body before sending
+            an early-abort JSON rejection so synchronous HTTP clients (e.g. urllib/http.client on
+            Windows loopback) finish sendall() cleanly without a kernel TCP RST (WinError 10053).
+            Returns True if the request body was fully drained, False otherwise.
+            """
+            unread = getattr(self, "_post_unread_cl", None)
+            if unread == 0:
+                return True
+            if not isinstance(unread, int) or unread < 0 or unread > EARLY_ABORT_DRAIN_MAX_BYTES:
+                return False
+            prev_timeout = None
+            sock = getattr(self, "connection", None)
+            try:
+                if sock is not None and hasattr(sock, "gettimeout") and hasattr(sock, "settimeout"):
+                    prev_timeout = sock.gettimeout()
+                    sock.settimeout(EARLY_ABORT_DRAIN_TIMEOUT_SEC)
+                remaining = unread
+                while remaining > 0:
+                    chunk = self.rfile.read(min(STREAM_CHUNK_BYTES, remaining))
+                    if not chunk:
+                        return False
+                    remaining -= len(chunk)
+                    self._post_unread_cl = remaining
+                return True
+            except Exception:
+                return False
+            finally:
+                if sock is not None and prev_timeout is not None and hasattr(sock, "settimeout"):
+                    try:
+                        sock.settimeout(prev_timeout)
+                    except Exception:
+                        pass
+
+        def _send_json(
+            self,
+            status: int,
+            payload: dict,
+            *,
+            send_body: bool = True,
+            early_abort_post: bool = False,
+        ):
+            drained_cleanly = True
+            if early_abort_post:
+                self.close_connection = True
+                drained_cleanly = self._drain_bounded_unread_post_body()
             body = json.dumps(payload).encode("utf-8")
             self.send_response(status)
             self._send_common_headers()
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
+            if early_abort_post or self.close_connection:
+                self.send_header("Connection", "close")
             self.end_headers()
             if send_body:
                 self.wfile.write(body)
+            try:
+                self.wfile.flush()
+            except Exception:
+                pass
+            if early_abort_post and not drained_cleanly:
+                sock = getattr(self, "connection", None)
+                if sock is not None and hasattr(sock, "shutdown"):
+                    try:
+                        sock.shutdown(socket.SHUT_WR)
+                    except OSError:
+                        pass
 
         def _handle_healthz(self, *, send_body: bool):
             rpc_ok = bool(registry_adapter.is_connected())
@@ -4314,9 +4761,19 @@ def create_gateway_server(
             self._send_json(404, {"error": "Not found"}, send_body=False)
 
         def do_POST(self):
+            # Track fixed-length unread request bytes so early-abort rejections (400/401/403/413/429)
+            # cleanly drain <= 8 MiB or half-close without sending TCP RST (WinError 10053).
+            self._post_unread_cl: int | None = None
+            _init_cl = self.headers.get_all("Content-Length") or []
+            _init_te = self.headers.get_all("Transfer-Encoding") or []
+            if len(_init_cl) == 1 and not _init_te:
+                _cl_s = _init_cl[0].strip()
+                if _cl_s.isascii() and _cl_s.isdigit() and len(_cl_s) <= 12:
+                    self._post_unread_cl = int(_cl_s)
+
             path_only = self.path.split("?", 1)[0]
             if path_only != "/api/v0/upload":
-                self._send_json(404, {"error": "Not found"})
+                self._send_json(404, {"error": "Not found"}, early_abort_post=True)
                 return
 
             claimed_addr = self.headers.get("X-GenoChain-Address", "").strip()
@@ -4329,7 +4786,11 @@ def create_gateway_server(
             if not (raw_ts.isascii() and raw_ts.isdigit() and len(raw_ts) <= MAX_TS_DIGITS):
                 with metrics_lock:
                     metrics["requestsDenied"] += 1
-                self._send_json(401, {"error": "Missing or non-numeric X-GenoChain-Timestamp."})
+                self._send_json(
+                    401,
+                    {"error": "Missing or non-numeric X-GenoChain-Timestamp."},
+                    early_abort_post=True,
+                )
                 return
 
             now_val = int(clock())
@@ -4348,7 +4809,7 @@ def create_gateway_server(
             if not ok_sig or not recovered_addr or not norm_sha:
                 with metrics_lock:
                     metrics["requestsDenied"] += 1
-                self._send_json(401, {"error": sig_reason})
+                self._send_json(401, {"error": sig_reason}, early_abort_post=True)
                 return
 
             # Anti-Sybil eligibility check BEFORE touching quota, disk spool, or NonceStore
@@ -4356,14 +4817,14 @@ def create_gateway_server(
             if not eligible_ok:
                 with metrics_lock:
                     metrics["requestsDenied"] += 1
-                self._send_json(403, {"error": eligible_reason})
+                self._send_json(403, {"error": eligible_reason}, early_abort_post=True)
                 return
 
             cl_headers = self.headers.get_all("Content-Length") or []
             if len(cl_headers) > 1:
                 with metrics_lock:
                     metrics["requestsDenied"] += 1
-                self._send_json(400, {"error": "Duplicate Content-Length headers rejected."})
+                self._send_json(400, {"error": "Duplicate Content-Length headers rejected."}, early_abort_post=True)
                 return
             raw_cl = cl_headers[0].strip() if cl_headers else ""
             te_headers = self.headers.get_all("Transfer-Encoding") or []
@@ -4376,7 +4837,11 @@ def create_gateway_server(
             if te_tokens and te_tokens != ["chunked"]:
                 with metrics_lock:
                     metrics["requestsDenied"] += 1
-                self._send_json(501, {"error": "Unsupported Transfer-Encoding (only 'chunked' is supported)."})
+                self._send_json(
+                    501,
+                    {"error": "Unsupported Transfer-Encoding (only 'chunked' is supported)."},
+                    early_abort_post=True,
+                )
                 return
             is_chunked = te_tokens == ["chunked"]
 
@@ -4385,24 +4850,36 @@ def create_gateway_server(
                 if cl_headers:
                     with metrics_lock:
                         metrics["requestsDenied"] += 1
-                    self._send_json(400, {"error": "Conflicting Transfer-Encoding and Content-Length headers."})
+                    self._send_json(
+                        400,
+                        {"error": "Conflicting Transfer-Encoding and Content-Length headers."},
+                        early_abort_post=True,
+                    )
                     return
             else:
                 if not (raw_cl.isascii() and raw_cl.isdigit() and len(raw_cl) <= 12):
                     with metrics_lock:
                         metrics["requestsDenied"] += 1
-                    self._send_json(411, {"error": "Valid Content-Length or Transfer-Encoding: chunked required for upload."})
+                    self._send_json(
+                        411,
+                        {"error": "Valid Content-Length or Transfer-Encoding: chunked required for upload."},
+                        early_abort_post=True,
+                    )
                     return
                 content_length = int(raw_cl)
                 if content_length <= 0:
                     with metrics_lock:
                         metrics["requestsDenied"] += 1
-                    self._send_json(400, {"error": "Upload payload must be non-empty."})
+                    self._send_json(400, {"error": "Upload payload must be non-empty."}, early_abort_post=True)
                     return
                 if content_length > MAX_UPLOAD_BYTES:
                     with metrics_lock:
                         metrics["requestsDenied"] += 1
-                    self._send_json(413, {"error": f"Upload exceeds maximum allowed size ({MAX_UPLOAD_BYTES} bytes)."})
+                    self._send_json(
+                        413,
+                        {"error": f"Upload exceeds maximum allowed size ({MAX_UPLOAD_BYTES} bytes)."},
+                        early_abort_post=True,
+                    )
                     return
 
             # Atomically reserve upload slot + estimated bytes BEFORE spooling or consuming nonce
@@ -4412,7 +4889,7 @@ def create_gateway_server(
             if not allowed_quota or not res_token:
                 with metrics_lock:
                     metrics["requestsDenied"] += 1
-                self._send_json(429, {"error": quota_reason})
+                self._send_json(429, {"error": quota_reason}, early_abort_post=True)
                 return
 
             hasher = hashlib.sha256()
@@ -4432,13 +4909,13 @@ def create_gateway_server(
                     if chunk_err_status is not None:
                         with metrics_lock:
                             metrics["requestsDenied"] += 1
-                        self._send_json(chunk_err_status, {"error": chunk_err_msg})
+                        self._send_json(chunk_err_status, {"error": chunk_err_msg}, early_abort_post=True)
                         return
                     ok_final_q, final_q_msg = upload_limiter.verify_streamed_quota(res_token, now_val)
                     if not ok_final_q:
                         with metrics_lock:
                             metrics["requestsDenied"] += 1
-                        self._send_json(429, {"error": final_q_msg})
+                        self._send_json(429, {"error": final_q_msg}, early_abort_post=True)
                         return
                     content_length = actual_len
                 else:
@@ -4449,11 +4926,16 @@ def create_gateway_server(
                         if not chunk:
                             with metrics_lock:
                                 metrics["requestsDenied"] += 1
-                            self._send_json(400, {"error": "Incomplete upload body (client disconnected early)."})
+                            self._send_json(
+                                400,
+                                {"error": "Incomplete upload body (client disconnected early)."},
+                                early_abort_post=True,
+                            )
                             return
                         hasher.update(chunk)
                         spool.write(chunk)
                         remaining -= len(chunk)
+                        self._post_unread_cl = remaining
 
                 actual_sha = hasher.hexdigest()
                 if actual_sha != norm_sha:
@@ -4698,6 +5180,26 @@ def create_gateway_server(
                     return
 
                 if not commit_ok:
+                    reject_reason = upload_limiter.pop_commit_reject_reason(res_token)
+                    if reject_reason == "gdpr_erased":
+                        # Mid-stream GDPR Art. 17 erasure occurred while Kubo was writing: roll back
+                        # our newly pinned block cleanly under rollback guard and mark repo/gc pending.
+                        try:
+                            safe_to_rollback = upload_limiter.acquire_rollback_eligibility(res_token, pin_mh)
+                            if wrote_or_pinned and safe_to_rollback:
+                                if (not pin_mh) or upload_limiter.has_persisted_pin(pin_mh) is False:
+                                    _rollback_kubo_block(pin_res["cid"])
+                        finally:
+                            upload_limiter.release_rollback_guard(res_token)
+                        with metrics_lock:
+                            metrics["requestsDenied"] += 1
+                        self._send_json(
+                            403,
+                            {
+                                "error": "Content SHA-256 was permanently erased under GDPR Art. 17 mid-upload; pin rolled back."
+                            },
+                        )
+                        return
                     # Provenance belongs to another uploader (e.g. cross-process race): do NOT unpin their pin,
                     # simply fail closed 403 and never return 200 without tracking.
                     with metrics_lock:

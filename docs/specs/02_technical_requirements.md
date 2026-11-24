@@ -170,10 +170,10 @@ Toàn bộ hệ thống đã được kiểm thử thực tế theo chuẩn **We
 
 | Nhóm kiểm tra | Hạng mục thực tế | Lệnh kiểm thử thực tế | Kết quả ghi nhận |
 | :--- | :--- | :--- | :---: |
-| **Smart Contract (Mocha/Hardhat)** | 499 Unit, Adversarial, Invariant, Fuzzing, Regression (`R18-01..06p`, `FIX-70c..f`) & OWASP Top 10 (2026) Tests (33 tệp) | `npx hardhat test` | **499/499 PASS (100%)** |
+| **Smart Contract (Mocha/Hardhat)** | 500 Unit, Adversarial, Invariant, Fuzzing, Regression (`R18-01..06q`, `FIX-70c..f`) & OWASP Top 10 (2026) Tests (33 tệp) | `npx hardhat test` | **500/500 PASS (100%)** |
 | **OWASP Top 10 (2026) & DeFiHackLabs** | 25 Tests phòng thủ SC01-SC10 & Định chuẩn $\Delta \text{Balance} = 0$ | `npx hardhat test test/OwaspTop10SmartContract2026Defense.test.js` | **25/25 PASS (100%)** |
 | **Independent Stress Suite & Diverse Datasets** | 24 kiểm định đối kháng độc lập + 14 kịch bản đa định dạng sinh học (INV-11) + toàn bộ 23/23 script `scripts/audit/*.mjs` | `independent_stress_suite.mjs` & `test_diverse_datasets_e2e.mjs` | **24/24, 14/14 & 23/23 PASS (100%)** |
-| **UI/UX Adversarial & WCAG 2.2 AA** | 15 kiểm định tĩnh UI/XSS/Sanitizer (`sanitizeGenomicMetadata`/`sanitizeMetadataTree`, 8/8 modal dialogs) + 702/702 khóa i18n + 38 online / 33 offline kịch bản axe-core (`wcag22aa`) + 4/4 live E2E Playwright | `ui_ux_adversarial_suite.mjs`, `audit_ui_ux_axe.py`, `e2e_fullstack_playwright.py` | **15/15, 38/38, 33/33 & 4/4 PASS (0 Violations)** |
+| **UI/UX Adversarial & WCAG 2.2 AA** | 15 kiểm định tĩnh UI/XSS/Sanitizer (`sanitizeGenomicMetadata`/`sanitizeMetadataTree`, 8/8 modal dialogs) + 702/702 khóa i18n + 40 online / 33 offline kịch bản axe-core (`wcag22aa`) + 4/4 live E2E Playwright | `ui_ux_adversarial_suite.mjs`, `audit_ui_ux_axe.py`, `e2e_fullstack_playwright.py` | **15/15, 40/40, 33/33 & 4/4 PASS (0 Violations)** |
 | **Web3.py Tương tác & Cổng SIWE IPFS** | Tương tác trực tiếp EVM thật (`live_chain_audit.py`, `web3_demo.py`, `ipfs_access_gateway.py`, `capsule_dispatcher.py`) | `python scripts/demo/web3_demo.py` & Gate 16 | **PASS (100%)** |
 | **Liêm Chính Học Thuật (UIT / IS355)** | 3/3 kiểm định tên trường, giảng viên, sinh viên (23520783), tỷ lệ hash | `python scripts/audit/academic_hygiene_toolkit.py --selftest` | **3/3 PASS (100%)** |
 | **Phân Tích Tĩnh (Solhint & Slither)** | Quét toàn bộ 7 Smart Contracts tuân thủ quy chuẩn OpenZeppelin & CEI | `npm run lint:sol` & `slither . --exclude-dependencies` | **0 ERRORS / 0 WARNINGS & 0 High/Med** |

@@ -19,7 +19,7 @@ In accordance with strict academic integrity, those lost artifacts are explicitl
 
 ## 2. Fresh Live-Stack UI & WCAG 2.2 AA Verification Screenshots (`docs/evidence/live_screenshots/`)
 
-Captured directly from Chromium during **Gate 11 (Online Axe-Core WCAG 2.2 AA, 38/38 scenarios, 0 blocking violations, 0px horizontal overflow)** against the live 13-cohort Hardhat EVM and Private Kubo PNET deployment:
+Captured directly from Chromium during **Gate 11 (Online Axe-Core WCAG 2.2 AA, 40/40 scenarios, 0 blocking violations, 0px horizontal overflow)** against the live 13-cohort Hardhat EVM and Private Kubo PNET deployment:
 
 | # | Evidence File (`live_screenshots/`) | Size | SHA-256 Prefix | Verified Viewport / Theme / Surface |
 | :-: | :--- | ---: | :--- | :--- |
@@ -68,5 +68,5 @@ These 8 tracked media files survived intact in git and are directly referenced i
 ## 4. Machine-Readable Audit Artifacts (`docs/reports/`)
 
 - Static security scan (`0 High / 0 Medium` on production contracts): [`docs/reports/slither_latest.json`](../reports/slither_latest.json)
-- Live WCAG 2.2 AA accessibility audit (`38/38` online scenarios, `0` blocking violations): [`docs/reports/ui_ux_axe_report.json`](../reports/ui_ux_axe_report.json)
+- Live WCAG 2.2 AA accessibility audit (`40/40` online scenarios, `0` blocking violations): [`docs/reports/ui_ux_axe_report.json`](../reports/ui_ux_axe_report.json)
 - Full 18-gate empirical verification ledger: [`docs/reports/08_project_master_audit_and_architecture_report.md`](../reports/08_project_master_audit_and_architecture_report.md)

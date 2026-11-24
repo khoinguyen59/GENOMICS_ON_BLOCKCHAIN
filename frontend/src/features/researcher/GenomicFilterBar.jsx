@@ -417,7 +417,7 @@ export default function GenomicFilterBar({ children, onPurchase }) {
             <button
               id="blind-search-clear-btn"
               type="button"
-              className="btn-terminal"
+              className="btn-terminal btn-terminal-ghost"
               style={{ height: "34px", padding: "0 10px", fontSize: "12px", whiteSpace: "nowrap" }}
               title={t("blindSearchClear")}
               onClick={handleClearBlindSearch}

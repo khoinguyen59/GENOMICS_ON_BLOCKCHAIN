@@ -453,24 +453,25 @@ async def run_audit():
                     await search_inp_f.fill("")
                     await page.wait_for_timeout(150)
 
-        # Audit AssetDetailModal in Desktop Light VI
-        await ensure_theme(page, "light")
-        await ensure_lang(page, "vi")
-        await switch_view(page, "researcher")
-        inspect_btn = page.locator(".opensea-nft-card, .btn-terminal-ghost").first
-        if await inspect_btn.count() > 0:
-            await inspect_btn.click()
-            await page.wait_for_selector(".opensea-modal-container", timeout=5000)
-            await page.wait_for_timeout(450)
-            tag = "desktop_light_vi_modal"
-            res = await audit_scenario(page, axe_js, tag, True)
-            all_scenarios.append(res)
-            blocking_failures += res["blocking_count"]
-            if res["overflow_px"] > 0:
-                overflow_failures += 1
-            # Test Escape dismissal
-            await page.keyboard.press("Escape")
-            await page.wait_for_timeout(350)
+        # Audit AssetDetailModal in Desktop Light VI AND Desktop Dark VI (Teamwork L5-02)
+        for modal_theme, modal_shot in [("light", True), ("dark", False)]:
+            await ensure_theme(page, modal_theme)
+            await ensure_lang(page, "vi")
+            await switch_view(page, "researcher")
+            inspect_btn = page.locator(".opensea-nft-card, .btn-terminal-ghost").first
+            if await inspect_btn.count() > 0:
+                await inspect_btn.click()
+                await page.wait_for_selector(".opensea-modal-container", timeout=5000)
+                await page.wait_for_timeout(450)
+                tag = f"desktop_{modal_theme}_vi_modal"
+                res = await audit_scenario(page, axe_js, tag, modal_shot)
+                all_scenarios.append(res)
+                blocking_failures += res["blocking_count"]
+                if res["overflow_px"] > 0:
+                    overflow_failures += 1
+                # Test Escape dismissal
+                await page.keyboard.press("Escape")
+                await page.wait_for_timeout(350)
 
         # Audit PatientSovereignVault Blind Tags Modal (tests .icon-copy-btn target-size under wcag22aa)
         await ensure_theme(page, "light")
@@ -777,29 +778,30 @@ async def run_audit():
             if res["overflow_px"] > 0:
                 overflow_failures += 1
 
-        # Audit AssetDetailModal in Mobile Light VI
-        await ensure_theme(mob_page, "light")
-        await ensure_lang(mob_page, "vi")
-        await switch_view(mob_page, "researcher")
-        mob_inspect = mob_page.locator(".opensea-nft-card, .btn-terminal-ghost, .btn-inspect").first
-        if await mob_inspect.count() > 0:
-            await mob_inspect.click()
-            await mob_page.wait_for_selector(".opensea-modal-container", timeout=5000)
-            await mob_page.wait_for_timeout(450)
-            tag = "mobile_light_vi_modal"
-            res = await audit_scenario(mob_page, axe_js, tag, True)
-            all_scenarios.append(res)
-            blocking_failures += res["blocking_count"]
-            if res["overflow_px"] > 0:
-                overflow_failures += 1
-            # Test close button dismissal
-            close_btn = mob_page.locator(".modal-close-btn").first
-            if await close_btn.count() > 0:
-                await close_btn.click()
-                await mob_page.wait_for_timeout(350)
-            else:
-                await mob_page.keyboard.press("Escape")
-                await mob_page.wait_for_timeout(350)
+        # Audit AssetDetailModal in Mobile Light VI AND Mobile Dark VI (Teamwork L5-02)
+        for mob_modal_theme, mob_modal_shot in [("light", True), ("dark", False)]:
+            await ensure_theme(mob_page, mob_modal_theme)
+            await ensure_lang(mob_page, "vi")
+            await switch_view(mob_page, "researcher")
+            mob_inspect = mob_page.locator(".opensea-nft-card, .btn-terminal-ghost, .btn-inspect").first
+            if await mob_inspect.count() > 0:
+                await mob_inspect.click()
+                await mob_page.wait_for_selector(".opensea-modal-container", timeout=5000)
+                await mob_page.wait_for_timeout(450)
+                tag = f"mobile_{mob_modal_theme}_vi_modal"
+                res = await audit_scenario(mob_page, axe_js, tag, mob_modal_shot)
+                all_scenarios.append(res)
+                blocking_failures += res["blocking_count"]
+                if res["overflow_px"] > 0:
+                    overflow_failures += 1
+                # Test close button dismissal
+                close_btn = mob_page.locator(".modal-close-btn").first
+                if await close_btn.count() > 0:
+                    await close_btn.click()
+                    await mob_page.wait_for_timeout(350)
+                else:
+                    await mob_page.keyboard.press("Escape")
+                    await mob_page.wait_for_timeout(350)
         await ctx_mob.close()
         await browser.close()
 

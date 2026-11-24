@@ -27,6 +27,6 @@ This index links strictly to verified documents and artifacts currently present 
 | **Master Audit & Architecture Report** | Markdown | Full 18-gate empirical verification ledger, EIP-170/3860 metrics & candid wipe disclosure | [`08_project_master_audit_and_architecture_report.md`](reports/08_project_master_audit_and_architecture_report.md) |
 | **Verified Live Evidence Catalog** | Markdown + PNG | Inventory & SHA-256 digests of 22 fresh live-stack screenshots (`docs/evidence/live_screenshots/`) & 8 tracked README assets | [`evidence/README.md`](evidence/README.md) |
 | **Slither Static Analysis Output** | JSON | Live Slither scan on `contracts/` (`0 High / 0 Medium` on production contracts) | [`slither_latest.json`](reports/slither_latest.json) |
-| **Axe-Core WCAG 2.2 AA Report** | JSON | Live online accessibility audit (`38/38` scenarios, `0` blocking violations, `0px` overflow) | [`ui_ux_axe_report.json`](reports/ui_ux_axe_report.json) |
+| **Axe-Core WCAG 2.2 AA Report** | JSON | Live online accessibility audit (`40/40` scenarios, `0` blocking violations, `0px` overflow) | [`ui_ux_axe_report.json`](reports/ui_ux_axe_report.json) |
 | **Independent AI Audit Prompt** | Markdown | Blind external reviewer guide | [`INDEPENDENT_AI_AUDIT_PROMPT.md`](audit_guides/INDEPENDENT_AI_AUDIT_PROMPT.md) |
 | **Production VPS & Timelock Runbook** | Markdown | Base Sepolia / Sepolia deploy, `GenomicTimelock`, Private Kubo PNET, SIWE Gateway & Caddy TLS | [`DEPLOYMENT_RUNBOOK.md`](../deploy/DEPLOYMENT_RUNBOOK.md) |

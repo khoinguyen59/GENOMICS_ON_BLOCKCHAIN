@@ -2457,6 +2457,8 @@ print("PHASE5_GATEWAY_REMEDIATION_OK")
     expect(decHookSrc).to.not.include("p.decryptedPdfBytes.fill(0)");
     expect(decHookSrc).to.include("useEffect(() =>");
     expect(decHookSrc).to.include("partialWarning");
+    const catalogHookSrc = fs.readFileSync(path.resolve("frontend/src/hooks/useGenomicCatalog.js"), "utf8");
+    expect(catalogHookSrc).to.include("partialWarning: p.partialWarning ?? null");
   });
 
   // =========================================================================
@@ -2672,6 +2674,10 @@ with tempfile.TemporaryDirectory() as td:
             assert cid_target not in kubo.written_blocks, f"F-03 {label} wrote unpinned block to Kubo!"
             assert cid_target not in kubo.pins, f"F-03 {label} pinned rejected CID!"
         assert kubo.write_calls == writes_before, f"F-03 403 rejections invoked write_calls: {kubo.write_calls} vs {writes_before}"
+        # GDPR Art. 17: rejected 403 probe on revoked CID must NOT resurrect purged upload_provenance row
+        assert srv.gateway_upload_limiter.get_upload_provenance(gw.extract_canonical_multihash(CID_REVOKED)) is None, (
+            "GDPR-revoked 403 probe resurrected purged upload_provenance row!"
+        )
 
         # ------------------------------------------------------------------
         # F-01D + F-03: Catalog RPC outage returns 502 with rpc_calls == 1 (no 2x amplification) AND 0 Kubo block writes!
@@ -2780,6 +2786,83 @@ with tempfile.TemporaryDirectory() as td:
             srv.gateway_upload_limiter.commit = orig_commit
 
         # ------------------------------------------------------------------
+        # F-01E: Pin-survival & clean HTTP fault-safety on SQLite errors:
+        # 1) Active on-chain anchored CID re-upload hitting commit() SQLite error MUST NOT unpin live dataset
+        # 2) Previously committed 200 OK CID retry hitting commit() SQLite error MUST NOT unpin committed pin
+        # 3) try_claim_upload_provenance() SQLite error MUST return clean JSON 502 (never drop socket)
+        # 4) Quota-only commit(cid=None) SQLite error on 403 MUST return clean JSON 403 (never drop socket)
+        # ------------------------------------------------------------------
+        kubo.pins[CID_ANCHORED] = len(ANCHORED_BYTES)
+        def _always_fail_commit(*a, **kw):
+            raise sqlite3.OperationalError("database is locked")
+        srv.gateway_upload_limiter.commit = _always_fail_commit
+        try:
+            req_anch_err = urllib.request.Request(
+                f"http://127.0.0.1:{port}/api/v0/upload",
+                data=ANCHORED_BYTES,
+                headers=sign_upload(ALICE, ANCHORED_BYTES, now_ts, "p6-f01e-anch-err-001"),
+                method="POST",
+            )
+            st_ae = None
+            try:
+                urllib.request.urlopen(req_anch_err, timeout=5)
+            except urllib.error.HTTPError as e:
+                st_ae = e.code
+            assert st_ae == 502, f"F-01E active anchored commit fault expected 502, got {st_ae}"
+            assert CID_ANCHORED in kubo.pins, "F-01E commit fault unpinned an active on-chain dataset!"
+
+            req_re_err = urllib.request.Request(
+                f"http://127.0.0.1:{port}/api/v0/upload",
+                data=FRESH1_BYTES,
+                headers=sign_upload(ALICE, FRESH1_BYTES, now_ts, "p6-f01e-retry-err-01"),
+                method="POST",
+            )
+            st_re = None
+            try:
+                urllib.request.urlopen(req_re_err, timeout=5)
+            except urllib.error.HTTPError as e:
+                st_re = e.code
+            assert st_re == 502, f"F-01E committed retry fault expected 502, got {st_re}"
+            assert CID_FRESH_1 in kubo.pins, "F-01E retry commit fault unpinned previously committed 200 OK pin!"
+
+            req_403_db_err = urllib.request.Request(
+                f"http://127.0.0.1:{port}/api/v0/upload",
+                data=FRESH1_BYTES,
+                headers=sign_upload(BOB, FRESH1_BYTES, now_ts, "p6-f01e-403-dberr-01"),
+                method="POST",
+            )
+            st_403_db = None
+            try:
+                urllib.request.urlopen(req_403_db_err, timeout=5)
+            except urllib.error.HTTPError as e:
+                st_403_db = e.code
+                assert "error" in json.loads(e.read().decode())
+            assert st_403_db == 403, f"F-01E quota commit fault during 403 expected clean 403, got {st_403_db}"
+        finally:
+            srv.gateway_upload_limiter.commit = orig_commit
+
+        orig_try_claim = srv.gateway_upload_limiter.try_claim_upload_provenance
+        def _fail_try_claim(*a, **kw):
+            raise sqlite3.OperationalError("database is locked")
+        srv.gateway_upload_limiter.try_claim_upload_provenance = _fail_try_claim
+        try:
+            req_tc_err = urllib.request.Request(
+                f"http://127.0.0.1:{port}/api/v0/upload",
+                data=FRESH1_BYTES,
+                headers=sign_upload(ALICE, FRESH1_BYTES, now_ts, "p6-f01e-tryclaim-err"),
+                method="POST",
+            )
+            st_tc = None
+            try:
+                urllib.request.urlopen(req_tc_err, timeout=5)
+            except urllib.error.HTTPError as e:
+                st_tc = e.code
+                assert "error" in json.loads(e.read().decode())
+            assert st_tc == 502, f"F-01E try_claim SQLite fault expected clean 502, got {st_tc}"
+        finally:
+            srv.gateway_upload_limiter.try_claim_upload_provenance = orig_try_claim
+
+        # ------------------------------------------------------------------
         # L3-03: Post-GC transient RPC failure retries _flush_pending_provenance_purges() on next healthy cycle!
         # ------------------------------------------------------------------
         req_p = urllib.request.Request(
@@ -2824,14 +2907,145 @@ with tempfile.TemporaryDirectory() as td:
     finally:
         srv.shutdown(); srv.server_close()
 
-# L3-02: Verify capsule_dispatcher.py queues missing_seed_key confirmed orders into pending_orders
-with open(os.path.join("scripts", "demo", "capsule_dispatcher.py"), "r", encoding="utf-8") as df:
-    disp_src = df.read()
-assert '"missing_seed_key"' in disp_src and "if data_id not in seed_keys:" in disp_src
-
 print("PHASE6_MICRO_POLISH_OK")
 `;
     const out = execFileSync(resolvePythonBin(), ["-c", pyPhase6], { encoding: "utf8" });
     expect(out).to.include("PHASE6_MICRO_POLISH_OK");
+  });
+
+  // =========================================================================
+  // R18-06m: Live Multi-Block (>5 Blocks) capsule_dispatcher.py Vault Hot-Reload & Zero-Leak Pruning (L3-02)
+  // =========================================================================
+  it("R18-06m: delivers missing_seed_key order after >5 blocks upon vault hot-reload while pruning opted-out, refunded & expired orders", async function () {
+    this.timeout(90000);
+    const nodeExec = process.execPath;
+    const hhCli = path.resolve("node_modules/hardhat/dist/src/cli.js");
+    const pyDispatcherE2E = `
+import json, os, secrets, socket, subprocess, sys, tempfile, time
+from cryptography.hazmat.primitives.asymmetric import rsa, padding
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from cryptography.hazmat.primitives import serialization, hashes
+from web3 import Web3
+
+sock = socket.socket()
+sock.bind(("127.0.0.1", 0))
+rpc_port = sock.getsockname()[1]
+sock.close()
+
+node_proc = subprocess.Popen(
+    [sys.argv[1], sys.argv[2], "node", "--hostname", "127.0.0.1", "--port", str(rpc_port)],
+    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+)
+try:
+    rpc_url = f"http://127.0.0.1:{rpc_port}"
+    w3 = Web3(Web3.HTTPProvider(rpc_url))
+    for _ in range(80):
+        if w3.is_connected():
+            break
+        time.sleep(0.25)
+    assert w3.is_connected(), "Ephemeral Hardhat node failed to boot"
+    deployer, provider, buyer = w3.eth.accounts[0], w3.eth.accounts[1], w3.eth.accounts[2]
+
+    def deploy(rel, *args):
+        art = json.load(open(os.path.join("artifacts", "contracts", rel), encoding="utf-8"))
+        c = w3.eth.contract(abi=art["abi"], bytecode=art["bytecode"])
+        rc = w3.eth.wait_for_transaction_receipt(c.constructor(*args).transact({"from": deployer}))
+        return w3.eth.contract(address=rc.contractAddress, abi=art["abi"])
+
+    tok = deploy("GenomicToken.sol/GenomicToken.json", deployer)
+    nft = deploy("GenomicNFT.sol/GenomicNFT.json", deployer, 1000)
+    reg = deploy("GenomicsRegistry.sol/GenomicsRegistry.json", tok.address, nft.address, deployer)
+    w3.eth.wait_for_transaction_receipt(nft.functions.setRegistryContract(reg.address).transact({"from": deployer}))
+    w3.eth.wait_for_transaction_receipt(reg.functions.setCapsuleDispatcher(deployer).transact({"from": deployer}))
+    w3.eth.wait_for_transaction_receipt(tok.functions.transfer(buyer, 10000 * 10**18).transact({"from": deployer}))
+    w3.eth.wait_for_transaction_receipt(tok.functions.approve(reg.address, 10000 * 10**18).transact({"from": buyer}))
+
+    priv = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    pub_pem = priv.public_key().public_bytes(
+        serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo
+    ).decode("utf-8")
+    w3.eth.wait_for_transaction_receipt(reg.functions.registerResearcherPublicKey(pub_pem).transact({"from": buyer}))
+
+    c1 = "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG"
+    c2 = "QmZ4tDuvesekSs4qM5ZBKpXiZGun7S2CYtEZRB3DYXkjGx"
+    c3 = "QmPZ9qBzzyAtRaQQQUZr6xHS6wVfETRR249s63UME18znJ"
+    for idx, dur in ((1, 86400), (2, 86400), (3, 86400), (4, 3600)):
+        w3.eth.wait_for_transaction_receipt(
+            reg.functions.registerGenomicData(Web3.keccak(text=f"disp-l302-{idx}"), c1, c2, c3, "ipfs://" + c3, 100 * 10**18, dur, 1000).transact({"from": provider})
+        )
+    # ds2: sovereign opt-out; ds3: refunded escrow; ds4: expired grant
+    w3.eth.wait_for_transaction_receipt(reg.functions.setDispatcherOptOut(2, True).transact({"from": provider}))
+    w3.eth.wait_for_transaction_receipt(reg.functions.grantAccessWithEscrow(1, 7200).transact({"from": buyer}))
+    w3.eth.wait_for_transaction_receipt(reg.functions.grantAccessWithEscrow(2, 7200).transact({"from": buyer}))
+    w3.eth.wait_for_transaction_receipt(reg.functions.grantAccessWithEscrow(3, 3600).transact({"from": buyer}))
+    w3.eth.wait_for_transaction_receipt(reg.functions.grantAccess(4).transact({"from": buyer}))
+
+    w3.provider.make_request("evm_increaseTime", [4000])
+    w3.provider.make_request("evm_mine", [])
+    w3.eth.wait_for_transaction_receipt(reg.functions.claimEscrowRefund(3).transact({"from": buyer}))
+
+    with tempfile.TemporaryDirectory() as td:
+        vault_file = os.path.join(td, "vault.json")
+        cp_file = os.path.join(td, "cp.json")
+        vault_key_hex = secrets.token_hex(32)
+        with open(os.path.join(td, "dispatcher_vault.key"), "w", encoding="utf-8") as kf:
+            kf.write(vault_key_hex)
+        with open(vault_file, "w", encoding="utf-8") as vf:
+            json.dump({"seeds": []}, vf)
+
+        def run_disp():
+            r = subprocess.run(
+                [
+                    sys.executable, os.path.join("scripts", "demo", "capsule_dispatcher.py"),
+                    "--unlocked-local-signer", "--rpc-url", rpc_url,
+                    "--registry-address", reg.address, "--deployed-block", "1",
+                    "--vault-file", vault_file, "--checkpoint", cp_file,
+                ],
+                capture_output=True, text=True, timeout=30,
+            )
+            assert r.returncode == 0, f"capsule_dispatcher failed: rc={r.returncode}\\n{r.stderr}"
+
+        # Cycle 1: vault empty -> ONLY ds1 queued as missing_seed_key; opted-out ds2, refunded ds3 & expired ds4 pruned!
+        run_disp()
+        cp1 = json.load(open(cp_file, encoding="utf-8"))
+        k1 = f"1:{buyer.lower()}"
+        assert list(cp1["pendingOrders"].keys()) == [k1], f"Unexpected pendingOrders: {cp1['pendingOrders']}"
+        assert cp1["pendingOrders"][k1]["reason"] == "missing_seed_key"
+
+        # Advance 10 blocks (> 5-block recheck window), then hot-reload vault with ds1 AES-256-GCM key envelope
+        for _ in range(10):
+            w3.provider.make_request("evm_mine", [])
+        aes_raw = secrets.token_bytes(32)
+        iv = secrets.token_bytes(12)
+        env_hex = (iv + AESGCM(bytes.fromhex(vault_key_hex)).encrypt(iv, aes_raw, None)).hex()
+        with open(vault_file, "w", encoding="utf-8") as vf:
+            json.dump({"seeds": [{"dataId": 1, "encryptedKeyEnvelopeHex": env_hex}]}, vf)
+
+        # Cycle 2: delivers ds1 from pendingOrders and empties pendingOrders completely!
+        run_disp()
+        cp2 = json.load(open(cp_file, encoding="utf-8"))
+        assert cp2["pendingOrders"] == {}, f"Stale pendingOrders remained: {cp2['pendingOrders']}"
+        assert k1 in cp2["dispatchedKeys"]
+        cap1 = reg.functions.buyerCapsules(1, buyer).call()
+        assert cap1, "Capsule not delivered after vault hot-reload!"
+        dec = priv.decrypt(
+            bytes.fromhex(json.loads(cap1)["keyCipher"]),
+            padding.OAEP(mgf=padding.MGF1(algorithm=hashes.SHA256()), algorithm=hashes.SHA256(), label=None),
+        )
+        assert dec == aes_raw, "Decrypted AES key mismatch after hot-reload delivery!"
+finally:
+    node_proc.terminate()
+    try:
+        node_proc.wait(timeout=5)
+    except Exception:
+        node_proc.kill()
+
+print("DISPATCHER_L302_LIVE_HOT_RELOAD_OK")
+`;
+    const out = execFileSync(resolvePythonBin(), ["-c", pyDispatcherE2E, nodeExec, hhCli], {
+      encoding: "utf8",
+      timeout: 80000,
+    });
+    expect(out).to.include("DISPATCHER_L302_LIVE_HOT_RELOAD_OK");
   });
 });

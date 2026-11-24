@@ -1476,19 +1476,61 @@ def main():
 
                 if data_id not in seed_keys:
                     if task["confirmedOrder"] and order_key not in dispatched_keys and order_key not in quarantined:
-                        # L3-02: Persist confirmed orders whose dataset AES key is not yet in seed_keys
-                        # so hot-reloading seed_vault_file delivers them even after >5 blocks elapse.
+                        # L3-02: Persist genuinely active, worker-authorized confirmed orders whose dataset AES
+                        # key is not yet in seed_keys so hot-reloading seed_vault_file delivers them even after
+                        # >5 blocks elapse, while pruning revoked, opted-out sovereign, refunded, or expired orders.
                         keep_missing_key = True
+                        mk_is_escrow = bool(task["isEscrow"])
                         try:
                             di = registry.functions.getGenomicData(data_id).call()
                             df = unpack_abi_outputs(registry_abi, "getGenomicData", di)
                             st_val = int(df.get("status", di[9]))
+                            mk_owner = Web3.to_checksum_address(df.get("currentOwner", di[2]))
                             if st_val == 2:
-                                prune_order_state(pending_orders, dispatched_keys, quarantined, order_key)
                                 keep_missing_key = False
+                            else:
+                                # Skip/prune sovereign opted-out or unauthorized datasets when key is absent
+                                if worker_account.lower() != mk_owner.lower():
+                                    mk_explicit = bool(
+                                        registry.functions.isAuthorizedWorker(data_id, worker_account).call()
+                                    )
+                                    if not mk_explicit:
+                                        mk_opted_out = bool(registry.functions.dispatcherDisabled(data_id).call())
+                                        mk_is_global = bool(
+                                            global_dispatcher
+                                            and worker_account.lower() == global_dispatcher.lower()
+                                        )
+                                        if mk_opted_out or not mk_is_global:
+                                            keep_missing_key = False
+
+                                if keep_missing_key:
+                                    latest_ts_mk = int(w3.eth.get_block("latest")["timestamp"])
+                                    dep_mk_raw = registry.functions.escrowDeposits(data_id, buyer).call()
+                                    dep_mk = unpack_abi_outputs(registry_abi, "escrowDeposits", dep_mk_raw)
+                                    mk_amt = int(dep_mk["amount"])
+                                    mk_rel = bool(dep_mk["released"])
+                                    mk_ref = bool(dep_mk["refunded"])
+                                    mk_deliv = bool(dep_mk["capsuleDelivered"])
+                                    mk_pending_escrow = mk_amt > 0 and (not mk_rel) and (not mk_ref)
+                                    if mk_pending_escrow:
+                                        mk_is_escrow = True
+                                        if (
+                                            not mk_deliv
+                                            and latest_ts_mk >= int(dep_mk["depositTime"]) + int(dep_mk["disputeWindow"])
+                                        ):
+                                            keep_missing_key = False
+                                    else:
+                                        grant_mk_raw = registry.functions.accessGrants(data_id, buyer).call()
+                                        grant_mk = unpack_abi_outputs(registry_abi, "accessGrants", grant_mk_raw)
+                                        g_granted = bool(
+                                            grant_mk.get("isGranted", grant_mk_raw[0] if len(grant_mk_raw) > 0 else False)
+                                        )
+                                        g_exp = int(
+                                            grant_mk.get("expiresAt", grant_mk_raw[2] if len(grant_mk_raw) > 2 else 0)
+                                        )
+                                        keep_missing_key = g_granted and g_exp > latest_ts_mk
                         except Exception as mk_err:
                             if decode_custom_error(mk_err, error_selector_map) == "DataNotFound":
-                                prune_order_state(pending_orders, dispatched_keys, quarantined, order_key)
                                 keep_missing_key = False
                         if keep_missing_key:
                             mark_pending_order(
@@ -1496,9 +1538,11 @@ def main():
                                 order_key,
                                 data_id,
                                 buyer,
-                                task["isEscrow"],
+                                mk_is_escrow,
                                 "missing_seed_key",
                             )
+                        else:
+                            prune_order_state(pending_orders, dispatched_keys, quarantined, order_key)
                     skipped_count += 1
                     continue
 

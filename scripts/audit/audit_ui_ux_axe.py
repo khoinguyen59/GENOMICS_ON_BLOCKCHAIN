@@ -561,6 +561,7 @@ async def run_audit():
         )
 
         # 1d. Verify global '/' hotkey focuses #nav-search-input across Researcher, Donor & Admin portals
+        # AND is suppressed when an aria-modal dialog is open (F-02 / L4-01 / L4-L3).
         slash_results = {}
         for role_key, view_key in (("researcher", "researcher"), ("donor", "provider_mint"), ("admin", "admin")):
             await switch_view(page, view_key)
@@ -573,6 +574,22 @@ async def run_audit():
             await page.wait_for_timeout(80)
             blurred_ok = await page.evaluate("() => !document.activeElement || document.activeElement.id !== 'nav-search-input'")
             slash_results[role_key] = (focused_id == "nav-search-input") and bool(blurred_ok)
+
+        modal_blocked = False
+        ipfs_modal_trigger = page.locator("#footer-ipfs-settings-btn, #admin-open-ipfs-btn").first
+        if await ipfs_modal_trigger.count() > 0:
+            await ipfs_modal_trigger.click()
+            await page.wait_for_selector('[role="dialog"][aria-modal="true"]', timeout=5000)
+            await page.evaluate("() => { const d = document.querySelector('[role=\"dialog\"][aria-modal=\"true\"]'); if (d) { d.setAttribute('tabindex', '-1'); d.focus(); } }")
+            await page.wait_for_timeout(80)
+            await page.keyboard.press("/")
+            await page.wait_for_timeout(80)
+            modal_focused_id = await page.evaluate("() => document.activeElement ? document.activeElement.id : ''")
+            modal_blocked = modal_focused_id != "nav-search-input"
+            await page.keyboard.press("Escape")
+            await page.wait_for_timeout(180)
+        slash_results["modalBlocked"] = modal_blocked
+
         slash_hotkey_diag = {
             **slash_results,
             "passed": all(slash_results.values()),

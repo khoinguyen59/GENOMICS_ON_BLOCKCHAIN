@@ -650,6 +650,48 @@ class UploadRateLimiter:
                 "INSERT INTO gdpr_meta(k, v) VALUES('gc_pending', '1') ON CONFLICT(k) DO UPDATE SET v = '1'"
             )
 
+    def is_new_unshared_claim(self, token: str, multihash: str | None) -> bool:
+        """
+        Return True ONLY if `token` acquired a brand-new, unanchored, untracked, non-concurrent
+        claim for `multihash` (so a post-pin commit fault may safely roll back its own new pin
+        without ever unpinning an active on-chain dataset, previously committed upload, or
+        same-owner concurrent upload).
+        """
+        mh = str(multihash or "").strip()
+        with self._lock:
+            info = self._inflight.get(token)
+            if info is None or not bool(info.get("is_new_pin_claim", False)):
+                return False
+            if mh:
+                claim = self._inflight_mh_claims.get(mh)
+                if claim is not None and len(claim[1] - {token}) > 0:
+                    return False
+            return True
+
+    def has_persisted_provenance_or_pin(self, multihash: str | None) -> bool | None:
+        """
+        Check whether `multihash` already has a persisted row in upload_provenance or tracked_pins.
+        Returns True if persisted, False if absent, or None if SQLite could not be queried.
+        """
+        mh = str(multihash or "").strip()
+        if not mh:
+            return False
+        try:
+            with self._lock:
+                p_row = self._conn.execute(
+                    "SELECT 1 FROM upload_provenance WHERE multihash = ? LIMIT 1",
+                    (mh,),
+                ).fetchone()
+                if p_row is not None:
+                    return True
+                t_row = self._conn.execute(
+                    "SELECT 1 FROM tracked_pins WHERE multihash = ? LIMIT 1",
+                    (mh,),
+                ).fetchone()
+                return t_row is not None
+        except Exception:
+            return None
+
     def try_claim_upload_provenance(
         self,
         token: str,
@@ -661,8 +703,9 @@ class UploadRateLimiter:
     ) -> tuple[bool, int, str, str | None, set[str]]:
         """
         Atomically verify on-chain + SQLite upload provenance and acquire an in-flight per-multihash
-        claim BEFORE writing any block to Kubo. Prevents dual-200 concurrent duplicate-CID races
-        and writes zero unpinned blocks on 403 rejection.
+        claim BEFORE writing any block to Kubo. Prevents dual-200 concurrent duplicate-CID races,
+        writes zero Kubo blocks and zero upload_provenance mutations on 403 rejection, and records
+        whether this token owns a brand-new unshared pin claim for safe rollback decisions.
         Returns (allowed, http_status, reason, canonical_prov, allowed_owners).
         """
         mh = str(multihash or "").strip()
@@ -683,15 +726,6 @@ class UploadRateLimiter:
             allowed_owners = {a for a in (earliest_owner, earliest_creator) if a}
 
         with self._lock:
-            if canonical_prov:
-                with _sqlite_write_tx(self._conn):
-                    self._conn.execute(
-                        """
-                        INSERT OR IGNORE INTO upload_provenance(multihash, uploader, created_at)
-                        VALUES(?, ?, ?)
-                        """,
-                        (mh, canonical_prov, float(now_ts)),
-                    )
             row = self._conn.execute(
                 "SELECT uploader FROM upload_provenance WHERE multihash = ?",
                 (mh,),
@@ -699,7 +733,7 @@ class UploadRateLimiter:
             existing_prov = str(row[0]).strip().lower() if row and row[0] else None
 
             if first_info is not None:
-                eff_allowed = {a for a in (existing_prov, *allowed_owners) if a}
+                eff_allowed = {a for a in (existing_prov, canonical_prov, *allowed_owners) if a}
                 if eff_allowed and caller_l not in eff_allowed:
                     return (
                         False,
@@ -717,6 +751,14 @@ class UploadRateLimiter:
                     {existing_prov},
                 )
 
+            already_tracked = (
+                self._conn.execute(
+                    "SELECT 1 FROM tracked_pins WHERE multihash = ? LIMIT 1",
+                    (mh,),
+                ).fetchone()
+                is not None
+            )
+
             existing_claim = self._inflight_mh_claims.get(mh)
             if existing_claim is not None:
                 claim_owner, claim_tokens = existing_claim
@@ -729,8 +771,23 @@ class UploadRateLimiter:
                         {claim_owner},
                     )
                 claim_tokens.add(token)
+                # Shared concurrent same-owner upload: neither token may roll back the shared pin
+                for tok in claim_tokens:
+                    tok_info = self._inflight.get(tok)
+                    if tok_info is not None:
+                        tok_info["is_new_pin_claim"] = False
+                is_new_pin_claim = False
             else:
                 self._inflight_mh_claims[mh] = (caller_l, {token})
+                is_new_pin_claim = (
+                    first_info is None
+                    and existing_prov is None
+                    and not already_tracked
+                )
+
+            cur_info = self._inflight.get(token)
+            if cur_info is not None:
+                cur_info["is_new_pin_claim"] = is_new_pin_claim
 
             return True, 200, "ok", canonical_prov, allowed_owners
 
@@ -3523,15 +3580,18 @@ def create_gateway_server(
                             and not catalog_index.last_refresh_succeeded()
                         )
                     ):
-                        if already_pinned:
+                        if already_pinned and upload_limiter.has_persisted_provenance_or_pin(pin_mh) is False:
                             _rollback_kubo_block(pre_res["cid"])
                         elif staged_unpinned:
                             try:
                                 upload_limiter.mark_gc_pending()
                             except Exception:
                                 pass
-                        upload_limiter.commit(res_token, content_length, now_val, cid=None, multihash=None)
-                        committed = True
+                        try:
+                            upload_limiter.commit(res_token, content_length, now_val, cid=None, multihash=None)
+                            committed = True
+                        except Exception:
+                            pass
                         with metrics_lock:
                             metrics["requestsDenied"] += 1
                         self._send_json(
@@ -3541,23 +3601,37 @@ def create_gateway_server(
                         return
 
                     # F-01: Atomic per-multihash claim under UploadRateLimiter._lock BEFORE writing to Kubo!
-                    claim_ok, claim_status, claim_err, canonical_prov, allowed_owners = (
-                        upload_limiter.try_claim_upload_provenance(
-                            res_token,
-                            pin_mh,
-                            recovered_addr,
-                            first_info=first_info,
-                            now_ts=now_val,
+                    try:
+                        claim_ok, claim_status, claim_err, canonical_prov, allowed_owners = (
+                            upload_limiter.try_claim_upload_provenance(
+                                res_token,
+                                pin_mh,
+                                recovered_addr,
+                                first_info=first_info,
+                                now_ts=now_val,
+                            )
                         )
-                    )
+                    except Exception as exc:
+                        if staged_unpinned:
+                            try:
+                                upload_limiter.mark_gc_pending()
+                            except Exception:
+                                pass
+                        with metrics_lock:
+                            metrics["requestsDenied"] += 1
+                        self._send_json(502, {"error": f"Gateway provenance claim failed: {exc}"})
+                        return
                     if not claim_ok:
                         if staged_unpinned:
                             try:
                                 upload_limiter.mark_gc_pending()
                             except Exception:
                                 pass
-                        upload_limiter.commit(res_token, content_length, now_val, cid=None, multihash=None)
-                        committed = True
+                        try:
+                            upload_limiter.commit(res_token, content_length, now_val, cid=None, multihash=None)
+                            committed = True
+                        except Exception:
+                            pass
                         with metrics_lock:
                             metrics["requestsDenied"] += 1
                         self._send_json(claim_status, {"error": claim_err})
@@ -3574,7 +3648,9 @@ def create_gateway_server(
                         self._send_json(502, {"error": f"Private Kubo pin failed: {exc}"})
                         return
                     if pin_mh and _try_canonical_multihash(pin_res.get("cid")) != pin_mh:
-                        _rollback_kubo_block(pin_res.get("cid"))
+                        actual_mh = _try_canonical_multihash(pin_res.get("cid"))
+                        if upload_limiter.has_persisted_provenance_or_pin(actual_mh) is False:
+                            _rollback_kubo_block(pin_res.get("cid"))
                         with metrics_lock:
                             metrics["requestsDenied"] += 1
                         self._send_json(502, {"error": "Kubo CID mismatch between only-hash precheck and pin."})
@@ -3587,11 +3663,22 @@ def create_gateway_server(
                             spool.seek(0)
                             pin_res = add_fn(spool, filename, content_length, cid_version=1, pin=True)
                         except Exception as exc:
-                            _rollback_kubo_block(pre_res["cid"])
+                            if (not pin_mh) or upload_limiter.is_new_unshared_claim(res_token, pin_mh):
+                                _rollback_kubo_block(pre_res["cid"])
+                            else:
+                                try:
+                                    upload_limiter.mark_gc_pending()
+                                except Exception:
+                                    pass
                             self._send_json(502, {"error": f"Private Kubo pin failed: {exc}"})
                             return
 
-                # F-01: Atomic SQLite commit reusing verified on-chain provenance (0 extra RPC calls).
+                # F-01: Snapshot whether this request owns a brand-new unshared pin BEFORE commit() pops res_token,
+                # so a transient SQLite fault can roll back a brand-new pin without EVER unpinning an active
+                # on-chain dataset, previously committed upload, or concurrent same-owner upload.
+                safe_to_rollback = (not pin_mh) or upload_limiter.is_new_unshared_claim(res_token, pin_mh)
+
+                # Atomic SQLite commit reusing verified on-chain provenance (0 extra RPC calls).
                 # Fail closed on ANY rejection or SQLite failure (never return 200 without tracking!).
                 try:
                     commit_ok = upload_limiter.commit(
@@ -3604,12 +3691,8 @@ def create_gateway_server(
                     )
                     committed = True
                 except Exception as exc:
-                    if wrote_or_pinned:
-                        try:
-                            cur_owner = upload_limiter.get_upload_provenance(pin_mh) if pin_mh else None
-                        except Exception:
-                            cur_owner = None
-                        if cur_owner in (None, recovered_addr.lower()):
+                    if wrote_or_pinned and safe_to_rollback:
+                        if upload_limiter.has_persisted_provenance_or_pin(pin_mh) is not True:
                             _rollback_kubo_block(pin_res["cid"])
                     with metrics_lock:
                         metrics["requestsDenied"] += 1

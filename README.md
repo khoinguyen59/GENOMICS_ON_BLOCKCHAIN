@@ -318,7 +318,7 @@ Mỗi bộ dữ liệu sinh siêu dữ liệu **GA4GH Phenopackets v2** nghiêm 
 │   ├── zk/                     # build_groth16_artifacts.mjs (lễ thiết lập Phase 1/2 snarkjs không trapdoor)
 │   ├── demo/                   # capsule_dispatcher.py (--watch, --vault-file, --json-logs, --health-port, SIGTERM, AWS KMS tùy chọn), web3_demo.py, zk_ceremony_helper.mjs, zk_prover_cli.mjs
 │   └── audit/                  # check_eip170.py, parse_slither.py, i18n_parity.mjs, audit_ui_ux_axe.py, e2e_fullstack_playwright.py & đối kháng
-├── test/                       # Bộ kiểm thử hợp đồng, mật mã, OWASP 2026, Groth16 & hồi quy bảo mật (33 tệp, 495 tests)
+├── test/                       # Bộ kiểm thử hợp đồng, mật mã, OWASP 2026, Groth16 & hồi quy bảo mật (33 tệp, 496 tests)
 ├── .github/workflows/          # Quy trình CI ci.yml (push/PR) & security_ci.yml (định kỳ hàng tuần, ghim phiên bản Python)
 ├── hardhat.config.js           # Cấu hình Solidity 0.8.24 Cancun + viaIR + mạng localhost / sepolia / baseSepolia / base theo biến môi trường
 └── package.json                # Khai báo phụ thuộc và npm scripts gốc
@@ -376,7 +376,7 @@ Mọi chỉ số dưới đây được đo trực tiếp trên mã nguồn hi�
 
 | Cổng | Hạng Mục Kiểm Chứng | Lệnh Thực Thi | Kết Quả Thực Nghiệm |
 | :---: | :--- | :--- | :--- |
-| **01** | Toàn bộ bộ kiểm thử Hardhat Mocha | `npx hardhat test` | **495 passing / 0 failing** (`33` tệp test) |
+| **01** | Toàn bộ bộ kiểm thử Hardhat Mocha | `npx hardhat test` | **496 passing / 0 failing** (`33` tệp test) |
 | **02** | Stress đối kháng & Đa định dạng sinh học | `independent_stress_suite.mjs` & `test_diverse_datasets_e2e.mjs` | **24/24 PASS** & **14/14 PASS** |
 | **03** | Trần bytecode EIP-170 & EIP-3860 | `python scripts/audit/check_eip170.py` | **7/7 hợp đồng PASS** (`GenomicsRegistry` `21,543 B <= 24,576 B`) |
 | **04** | Phân tích tĩnh chuẩn phong cách Solhint | `npm run lint:sol` (`--max-warnings 0`) | **0 errors / 0 warnings** |

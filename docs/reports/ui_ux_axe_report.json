@@ -28,6 +28,7 @@
       "researcher": true,
       "donor": true,
       "admin": true,
+      "modalBlocked": true,
       "passed": true
     }
   },

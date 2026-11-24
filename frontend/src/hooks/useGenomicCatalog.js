@@ -523,7 +523,8 @@ export function useGenomicCatalog({ account, getContracts, lang }) {
               isOwner,
               decryptedContent: null,
               decryptedPdfBytes: null,
-              phenopacketJson: null
+              phenopacketJson: null,
+              partialWarning: null
             });
           }
         }
@@ -535,7 +536,13 @@ export function useGenomicCatalog({ account, getContracts, lang }) {
             const key = `${n.accountAddr || ""}:${n.dataId}`;
             const p = prevMap.get(key);
             if (p?.decryptedContent && n.status === "Active" && !n.escrowInfo?.isDisputed) {
-              return { ...n, decryptedContent: p.decryptedContent, decryptedPdfBytes: p.decryptedPdfBytes, phenopacketJson: p.phenopacketJson };
+              return {
+                ...n,
+                decryptedContent: p.decryptedContent,
+                decryptedPdfBytes: p.decryptedPdfBytes,
+                phenopacketJson: p.phenopacketJson,
+                partialWarning: p.partialWarning ?? null
+              };
             }
             return n;
           });

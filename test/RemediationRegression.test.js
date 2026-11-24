@@ -3121,7 +3121,7 @@ print("DISPATCHER_L302_LIVE_HOT_RELOAD_OK")
     expect(largeCidV0).to.not.equal(largeCidV1Raw);
 
     const pyCrossCodec = `
-import hashlib, json, os, sqlite3, sys, tempfile, threading, time, urllib.error, urllib.request
+import base64, hashlib, json, os, sqlite3, sys, tempfile, threading, time, urllib.error, urllib.request
 from eth_account import Account
 from eth_account.messages import encode_defunct
 import deploy.ipfs_access_gateway as gw
@@ -4627,7 +4627,7 @@ print("R18_06Q_DISPATCHER_L304_OK")
   it("R18-06r: closes L3-F1 legacy metadataHash=0x0 kubo_match guard, L3-F2/L3-F01 tombstone-before-unpin & exact tracked_pins removal, BOOST-L3/L3-F02 deferred peer rollback, L3-F03 orphan TTL vs inflight upload, and L3-F3 non-local fail-closed retrieveFromIpfs", async function () {
     this.timeout(90000);
     const pyPhase9Gateway = `
-import hashlib, json, os, sqlite3, sys, tempfile, threading, time, urllib.error, urllib.request
+import base64, hashlib, json, os, sqlite3, sys, tempfile, threading, time, urllib.error, urllib.request
 from eth_account import Account
 from eth_account.messages import encode_defunct
 import deploy.ipfs_access_gateway as gw
@@ -4788,6 +4788,17 @@ with tempfile.TemporaryDirectory() as td:
         rec1.reconcile_once()
         assert CID_V_META in kubo1.pins, "L3-F1 FAILED: Attacker destroyed Victim's legacy metadataHash=0x0 active metadataCid via kubo_match!"
         assert CID_ATK_RAW not in kubo1.pins, "L3-F1 sanity: Attacker's own revoked rawCid should be erased!"
+        assert lim1.get_erased_sha_owner(META_SHA) is None, "L3-F1 FAILED: Attacker poisoned gdpr_erased_shas tombstone for Victim's legacy metadataHash=0x0 artifact!"
+        mh_v_meta = gw.extract_canonical_multihash(CID_V_META)
+        ok_rv, _, tok_v = lim1.reserve(VICTIM.address, len(META_BYTES), now_ts)
+        assert ok_rv
+        fi_v, fsi_v, sr_v = cat1.get_upload_provenance_info(mh_v_meta, META_SHA, allow_authoritative_refresh=True)
+        ok_cv, st_cv, err_cv, _, _ = lim1.try_claim_upload_provenance(
+            tok_v, mh_v_meta, VICTIM.address, first_info=fi_v, content_sha256=META_SHA,
+            first_sha_info=fsi_v, sha_revoked=sr_v, now_ts=now_ts,
+        )
+        assert ok_cv and st_cv == 200, f"L3-F1 FAILED: Victim blocked from re-uploading legacy metadata ({st_cv}: {err_cv})"
+        lim1.release(tok_v)
     finally:
         rec1.close(); lim1.close()
 
@@ -5033,6 +5044,101 @@ with tempfile.TemporaryDirectory() as td:
     finally:
         lim4.close()
 
+    # ------------------------------------------------------------------
+    # 5. Deep edge-case closure inside R18-06r:
+    #    (a) Fresh post-tombstone list_recursive_pins() after conflict verification (L3-F2)
+    #    (b) Partial-SHA legacy dataset transition-window re-commit sweep (L3-F2)
+    #    (c) Cross-alias (CIDv0 expired vs CIDv1 re-upload) orphan GC preservation (L3-F03)
+    # ------------------------------------------------------------------
+    cid_alias_v0 = CID_V_META
+    mh_alias_bytes = gw._decode_base58btc(cid_alias_v0)
+    cid_alias_v1 = "b" + base64.b32encode(bytes([0x01, 0x70]) + mh_alias_bytes).decode("ascii").lower().rstrip("=")
+    shared_alias_mh = gw.extract_canonical_multihash(cid_alias_v0)
+    assert gw.extract_canonical_multihash(cid_alias_v1) == shared_alias_mh
+
+    # (a) Pre-tombstone list_recursive_pins during conflict MUST NOT cache stale pins across _record_erased_shas
+    db5a = os.path.join(td, "l3_f2_fresh_list.sqlite")
+    conf_bytes = b"ALICE_CONFLICT_POST_TOMBSTONE_LIST"
+    conf_sha = hashlib.sha256(conf_bytes).hexdigest()
+    reg5a = P9Reg()
+    reg5a.datasets = [
+        {"dataId": 1, "tokenId": 1, "currentOwner": ALICE.address, "originalCreator": ALICE.address,
+         "rawDataHash": "0x" + conf_sha, "summaryHash": "", "metadataHash": "",
+         "rawCid": cid_alias_v0, "summaryCid": "", "metadataCid": "", "status": 2},
+        {"dataId": 2, "tokenId": 2, "currentOwner": ATTACKER.address, "originalCreator": ATTACKER.address,
+         "rawDataHash": "0x" + conf_sha, "summaryHash": "", "metadataHash": "",
+         "rawCid": CID_ATK_RAW, "summaryCid": "", "metadataCid": "", "status": 0},
+    ]
+    reg5a.events = [{"dataId": 1, "newStatus": 2, "blockNumber": 399}]
+    kubo5a = P9Kubo()
+    kubo5a.pins = {cid_alias_v0: len(conf_bytes)}
+    kubo5a.written[cid_alias_v0] = conf_bytes
+    list_cnt_5a = [0]
+    kubo5a.on_list_pins = lambda: list_cnt_5a.__setitem__(0, list_cnt_5a[0] + 1)
+    orig_cat_5a = kubo5a.cat_cid
+    def _cat_inject_alias(c):
+        kubo5a.pins[cid_alias_v1] = len(conf_bytes)
+        return orig_cat_5a(c)
+    kubo5a.cat_cid = _cat_inject_alias
+    rec5a = gw.GdprErasureReconciler(reg5a, kubo5a, start_block=395, db_path=db5a)
+    try:
+        rec5a.reconcile_once()
+        assert list_cnt_5a[0] >= 2 and cid_alias_v1 not in kubo5a.pins, f"L3-F2 stale pins_cache_box: cnt={list_cnt_5a[0]} pins={kubo5a.pins}"
+    finally:
+        rec5a.close()
+
+    # (b) Partial-SHA legacy dataset: CID without on-chain hash re-committed during unpin loop MUST be re-unpinned
+    db5b = os.path.join(td, "l3_f2_partial_sha.sqlite")
+    reg5b = P9Reg()
+    reg5b.datasets = [
+        {"dataId": 1, "tokenId": 1, "currentOwner": ALICE.address, "originalCreator": ALICE.address,
+         "rawDataHash": "", "summaryHash": "0x" + "aa" * 32, "metadataHash": "",
+         "rawCid": CID_V_META, "summaryCid": CID_V_RAW, "metadataCid": "", "status": 2},
+    ]
+    reg5b.events = [{"dataId": 1, "newStatus": 2, "blockNumber": 399}]
+    kubo5b = P9Kubo()
+    kubo5b.pins = {CID_V_META: len(META_BYTES), CID_V_RAW: 100}
+    lim5b = gw.UploadRateLimiter(db_path=db5b, kubo_adapter=kubo5b)
+    lim5b.record_pending_upload(CID_V_META, ALICE.address, len(META_BYTES), now_ts - 10)
+    re_comm_5b = [False]
+    def _on_unpin_5b(c):
+        if c == CID_V_RAW and not re_comm_5b[0]:
+            re_comm_5b[0] = True
+            kubo5b.pins[CID_V_META] = len(META_BYTES)
+            lim5b.record_pending_upload(CID_V_META, ALICE.address, len(META_BYTES), now_ts + 5)
+    kubo5b.on_unpin = _on_unpin_5b
+    rec5b = gw.GdprErasureReconciler(reg5b, kubo5b, start_block=395, db_path=db5b)
+    try:
+        rec5b.reconcile_once()
+        assert CID_V_META not in kubo5b.pins, f"L3-F2 partial-SHA re-commit ghost pin survived: {kubo5b.pins}"
+    finally:
+        rec5b.close(); lim5b.close()
+
+    # (c) Cross-alias orphan GC: expired CIDv0 orphan MUST NOT wipe newly committed same-MH CIDv1 alias
+    db5c = os.path.join(td, "l3_f03_cross_alias.sqlite")
+    reg5c = P9Reg()
+    kubo5c = P9Kubo()
+    kubo5c.pins = {cid_alias_v0: 100, cid_alias_v1: 100}
+    lim5c = gw.UploadRateLimiter(db_path=db5c, kubo_adapter=kubo5c)
+    lim5c.record_pending_upload(cid_alias_v0, ALICE.address, 100, now_ts - 4000)
+    reup_5c = [False]
+    def _on_unpin_5c(c):
+        if c == cid_alias_v1 and not reup_5c[0]:
+            reup_5c[0] = True
+            ok_r5, _, t5 = lim5c.reserve(ALICE.address, 100, now_ts)
+            assert ok_r5
+            c5_ok, _, _, _, _ = lim5c.try_claim_upload_provenance(t5, shared_alias_mh, ALICE.address, now_ts=now_ts)
+            assert c5_ok
+            lim5c.commit(t5, 100, now_ts, cid=cid_alias_v1, multihash=shared_alias_mh, verified_onchain_provenance=(True, ALICE.address.lower(), {ALICE.address.lower()}))
+            lim5c.release_rollback_guard(t5)
+    kubo5c.on_unpin = _on_unpin_5c
+    rec5c = gw.GdprErasureReconciler(reg5c, kubo5c, start_block=400, db_path=db5c, orphan_pin_ttl_sec=3600, now_fn=lambda: now_ts, upload_limiter=lim5c)
+    try:
+        rec5c.reconcile_orphan_uploads()
+        assert cid_alias_v1 in kubo5c.pins, f"L3-F03 cross-alias CIDv1 wiped by orphan GC: {kubo5c.pins}"
+    finally:
+        rec5c.close(); lim5c.close()
+
 print("R18_06R_GATEWAY_CONCURRENCY_OK")
 `;
     const pyOut = execFileSync(resolvePythonBin(), ["-c", pyPhase9Gateway], {
@@ -5109,7 +5215,22 @@ print("R18_06R_GATEWAY_CONCURRENCY_OK")
         expect(err3.privateGatewayFailClosed).to.equal(true);
         expect(fetchCalls.length).to.equal(0);
 
-        // 4. Explicit non-private metadata opt-in (fastCatalog + allowPublicGatewayFallback, no dataId/signer) succeeds
+        // 3b. Authenticated account/headers opt-in bypass MUST ALSO fail closed!
+        let err3b = null;
+        try {
+          await retrieveFromIpfs(CID_TEST, "https://gateway.pinata.cloud/ipfs", {
+            fastCatalog: true,
+            account: "0x1111111111111111111111111111111111111111",
+            allowPublicGatewayFallback: true,
+          });
+        } catch (e) {
+          err3b = e;
+        }
+        expect(err3b, `${mode} authenticated account opt-in bypass must fail closed`).to.not.equal(null);
+        expect(err3b.privateGatewayFailClosed).to.equal(true);
+        expect(fetchCalls.length).to.equal(0);
+
+        // 4. Explicit non-private metadata opt-in (fastCatalog + allowPublicGatewayFallback, no dataId/signer/account) succeeds
         const optInBytes = await retrieveFromIpfs(CID_TEST, "https://gateway.pinata.cloud/ipfs", {
           fastCatalog: true,
           allowPublicGatewayFallback: true,

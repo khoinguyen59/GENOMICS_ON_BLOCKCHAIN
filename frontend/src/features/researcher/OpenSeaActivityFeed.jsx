@@ -750,7 +750,7 @@ export default function OpenSeaActivityFeed() {
                             aria-label={t("ariaCopyAddress")}
                           >
                             {copiedKey === `from-${ev.id}` ? (
-                              <CheckCircleIcon size={11} color="var(--accent-emerald)" />
+                              <CheckCircleIcon size={11} color="var(--accent-emerald-text)" />
                             ) : (
                               <CopyIcon size={11} />
                             )}
@@ -778,7 +778,7 @@ export default function OpenSeaActivityFeed() {
                                 aria-label={t("ariaCopyAddress")}
                               >
                                 {copiedKey === `to-${ev.id}` ? (
-                                  <CheckCircleIcon size={11} color="var(--accent-emerald)" />
+                                  <CheckCircleIcon size={11} color="var(--accent-emerald-text)" />
                                 ) : (
                                   <CopyIcon size={11} />
                                 )}
@@ -803,7 +803,7 @@ export default function OpenSeaActivityFeed() {
                           aria-label={t("ariaCopyTxHash")}
                         >
                           {copiedKey === `tx-${ev.id}` ? (
-                            <CheckCircleIcon size={11} color="var(--accent-emerald)" />
+                            <CheckCircleIcon size={11} color="var(--accent-emerald-text)" />
                           ) : (
                             <CopyIcon size={11} />
                           )}

@@ -273,7 +273,10 @@ export async function retrieveFromIpfs(cid, gatewayUrl = "https://gateway.pinata
       Boolean(fastCatalog) &&
       !options?.privatePayload &&
       (options?.dataId === undefined || options?.dataId === null) &&
-      !options?.signer;
+      !options?.signer &&
+      !options?.account &&
+      !options?.address &&
+      !options?.headers;
     if (!isPublicMetadataOptIn) {
       const nonLocalErr = new Error(
         `Non-local build requires a configured Private IPFS Gateway (VITE_KUBO_GATEWAY) for CID ${cid}; public-gateway fallback is strictly disabled.`

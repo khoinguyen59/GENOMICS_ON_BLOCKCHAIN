@@ -258,7 +258,7 @@ export default function AssetDetailModal({ onPurchase }) {
                       title={t("copyContractAddress") || (lang === "vi" ? "Sao chép địa chỉ hợp đồng" : "Copy contract address")}
                       aria-label={t("copyContractAddress") || (lang === "vi" ? "Sao chép địa chỉ hợp đồng" : "Copy contract address")}
                     >
-                      {copiedKey === "contract" ? <CheckCircleIcon size={12} color="var(--accent-emerald)" /> : <CopyIcon size={12} />}
+                      {copiedKey === "contract" ? <CheckCircleIcon size={12} color="var(--accent-emerald-text)" /> : <CopyIcon size={12} />}
                     </button>
                   </div>
                 </div>
@@ -297,7 +297,7 @@ export default function AssetDetailModal({ onPurchase }) {
                         title={t("copyMetadataCid") || (lang === "vi" ? "Sao chép CID Metadata" : "Copy Metadata CID")}
                         aria-label={t("copyMetadataCid") || (lang === "vi" ? "Sao chép CID Metadata" : "Copy Metadata CID")}
                       >
-                        {copiedKey === "metaCid" ? <CheckCircleIcon size={12} color="var(--accent-emerald)" /> : <CopyIcon size={12} />}
+                        {copiedKey === "metaCid" ? <CheckCircleIcon size={12} color="var(--accent-emerald-text)" /> : <CopyIcon size={12} />}
                       </button>
                     )}
                   </div>
@@ -315,7 +315,7 @@ export default function AssetDetailModal({ onPurchase }) {
                         title={t("copyRawCid") || (lang === "vi" ? "Sao chép CID Dữ liệu thô" : "Copy Raw CID")}
                         aria-label={t("copyRawCid") || (lang === "vi" ? "Sao chép CID Dữ liệu thô" : "Copy Raw CID")}
                       >
-                        {copiedKey === "rawCid" ? <CheckCircleIcon size={12} color="var(--accent-emerald)" /> : <CopyIcon size={12} />}
+                        {copiedKey === "rawCid" ? <CheckCircleIcon size={12} color="var(--accent-emerald-text)" /> : <CopyIcon size={12} />}
                       </button>
                     )}
                   </div>
@@ -333,7 +333,7 @@ export default function AssetDetailModal({ onPurchase }) {
                         title={t("modalSummaryCidLabel") || "Copy Summary CID"}
                         aria-label={t("modalSummaryCidLabel") || "Copy Summary CID"}
                       >
-                        {copiedKey === "summaryCid" ? <CheckCircleIcon size={12} color="var(--accent-emerald)" /> : <CopyIcon size={12} />}
+                        {copiedKey === "summaryCid" ? <CheckCircleIcon size={12} color="var(--accent-emerald-text)" /> : <CopyIcon size={12} />}
                       </button>
                     )}
                   </div>
@@ -617,7 +617,7 @@ export default function AssetDetailModal({ onPurchase }) {
                   title={t("copyRawHash") || (lang === "vi" ? "Sao chép mã băm SHA-256" : "Copy SHA-256 hash")}
                   aria-label={t("copyRawHash") || (lang === "vi" ? "Sao chép mã băm SHA-256" : "Copy SHA-256 hash")}
                 >
-                  {copiedKey === "hash" ? <CheckCircleIcon size={12} color="var(--accent-emerald)" /> : <CopyIcon size={12} />}
+                  {copiedKey === "hash" ? <CheckCircleIcon size={12} color="var(--accent-emerald-text)" /> : <CopyIcon size={12} />}
                 </button>
               </div>
               {selectedAssetModal.summaryDataHash && (
@@ -630,7 +630,7 @@ export default function AssetDetailModal({ onPurchase }) {
                     title={t("copySummaryHash")}
                     aria-label={t("copySummaryHash")}
                   >
-                    {copiedKey === "sumHash" ? <CheckCircleIcon size={12} color="var(--accent-emerald)" /> : <CopyIcon size={12} />}
+                    {copiedKey === "sumHash" ? <CheckCircleIcon size={12} color="var(--accent-emerald-text)" /> : <CopyIcon size={12} />}
                   </button>
                 </div>
               )}
@@ -644,7 +644,7 @@ export default function AssetDetailModal({ onPurchase }) {
                     title={t("copyMetadataHash")}
                     aria-label={t("copyMetadataHash")}
                   >
-                    {copiedKey === "metaHash" ? <CheckCircleIcon size={12} color="var(--accent-emerald)" /> : <CopyIcon size={12} />}
+                    {copiedKey === "metaHash" ? <CheckCircleIcon size={12} color="var(--accent-emerald-text)" /> : <CopyIcon size={12} />}
                   </button>
                 </div>
               )}

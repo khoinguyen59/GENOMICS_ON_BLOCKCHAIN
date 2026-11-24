@@ -2540,15 +2540,16 @@ class PublicMetadataCatalogIndex:
                 # 1. Cross-codec SHA-256 content-hash provenance & GDPR revocation index FIRST
                 #    so backfill_pairs below knows the authoritative first registrant for each SHA!
                 orig_c_cached: str | None = None
-                for field_kind, sha_val, field_cid in (
-                    ("raw", raw_sha, ds.get("rawCid")),
-                    ("summary", sum_sha, ds.get("summaryCid")),
-                    ("metadata", meta_sha, ds.get("metadataCid")),
+                for field_kind, sha_val, field_cid, field_mh in (
+                    ("raw", raw_sha, ds.get("rawCid"), raw_mh),
+                    ("summary", sum_sha, ds.get("summaryCid"), sum_mh),
+                    ("metadata", meta_sha, ds.get("metadataCid"), meta_mh),
                 ):
                     if not sha_val:
                         continue
                     if orig_c_cached is None:
                         orig_c_cached = _get_orig_creator(ds, d_id)
+                    field_mh_auth = (not field_mh) or _is_ds_authorized_for_mh(ds, d_id, owner_l, field_mh)
                     datasets_by_sha.setdefault(sha_val, []).append(
                         {
                             "dataId": d_id,
@@ -2557,9 +2558,10 @@ class PublicMetadataCatalogIndex:
                             "status": status,
                             "cid": str(field_cid or "").strip(),
                             "kind": field_kind,
+                            "mhAuthorized": field_mh_auth,
                         }
                     )
-                    if sha_val not in first_reg_details_by_sha:
+                    if field_mh_auth and sha_val not in first_reg_details_by_sha:
                         sha_prov_l = _lookup_sha_prov(sha_val)
                         erased_owner_l = _lookup_erased_sha(sha_val)
                         # A persistent GDPR erasure tombstone's canonical owner strictly overrides any
@@ -2632,6 +2634,8 @@ class PublicMetadataCatalogIndex:
                 has_revoked_auth = erased_owner_l is not None
                 has_active_auth = False
                 for ent in ds_entries:
+                    if not ent.get("mhAuthorized", True):
+                        continue
                     ent_owners = {a for a in (ent["owner"], ent["originalCreator"]) if a}
                     is_auth = (not auth_owners) or bool(ent_owners & auth_owners)
                     if not is_auth:
@@ -3508,18 +3512,36 @@ class GdprErasureReconciler:
         *,
         shas: set[str] | None = None,
         purge_provenance: bool = False,
+        max_ts_by_cid: dict[str, int] | None = None,
     ) -> None:
         """
         Delete tracked_pins / pending_uploads rows STRICTLY for the exact CIDs that were
         actually unpinned (NEVER bulk-deleting tracked_pins/pending_uploads rows by sha256
         or multihash whose CID was not unpinned — closes L3-F2 / Swarm L3-F01).
+        When `max_ts_by_cid` is supplied, rows refreshed AFTER unpinning are also preserved.
         """
         if not cids and not (purge_provenance and (multihashes or shas)):
             return
         with self._lock, _sqlite_write_tx(self._conn):
             if cids:
-                self._conn.executemany("DELETE FROM tracked_pins WHERE cid = ?", [(c,) for c in cids])
-                self._conn.executemany("DELETE FROM pending_uploads WHERE cid = ?", [(c,) for c in cids])
+                if max_ts_by_cid is not None:
+                    bounded = [(c, int(max_ts_by_cid[c])) for c in cids if c in max_ts_by_cid]
+                    unbounded = [(c,) for c in cids if c not in max_ts_by_cid]
+                    if bounded:
+                        self._conn.executemany(
+                            "DELETE FROM tracked_pins WHERE cid = ? AND pinned_at <= ?",
+                            bounded,
+                        )
+                        self._conn.executemany(
+                            "DELETE FROM pending_uploads WHERE cid = ? AND uploaded_at <= ?",
+                            bounded,
+                        )
+                    if unbounded:
+                        self._conn.executemany("DELETE FROM tracked_pins WHERE cid = ?", unbounded)
+                        self._conn.executemany("DELETE FROM pending_uploads WHERE cid = ?", unbounded)
+                else:
+                    self._conn.executemany("DELETE FROM tracked_pins WHERE cid = ?", [(c,) for c in cids])
+                    self._conn.executemany("DELETE FROM pending_uploads WHERE cid = ?", [(c,) for c in cids])
             if purge_provenance:
                 if multihashes:
                     self._conn.executemany(
@@ -3941,6 +3963,29 @@ class GdprErasureReconciler:
             elif matching:
                 first_m = matching[0]
                 canonical_owners = set(first_m[2])
+                # L3-F1 tombstone-poisoning defense: if matching[0] has paired CIDs for sha_val and
+                # EVERY paired CID belongs to another owner (active legacy dataset, upload_provenance,
+                # or earlier first_mh_owners), matching[0] fabricated the SHA claim using a stolen CID —
+                # NEVER authorize erasure OR write a gdpr_erased_shas tombstone for sha_val!
+                paired_first = first_m[3]
+                if paired_first and canonical_owners:
+                    has_owned_paired_cid = False
+                    for pc in paired_first:
+                        pc_mh = _try_canonical_multihash(pc)
+                        if not pc_mh:
+                            continue
+                        if pc_mh in other_owner_active_mhs:
+                            continue
+                        pc_prov = self._get_upload_provenance_details(pc_mh)
+                        if pc_prov is not None and pc_prov[0] and pc_prov[0] not in canonical_owners:
+                            continue
+                        pc_first = first_mh_owners.get(pc_mh)
+                        if pc_first and not (pc_first & canonical_owners):
+                            continue
+                        has_owned_paired_cid = True
+                        break
+                    if not has_owned_paired_cid:
+                        continue
                 # Cold-SQLite V2A defense: if matching[0] is revoked while ANOTHER owner holds an
                 # active dataset for sha_val, verify matching[0]'s paired CID genuinely backs sha_val in Kubo.
                 has_other_owner_active = any(
@@ -3999,39 +4044,64 @@ class GdprErasureReconciler:
                         found_mhs.add(m_s)
         return found_cids, found_mhs
 
+    def _collect_tracked_rows_for_targets(
+        self,
+        target_mhs: set[str],
+        target_shas: set[str],
+    ) -> list[tuple[str, str, int, str]]:
+        """
+        Query (cid, multihash, max_ts, sha256) rows currently in tracked_pins or pending_uploads
+        matching target_mhs or target_shas.
+        """
+        if not target_mhs and not target_shas:
+            return []
+        merged: dict[str, tuple[str, int, str]] = {}
+        order: list[str] = []
+        with self._lock:
+            for tbl, ts_col in (("tracked_pins", "pinned_at"), ("pending_uploads", "uploaded_at")):
+                for mh in target_mhs:
+                    for cid_val, mh_val, ts_val, sha_val in self._conn.execute(
+                        f"SELECT cid, multihash, {ts_col}, sha256 FROM {tbl} WHERE multihash = ?",
+                        (mh,),
+                    ).fetchall():
+                        c_s = str(cid_val or "").strip()
+                        if not c_s:
+                            continue
+                        m_s = str(mh_val or "").strip() or (_try_canonical_multihash(c_s) or "")
+                        t_i = int(ts_val or 0)
+                        s_s = _normalize_sha256_hex(sha_val)
+                        if c_s not in merged:
+                            order.append(c_s)
+                            merged[c_s] = (m_s, t_i, s_s)
+                        else:
+                            pm, pt, ps = merged[c_s]
+                            merged[c_s] = (pm or m_s, max(pt, t_i), ps or s_s)
+                for sha in target_shas:
+                    for cid_val, mh_val, ts_val, sha_val in self._conn.execute(
+                        f"SELECT cid, multihash, {ts_col}, sha256 FROM {tbl} WHERE sha256 = ?",
+                        (sha,),
+                    ).fetchall():
+                        c_s = str(cid_val or "").strip()
+                        if not c_s:
+                            continue
+                        m_s = str(mh_val or "").strip() or (_try_canonical_multihash(c_s) or "")
+                        t_i = int(ts_val or 0)
+                        s_s = _normalize_sha256_hex(sha_val) or sha
+                        if c_s not in merged:
+                            order.append(c_s)
+                            merged[c_s] = (m_s, t_i, s_s)
+                        else:
+                            pm, pt, ps = merged[c_s]
+                            merged[c_s] = (pm or m_s, max(pt, t_i), ps or s_s)
+        return [(c_s, merged[c_s][0], merged[c_s][1], merged[c_s][2]) for c_s in order]
+
     def _collect_tracked_cids_for_targets(
         self,
         target_mhs: set[str],
         target_shas: set[str],
     ) -> list[tuple[str, str]]:
         """Query (cid, multihash) pairs currently in tracked_pins or pending_uploads for target_mhs/target_shas."""
-        if not target_mhs and not target_shas:
-            return []
-        out: list[tuple[str, str]] = []
-        seen_cids: set[str] = set()
-        with self._lock:
-            for tbl in ("tracked_pins", "pending_uploads"):
-                for mh in target_mhs:
-                    for cid_val, mh_val in self._conn.execute(
-                        f"SELECT cid, multihash FROM {tbl} WHERE multihash = ?",
-                        (mh,),
-                    ).fetchall():
-                        c_s = str(cid_val or "").strip()
-                        m_s = str(mh_val or "").strip() or (_try_canonical_multihash(c_s) or "")
-                        if c_s and c_s not in seen_cids:
-                            seen_cids.add(c_s)
-                            out.append((c_s, m_s))
-                for sha in target_shas:
-                    for cid_val, mh_val in self._conn.execute(
-                        f"SELECT cid, multihash FROM {tbl} WHERE sha256 = ?",
-                        (sha,),
-                    ).fetchall():
-                        c_s = str(cid_val or "").strip()
-                        m_s = str(mh_val or "").strip() or (_try_canonical_multihash(c_s) or "")
-                        if c_s and c_s not in seen_cids:
-                            seen_cids.add(c_s)
-                            out.append((c_s, m_s))
-        return out
+        return [(c_s, m_s) for c_s, m_s, _, _ in self._collect_tracked_rows_for_targets(target_mhs, target_shas)]
 
     def _queue_provenance_purges(
         self,
@@ -4208,14 +4278,36 @@ class GdprErasureReconciler:
                 done_anchored_rows.append((cid_s, obs_ts))
                 continue
             if obs_ts <= cutoff:
-                # L3-L2 + Teamwork L3-01 TOCTOU re-check: verify row was not concurrently refreshed
-                # by an identical-CID re-upload OR newly anchored on-chain right at the 1h TTL boundary!
+                # L3-L2 + Teamwork L3-01 + Swarm L3-F03 TOCTOU re-check: verify neither cid_s NOR
+                # any same-multihash alias (CIDv0 <-> CIDv1) was concurrently refreshed by a re-upload
+                # OR newly anchored on-chain right at the 1h TTL boundary!
                 with self._lock:
                     cur_row = self._conn.execute(
                         "SELECT uploaded_at FROM pending_uploads WHERE cid = ?",
                         (cid_s,),
                     ).fetchone()
-                if cur_row is None or int(cur_row[0]) > cutoff:
+                    mh_pre_pending = (
+                        self._conn.execute(
+                            "SELECT MAX(uploaded_at) FROM pending_uploads WHERE multihash = ?",
+                            (mh_s,),
+                        ).fetchone()
+                        if mh_s
+                        else None
+                    )
+                    mh_pre_tracked = (
+                        self._conn.execute(
+                            "SELECT MAX(pinned_at) FROM tracked_pins WHERE multihash = ?",
+                            (mh_s,),
+                        ).fetchone()
+                        if mh_s
+                        else None
+                    )
+                if (
+                    cur_row is None
+                    or int(cur_row[0]) > cutoff
+                    or (mh_pre_pending is not None and mh_pre_pending[0] is not None and int(mh_pre_pending[0]) > cutoff)
+                    or (mh_pre_tracked is not None and mh_pre_tracked[0] is not None and int(mh_pre_tracked[0]) > cutoff)
+                ):
                     continue
                 # Swarm L3-F03: Never unpin a multihash while an upload or rollback guard is in-flight!
                 if mh_s and self.upload_limiter is not None and self.upload_limiter.has_inflight_mh(mh_s):
@@ -4257,9 +4349,27 @@ class GdprErasureReconciler:
                             "SELECT pinned_at FROM tracked_pins WHERE cid = ?",
                             (cid_s,),
                         ).fetchone()
+                        post_mh_pending = (
+                            self._conn.execute(
+                                "SELECT MAX(uploaded_at) FROM pending_uploads WHERE multihash = ?",
+                                (mh_s,),
+                            ).fetchone()
+                            if mh_s
+                            else None
+                        )
+                        post_mh_tracked = (
+                            self._conn.execute(
+                                "SELECT MAX(pinned_at) FROM tracked_pins WHERE multihash = ?",
+                                (mh_s,),
+                            ).fetchone()
+                            if mh_s
+                            else None
+                        )
                     concurrently_refreshed = (
                         (post_pending is not None and int(post_pending[0]) > cutoff)
                         or (post_tracked is not None and int(post_tracked[0]) > cutoff)
+                        or (post_mh_pending is not None and post_mh_pending[0] is not None and int(post_mh_pending[0]) > cutoff)
+                        or (post_mh_tracked is not None and post_mh_tracked[0] is not None and int(post_mh_tracked[0]) > cutoff)
                     )
                     concurrently_inflight = bool(
                         mh_s and self.upload_limiter is not None and self.upload_limiter.has_inflight_mh(mh_s)
@@ -4443,6 +4553,10 @@ class GdprErasureReconciler:
                 self._record_erased_shas(target_shas, revoked_creator_l or revoked_owner_l)
                 if self.catalog_index is not None:
                     self.catalog_index.invalidate()
+                # Reset any pre-tombstone recursive pin cache populated during conflict verification
+                # so the alias unpin pass below ALWAYS lists Kubo pins strictly AFTER the tombstone!
+                pins_cache_box["loaded"] = False
+                pins_cache_box["val"] = None
                 other_owner_active_mhs = sha_ctx.get("other_owner_active_mhs") or set()
                 first_mh_owners = sha_ctx.get("first_mh_owners") or {}
                 canonical_owners_by_sha = sha_ctx.get("canonical_owners_by_sha") or {}
@@ -4542,7 +4656,12 @@ class GdprErasureReconciler:
                         cids_to_unpin.append(pinned_c)
 
             valid_unshared_cids = len(cids_to_unpin)
+            pre_unpin_ts_by_cid: dict[str, int] = {}
+            if target_mhs or target_shas:
+                for rc, _rmh, rts, _rsha in self._collect_tracked_rows_for_targets(target_mhs, target_shas):
+                    pre_unpin_ts_by_cid[rc] = max(pre_unpin_ts_by_cid.get(rc, 0), rts)
             unpinned_ok_cids: list[str] = []
+            unpinned_max_ts: dict[str, int] = {}
             unpin_failed = False
             for c in cids_to_unpin:
                 try:
@@ -4551,23 +4670,30 @@ class GdprErasureReconciler:
                         self.unpinned_cids_total += 1
                         self._gc_pending = True
                     unpinned_ok_cids.append(c)
+                    unpinned_max_ts[c] = pre_unpin_ts_by_cid.get(c, 0)
                 except Exception:
                     unpin_failed = True
             # L3-F2 / Swarm L3-F01 post-unpin transition-window re-check: catch & unpin any pin
-            # committed to tracked_pins/pending_uploads during the transition window before deleting rows!
+            # committed to tracked_pins/pending_uploads during the transition window (including
+            # legacy/partial-SHA CIDs whose sha256 is absent from target_shas or whose timestamp
+            # advanced during the unpin loop) before removing rows!
             if not unpin_failed and (target_mhs or target_shas):
-                late_rows = self._collect_tracked_cids_for_targets(target_mhs, target_shas)
-                late_cids: list[str] = []
-                for lc, lmh in late_rows:
+                late_rows = self._collect_tracked_rows_for_targets(target_mhs, target_shas)
+                late_cids: list[tuple[str, int]] = []
+                seen_late: set[str] = set()
+                for lc, lmh, lts, lsha in late_rows:
                     if lmh and lmh in protected_mhs:
                         continue
                     try:
                         validate_cid(lc)
                     except ValueError:
                         continue
-                    if (lc not in unpinned_ok_cids or not target_shas) and lc not in late_cids:
-                        late_cids.append(lc)
-                for lc in late_cids:
+                    was_refreshed = lts > pre_unpin_ts_by_cid.get(lc, -1)
+                    unprotected_by_sha = (not lsha) or (lsha not in target_shas)
+                    if (lc not in unpinned_ok_cids or was_refreshed or unprotected_by_sha) and lc not in seen_late:
+                        seen_late.add(lc)
+                        late_cids.append((lc, lts))
+                for lc, lts in late_cids:
                     try:
                         if self.kubo_adapter.unpin_cid(lc):
                             unpinned_now.append(lc)
@@ -4575,6 +4701,7 @@ class GdprErasureReconciler:
                             self._gc_pending = True
                         if lc not in unpinned_ok_cids:
                             unpinned_ok_cids.append(lc)
+                        unpinned_max_ts[lc] = max(unpinned_max_ts.get(lc, 0), lts)
                         lmh = _try_canonical_multihash(lc)
                         if lmh:
                             target_mhs.add(lmh)
@@ -4585,10 +4712,15 @@ class GdprErasureReconciler:
                 continue
             if unpinned_ok_cids or target_mhs:
                 # L3-L1 + L3-F2 / Swarm L3-F01: delete tracked_pins/pending_uploads ONLY for exact CIDs
-                # that were actually unpinned (NEVER bulk-deleting rows for un-unpinned CIDs), and keep
-                # upload_provenance intact until AFTER Kubo repo/gc physically purges unpinned blocks!
+                # that were actually unpinned up through unpinned_max_ts (NEVER bulk-deleting rows for
+                # un-unpinned or subsequently refreshed CIDs), and keep upload_provenance intact until
+                # AFTER Kubo repo/gc physically purges unpinned blocks!
                 if unpinned_ok_cids:
-                    self._remove_tracked_pins(unpinned_ok_cids, purge_provenance=False)
+                    self._remove_tracked_pins(
+                        unpinned_ok_cids,
+                        purge_provenance=False,
+                        max_ts_by_cid=unpinned_max_ts,
+                    )
                 if target_mhs:
                     self._queue_provenance_purges(target_mhs)
             if valid_unshared_cids > 0:
@@ -5426,6 +5558,7 @@ def create_gateway_server(
                     finally:
                         _drain_and_rollback_deferred()
                         upload_limiter.release_rollback_guard(res_token)
+                        upload_limiter.release(res_token)
                     with metrics_lock:
                         metrics["requestsDenied"] += 1
                     self._send_json(429, {"error": "Upload nonce bucket saturated; retry shortly."})
@@ -5441,6 +5574,7 @@ def create_gateway_server(
                     finally:
                         _drain_and_rollback_deferred()
                         upload_limiter.release_rollback_guard(res_token)
+                        upload_limiter.release(res_token)
                     with metrics_lock:
                         metrics["requestsDenied"] += 1
                     self._send_json(401, {"error": "Nonce already used (replay rejected)."})
@@ -5456,6 +5590,7 @@ def create_gateway_server(
                     except Exception as exc:
                         _drain_and_rollback_deferred()
                         upload_limiter.release_rollback_guard(res_token)
+                        upload_limiter.release(res_token)
                         with metrics_lock:
                             metrics["requestsDenied"] += 1
                         self._send_json(502, {"error": f"Private Kubo pin failed: {exc}"})
@@ -5466,6 +5601,7 @@ def create_gateway_server(
                             _rollback_kubo_block(pin_res.get("cid"))
                         _drain_and_rollback_deferred()
                         upload_limiter.release_rollback_guard(res_token)
+                        upload_limiter.release(res_token)
                         with metrics_lock:
                             metrics["requestsDenied"] += 1
                         self._send_json(502, {"error": "Kubo CID mismatch between only-hash precheck and pin."})
@@ -5490,6 +5626,7 @@ def create_gateway_server(
                             finally:
                                 _drain_and_rollback_deferred()
                                 upload_limiter.release_rollback_guard(res_token)
+                                upload_limiter.release(res_token)
                             self._send_json(502, {"error": f"Private Kubo pin failed: {exc}"})
                             return
 

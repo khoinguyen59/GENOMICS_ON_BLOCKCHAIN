@@ -24,13 +24,13 @@ export default function Toast() {
       aria-live="polite"
     >
       {toast.type === "error" ? (
-        <AlertTriangleIcon size={14} color="#ef4444" />
+        <AlertTriangleIcon size={14} color="var(--accent-rose-text)" />
       ) : toast.type === "warning" ? (
         <AlertTriangleIcon size={14} color="var(--accent-amber-text)" />
       ) : toast.type === "info" ? (
-        <RefreshSpinIcon size={14} color="#0284c7" className="spin" />
+        <RefreshSpinIcon size={14} color="var(--accent-cyan)" className="spin" />
       ) : (
-        <CheckCircleIcon size={14} color="#10b981" />
+        <CheckCircleIcon size={14} color="var(--accent-emerald-text)" />
       )}
       <span className="terminal-toast-msg">{toast.message}</span>
       <button

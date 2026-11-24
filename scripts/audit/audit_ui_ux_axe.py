@@ -774,8 +774,25 @@ async def run_audit():
                     if (checkMode === 'svg') {
                         const svg = el.querySelector('svg');
                         if (svg) {
-                            const ss = getComputedStyle(svg);
-                            fgRaw = parseRgba(ss.stroke !== 'none' ? ss.stroke : (ss.fill !== 'none' ? ss.fill : ss.color)) || fgRaw;
+                            const pickInk = (node) => {
+                                const ns = getComputedStyle(node);
+                                for (const prop of ['stroke', 'fill']) {
+                                    const val = ns[prop];
+                                    if (val && val !== 'none' && !val.startsWith('url(')) {
+                                        const parsed = parseRgba(val);
+                                        if (parsed && parsed.a > 0) return parsed;
+                                    }
+                                }
+                                return null;
+                            };
+                            let ink = pickInk(svg);
+                            if (!ink) {
+                                for (const sh of svg.querySelectorAll('path, line, circle, rect, polyline, polygon')) {
+                                    ink = pickInk(sh);
+                                    if (ink) break;
+                                }
+                            }
+                            fgRaw = ink || parseRgba(getComputedStyle(svg).color) || fgRaw;
                         }
                     } else if (checkMode === 'border') {
                         fgRaw = parseRgba(st.borderTopColor || st.borderColor);

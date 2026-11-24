@@ -23,28 +23,28 @@ Captured directly from Chromium during **Gate 11 (Online Axe-Core WCAG 2.2 AA, 3
 
 | # | Evidence File (`live_screenshots/`) | Size | SHA-256 Prefix | Verified Viewport / Theme / Surface |
 | :-: | :--- | ---: | :--- | :--- |
-| 01 | [`desktop_light_vi_researcher.png`](live_screenshots/desktop_light_vi_researcher.png) | 716,331 B | `937974e8964a957a` | Desktop `1440x900` Light VI — Researcher Marketplace & 13 live cohorts |
-| 02 | [`desktop_dark_vi_researcher.png`](live_screenshots/desktop_dark_vi_researcher.png) | 725,774 B | `0ed0b7920c1ac1a3` | Desktop `1440x900` Dark VI — Researcher Marketplace |
+| 01 | [`desktop_light_vi_researcher.png`](live_screenshots/desktop_light_vi_researcher.png) | 719,692 B | `537b4cbb6831846a` | Desktop `1440x900` Light VI — Researcher Marketplace & 13 live cohorts |
+| 02 | [`desktop_dark_vi_researcher.png`](live_screenshots/desktop_dark_vi_researcher.png) | 726,495 B | `58fdd29596579db0` | Desktop `1440x900` Dark VI — Researcher Marketplace |
 | 03 | [`desktop_light_vi_table_view.png`](live_screenshots/desktop_light_vi_table_view.png) | 506,869 B | `544b661445b7ec4f` | Desktop `1440x900` Light VI — Tabular Catalog & Dynamic EIP-2981 Royalty |
-| 04 | [`desktop_light_vi_activity_view.png`](live_screenshots/desktop_light_vi_activity_view.png) | 494,525 B | `b98239a80b5426aa` | Desktop `1440x900` Light VI — Live On-Chain Activity Feed |
-| 05 | [`desktop_light_vi_modal.png`](live_screenshots/desktop_light_vi_modal.png) | 448,768 B | `93023fae4ea6cedf` | Desktop `1440x900` Light VI — Asset Detail Modal (3 CIDs, 3 SHA-256, Escrow) |
-| 06 | [`desktop_light_vi_licensed_view.png`](live_screenshots/desktop_light_vi_licensed_view.png) | 131,325 B | `59d3db63e803ca6b` | Desktop `1440x900` Light VI — Licensed Datasets & In-Memory Decryption View |
-| 07 | [`desktop_light_vi_provider_mint.png`](live_screenshots/desktop_light_vi_provider_mint.png) | 206,723 B | `6243d4e033a65262` | Desktop `1440x900` Light VI — Donor Drag-Drop Encryption & Minting Studio |
-| 08 | [`desktop_light_vi_provider_vault.png`](live_screenshots/desktop_light_vi_provider_vault.png) | 146,404 B | `097f38de5d62d498` | Desktop `1440x900` Light VI — Patient Sovereign Vault & ZK Bounty Claim |
-| 09 | [`desktop_dark_vi_provider_vault.png`](live_screenshots/desktop_dark_vi_provider_vault.png) | 162,695 B | `dfaa5a47a70862c2` | Desktop `1440x900` Dark VI — Patient Sovereign Vault |
-| 10 | [`desktop_light_vi_admin.png`](live_screenshots/desktop_light_vi_admin.png) | 132,476 B | `a5e0c6826e552790` | Desktop `1440x900` Light VI — Protocol Admin & Timelock Governance Portal |
-| 11 | [`desktop_dark_vi_admin.png`](live_screenshots/desktop_dark_vi_admin.png) | 167,086 B | `7d60cc65d7adbb17` | Desktop `1440x900` Dark VI — Protocol Admin Portal |
-| 12 | [`desktop_light_en_admin.png`](live_screenshots/desktop_light_en_admin.png) | 129,102 B | `e2644c5ea0533a41` | Desktop `1440x900` Light EN — Bilingual Admin Governance Parity |
-| 13 | [`desktop_dark_en_admin.png`](live_screenshots/desktop_dark_en_admin.png) | 163,495 B | `ad5ca9d94eff1992` | Desktop `1440x900` Dark EN — Bilingual Admin Governance Parity |
-| 14 | [`desktop_light_ipfs_modal.png`](live_screenshots/desktop_light_ipfs_modal.png) | 151,062 B | `9de6312ba7be8762` | Desktop `1440x900` Light — Private IPFS Gateway & Pinata/Kubo Settings Modal |
-| 15 | [`desktop_dark_ipfs_modal.png`](live_screenshots/desktop_dark_ipfs_modal.png) | 172,849 B | `9b6bac099119863c` | Desktop `1440x900` Dark — Private IPFS Gateway Settings Modal |
-| 16 | [`tablet_1024x768_light_vi_researcher.png`](live_screenshots/tablet_1024x768_light_vi_researcher.png) | 524,560 B | `de5f6c08060a8c78` | Tablet `1024x768` Light VI — Responsive Researcher Marketplace |
-| 17 | [`tablet_1024x768_light_vi_admin.png`](live_screenshots/tablet_1024x768_light_vi_admin.png) | 79,186 B | `7db941a1e438e18c` | Tablet `1024x768` Light VI — Responsive Admin Portal |
-| 18 | [`mobile_light_vi_researcher.png`](live_screenshots/mobile_light_vi_researcher.png) | 168,205 B | `e32afd9f21ab5844` | Mobile `390x844` Light VI — Responsive Researcher Marketplace (`0px` overflow) |
-| 19 | [`mobile_light_vi_modal.png`](live_screenshots/mobile_light_vi_modal.png) | 182,568 B | `1a6b0c5224411b89` | Mobile `390x844` Light VI — Responsive Asset Detail Modal (`>= 24x24px` targets) |
+| 04 | [`desktop_light_vi_activity_view.png`](live_screenshots/desktop_light_vi_activity_view.png) | 494,609 B | `04d8a012f1c09db0` | Desktop `1440x900` Light VI — Live On-Chain Activity Feed |
+| 05 | [`desktop_light_vi_modal.png`](live_screenshots/desktop_light_vi_modal.png) | 448,705 B | `b8b6653d79468726` | Desktop `1440x900` Light VI — Asset Detail Modal (3 CIDs, 3 SHA-256, Escrow) |
+| 06 | [`desktop_light_vi_licensed_view.png`](live_screenshots/desktop_light_vi_licensed_view.png) | 132,264 B | `9e16ddd299e3080b` | Desktop `1440x900` Light VI — Licensed Datasets & In-Memory Decryption View |
+| 07 | [`desktop_light_vi_provider_mint.png`](live_screenshots/desktop_light_vi_provider_mint.png) | 206,723 B | `150055a82c20810e` | Desktop `1440x900` Light VI — Donor Drag-Drop Encryption & Minting Studio |
+| 08 | [`desktop_light_vi_provider_vault.png`](live_screenshots/desktop_light_vi_provider_vault.png) | 146,394 B | `f4ec3f686c026ab1` | Desktop `1440x900` Light VI — Patient Sovereign Vault & ZK Bounty Claim |
+| 09 | [`desktop_dark_vi_provider_vault.png`](live_screenshots/desktop_dark_vi_provider_vault.png) | 162,698 B | `f0e79bec5bbd9acc` | Desktop `1440x900` Dark VI — Patient Sovereign Vault |
+| 10 | [`desktop_light_vi_admin.png`](live_screenshots/desktop_light_vi_admin.png) | 132,476 B | `fd933b744a8a462c` | Desktop `1440x900` Light VI — Protocol Admin & Timelock Governance Portal |
+| 11 | [`desktop_dark_vi_admin.png`](live_screenshots/desktop_dark_vi_admin.png) | 163,253 B | `1183c21c689d7acb` | Desktop `1440x900` Dark VI — Protocol Admin Portal |
+| 12 | [`desktop_light_en_admin.png`](live_screenshots/desktop_light_en_admin.png) | 129,102 B | `35cc8dbea12d2ff7` | Desktop `1440x900` Light EN — Bilingual Admin Governance Parity |
+| 13 | [`desktop_dark_en_admin.png`](live_screenshots/desktop_dark_en_admin.png) | 159,932 B | `3d0292ff25891997` | Desktop `1440x900` Dark EN — Bilingual Admin Governance Parity |
+| 14 | [`desktop_light_ipfs_modal.png`](live_screenshots/desktop_light_ipfs_modal.png) | 151,057 B | `707b24c30cab5ae8` | Desktop `1440x900` Light — Private IPFS Gateway & Pinata/Kubo Settings Modal |
+| 15 | [`desktop_dark_ipfs_modal.png`](live_screenshots/desktop_dark_ipfs_modal.png) | 172,785 B | `9418853790747da2` | Desktop `1440x900` Dark — Private IPFS Gateway Settings Modal |
+| 16 | [`tablet_1024x768_light_vi_researcher.png`](live_screenshots/tablet_1024x768_light_vi_researcher.png) | 532,133 B | `0263fe3ac93816a9` | Tablet `1024x768` Light VI — Responsive Researcher Marketplace |
+| 17 | [`tablet_1024x768_light_vi_admin.png`](live_screenshots/tablet_1024x768_light_vi_admin.png) | 79,182 B | `7386860598be6c49` | Tablet `1024x768` Light VI — Responsive Admin Portal |
+| 18 | [`mobile_light_vi_researcher.png`](live_screenshots/mobile_light_vi_researcher.png) | 174,066 B | `dc956f3c6dcb180d` | Mobile `390x844` Light VI — Responsive Researcher Marketplace (`0px` overflow) |
+| 19 | [`mobile_light_vi_modal.png`](live_screenshots/mobile_light_vi_modal.png) | 182,262 B | `bfdaf3884ba29c76` | Mobile `390x844` Light VI — Responsive Asset Detail Modal (`>= 24x24px` targets) |
 | 20 | [`mobile_light_vi_provider_mint.png`](live_screenshots/mobile_light_vi_provider_mint.png) | 110,355 B | `e8be05cb9719c501` | Mobile `390x844` Light VI — Responsive Donor Minting Studio |
 | 21 | [`mobile_light_vi_provider_vault.png`](live_screenshots/mobile_light_vi_provider_vault.png) | 52,360 B | `325fa7f34f8ceb8e` | Mobile `390x844` Light VI — Responsive Sovereign Vault |
-| 22 | [`mobile_dark_vi_admin.png`](live_screenshots/mobile_dark_vi_admin.png) | 61,413 B | `6bbb187f05a6f5b5` | Mobile `390x844` Dark VI — Responsive Admin Portal |
+| 22 | [`mobile_dark_vi_admin.png`](live_screenshots/mobile_dark_vi_admin.png) | 61,645 B | `934732bc2339b987` | Mobile `390x844` Dark VI — Responsive Admin Portal |
 
 ---
 

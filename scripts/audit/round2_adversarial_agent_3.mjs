@@ -360,11 +360,19 @@ async function runAdversarialAudit() {
     console.log(`${idx + 1}. [${d.id}] [${d.severity}] ${d.title}`);
   });
 
-  return defectCatalog;
+  return { defects: defectCatalog, passedTests, totalTests };
 }
 
 runAdversarialAudit()
-  .then((defects) => process.exit(defects.length > 0 ? 1 : 0))
+  .then(({ defects, passedTests, totalTests }) => {
+    if (defects.length > 0 || totalTests === 0 || passedTests !== totalTests) {
+      console.error(
+        `[FAIL] Agent 3 exit check failed: defects=${defects.length}, passedTests=${passedTests}/${totalTests}`
+      );
+      process.exit(1);
+    }
+    process.exit(0);
+  })
   .catch((err) => {
     console.error("FATAL SUITE ERROR:", err);
     process.exit(1);

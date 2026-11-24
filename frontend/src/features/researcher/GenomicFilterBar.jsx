@@ -137,30 +137,6 @@ export default function GenomicFilterBar({ children, onPurchase }) {
     setOpenSections((prev) => ({ ...prev, [sectionKey]: !prev[sectionKey] }));
   };
 
-  // Keyboard shortcut listener: press '/' to focus search input, 'Escape' to blur
-  useEffect(() => {
-    const handleKeyDown = (e) => {
-      if (document.querySelector('[role="dialog"][aria-modal="true"]')) return;
-      const activeTag = document.activeElement?.tagName;
-      if (
-        e.key === "/" &&
-        !["INPUT", "TEXTAREA", "SELECT"].includes(activeTag) &&
-        !document.activeElement?.isContentEditable
-      ) {
-        e.preventDefault();
-        const searchInput = document.getElementById("input-filter-search");
-        if (searchInput) {
-          searchInput.focus();
-          searchInput.select();
-        }
-      } else if (e.key === "Escape" && document.activeElement?.id === "input-filter-search") {
-        document.activeElement.blur();
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, []);
-
   // Sync local min/max when context resets
   useEffect(() => {
     setLocalMin(minPrice || "");

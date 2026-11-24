@@ -138,6 +138,15 @@ async def audit_scenario(page, axe_js: str, scenario_tag: str, save_shot: bool):
                 if (!m) return null;
                 return { r: +m[1], g: +m[2], b: +m[3], a: m[4] === undefined ? 1 : +m[4] };
             };
+            const parseAllRgba = (str) => {
+                const out = [];
+                const re = /rgba?\\((\\d+(?:\\.\\d+)?),\\s*(\\d+(?:\\.\\d+)?),\\s*(\\d+(?:\\.\\d+)?)(?:,\\s*(\\d+(?:\\.\\d+)?))?\\)/g;
+                let m;
+                while ((m = re.exec(String(str || ''))) !== null) {
+                    out.push({ r: +m[1], g: +m[2], b: +m[3], a: m[4] === undefined ? 1 : +m[4] });
+                }
+                return out;
+            };
             const blend = (fg, bg) => {
                 const a = fg.a;
                 return {
@@ -154,24 +163,51 @@ async def audit_scenario(page, axe_js: str, scenario_tag: str, save_shot: bool):
                 });
                 return 0.2126 * ch[0] + 0.7152 * ch[1] + 0.0722 * ch[2];
             };
-            const getBg = (el) => {
-                const layers = [];
+            const getBgCandidates = (el) => {
+                const layerGroups = [];
                 let cur = el;
                 while (cur && cur.nodeType === 1) {
                     const st = getComputedStyle(cur);
-                    if (st.backgroundImage && st.backgroundImage.includes('gradient')) return null;
+                    const hasGrad = st.backgroundImage && st.backgroundImage.includes('gradient');
+                    const gradStops = hasGrad ? parseAllRgba(st.backgroundImage).filter(c => c.a >= 0.5) : [];
                     const bg = parseRgba(st.backgroundColor);
-                    if (bg && bg.a > 0) layers.push(bg);
-                    if (bg && bg.a >= 0.999) break;
+                    if (gradStops.length > 0) {
+                        layerGroups.push(gradStops);
+                        if (gradStops.every(c => c.a >= 0.999)) break;
+                    }
+                    if (bg && bg.a > 0) {
+                        layerGroups.push([bg]);
+                        if (bg.a >= 0.999) break;
+                    }
                     cur = cur.parentElement;
                 }
                 const rootBg = parseRgba(getComputedStyle(document.body).backgroundColor) || { r: 255, g: 255, b: 255, a: 1 };
-                let acc = rootBg.a > 0.99 ? rootBg : { r: 255, g: 255, b: 255, a: 1 };
-                for (let i = layers.length - 1; i >= 0; i--) acc = blend(layers[i], acc);
-                return acc;
+                let candidates = [rootBg.a > 0.99 ? rootBg : { r: 255, g: 255, b: 255, a: 1 }];
+                for (let i = layerGroups.length - 1; i >= 0; i--) {
+                    const next = [];
+                    for (const base of candidates) {
+                        for (const layer of layerGroups[i]) {
+                            next.push(blend(layer, base));
+                        }
+                    }
+                    candidates = next.slice(0, 8);
+                }
+                return candidates;
             };
             const failures = [];
-            for (const el of document.querySelectorAll('button:not(:disabled), .status-badge-chip, .btn-terminal:not(:disabled)')) {
+            const contrastSelectors = [
+                'button:not(:disabled)',
+                '.status-badge-chip',
+                '.btn-terminal:not(:disabled)',
+                '.opensea-trait-type',
+                '.nft-gene-badge .gene-name',
+                '.spotlight-floating-badge',
+                '.opensea-full-hash',
+                '.os2-search-kbd',
+                '.filter-count-badge',
+                '.subnav-tab-item.active'
+            ].join(', ');
+            for (const el of document.querySelectorAll(contrastSelectors)) {
                 if (el.closest('.os2-featured-strip-card') || el.classList.contains('os2-brand-btn')) continue;
                 const rect = el.getBoundingClientRect();
                 if (rect.width <= 0 || rect.height <= 0) continue;
@@ -180,17 +216,21 @@ async def audit_scenario(page, axe_js: str, scenario_tag: str, save_shot: bool):
                 if (st.webkitTextFillColor === 'rgba(0, 0, 0, 0)') continue;
                 const txt = (el.innerText || '').trim();
                 if (!txt) continue;
-                const bg = getBg(el);
+                const bgCandidates = getBgCandidates(el);
                 const fgRaw = parseRgba(st.color);
-                if (!bg || !fgRaw || fgRaw.a === 0) continue;
-                const fg = fgRaw.a < 1 ? blend(fgRaw, bg) : fgRaw;
-                const l1 = lum(fg), l2 = lum(bg);
-                const ratio = (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
+                if (!bgCandidates.length || !fgRaw || fgRaw.a === 0) continue;
+                let worstRatio = Infinity;
+                for (const bg of bgCandidates) {
+                    const fg = fgRaw.a < 1 ? blend(fgRaw, bg) : fgRaw;
+                    const l1 = lum(fg), l2 = lum(bg);
+                    const ratio = (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
+                    if (ratio < worstRatio) worstRatio = ratio;
+                }
                 const px = parseFloat(st.fontSize) || 14;
                 const bold = (parseInt(st.fontWeight, 10) || 400) >= 700;
                 const minRatio = (px >= 24 || (bold && px >= 18.67)) ? 3.0 : 4.5;
-                if (ratio < minRatio) {
-                    failures.push({ tag: el.tagName, id: el.id || '', cls: String(el.className || '').slice(0, 60), text: txt.slice(0, 40), ratio: Number(ratio.toFixed(2)), minRatio });
+                if (worstRatio < minRatio) {
+                    failures.push({ tag: el.tagName, id: el.id || '', cls: String(el.className || '').slice(0, 60), text: txt.slice(0, 40), ratio: Number(worstRatio.toFixed(2)), minRatio });
                 }
             }
             return failures;
@@ -477,8 +517,8 @@ async def run_audit():
         await ensure_lang(page, "vi")
         lang_vi_back = await page.evaluate("() => document.documentElement.lang")
 
-        # 1b. Verify .os2-search-clear meets WCAG 2.2 SC 2.5.8 (>= 24x24px) when rendered
-        search_clear_diag = {"rendered": False, "width": 0.0, "height": 0.0, "meets24px": False}
+        # 1b. Verify .os2-search-clear meets WCAG 2.2 SC 2.5.8 (>= 24x24px) & has aria-label when rendered
+        search_clear_diag = {"rendered": False, "width": 0.0, "height": 0.0, "meets24px": False, "ariaLabel": ""}
         search_inp = page.locator(".os2-search-input").first
         if await search_inp.count() > 0 and await search_inp.is_visible():
             await search_inp.fill("ALDH2")
@@ -486,12 +526,14 @@ async def run_audit():
             clear_btn = page.locator(".os2-search-clear").first
             if await clear_btn.count() > 0 and await clear_btn.is_visible():
                 box = await clear_btn.bounding_box()
+                aria_lbl = (await clear_btn.get_attribute("aria-label")) or ""
                 if box:
                     search_clear_diag = {
                         "rendered": True,
                         "width": round(box["width"], 1),
                         "height": round(box["height"], 1),
                         "meets24px": box["width"] >= 23.5 and box["height"] >= 23.5,
+                        "ariaLabel": aria_lbl,
                     }
                 await clear_btn.click()
                 await page.wait_for_timeout(150)
@@ -518,19 +560,41 @@ async def run_audit():
             }"""
         )
 
+        # 1d. Verify global '/' hotkey focuses #nav-search-input across Researcher, Donor & Admin portals
+        slash_results = {}
+        for role_key, view_key in (("researcher", "researcher"), ("donor", "provider_mint"), ("admin", "admin")):
+            await switch_view(page, view_key)
+            await page.evaluate("() => { if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); }")
+            await page.wait_for_timeout(100)
+            await page.keyboard.press("/")
+            await page.wait_for_timeout(100)
+            focused_id = await page.evaluate("() => document.activeElement ? document.activeElement.id : ''")
+            await page.keyboard.press("Escape")
+            await page.wait_for_timeout(80)
+            blurred_ok = await page.evaluate("() => !document.activeElement || document.activeElement.id !== 'nav-search-input'")
+            slash_results[role_key] = (focused_id == "nav-search-input") and bool(blurred_ok)
+        slash_hotkey_diag = {
+            **slash_results,
+            "passed": all(slash_results.values()),
+        }
+
         wcag_live_checks = {
             "htmlLangSync": {"vi": lang_vi, "en": lang_en, "viBack": lang_vi_back, "passed": lang_vi == "vi" and lang_en == "en" and lang_vi_back == "vi"},
             "searchClearTargetSize": search_clear_diag,
             "keyboardFocusVisible": focus_visible_diag,
+            "globalSlashHotkey": slash_hotkey_diag,
         }
         if not wcag_live_checks["htmlLangSync"]["passed"]:
             print(f"    [FAIL LIVE WCAG] Dynamic <html lang> sync failed: {wcag_live_checks['htmlLangSync']}")
             blocking_failures += 1
-        if not (search_clear_diag["rendered"] and search_clear_diag["meets24px"]):
-            print(f"    [FAIL LIVE WCAG] .os2-search-clear missing or < 24x24px: {search_clear_diag}")
+        if not (search_clear_diag["rendered"] and search_clear_diag["meets24px"] and bool(search_clear_diag.get("ariaLabel"))):
+            print(f"    [FAIL LIVE WCAG] .os2-search-clear missing, < 24x24px, or missing aria-label: {search_clear_diag}")
             blocking_failures += 1
         if not focus_visible_diag.get("passed"):
             print(f"    [FAIL LIVE WCAG] Keyboard :focus-visible outline check failed: {focus_visible_diag}")
+            blocking_failures += 1
+        if not slash_hotkey_diag.get("passed"):
+            print(f"    [FAIL LIVE WCAG] Global '/' hotkey failed across portals: {slash_hotkey_diag}")
             blocking_failures += 1
 
         await switch_view(page, "admin")

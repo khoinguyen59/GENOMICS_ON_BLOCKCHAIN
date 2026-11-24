@@ -355,9 +355,18 @@ class UploadRateLimiter:
         self._lock = threading.Lock()
         self._conn = _open_sqlite_db(self._db_path)
         self._inflight: dict[str, dict] = {}
+        self._inflight_mh_claims: dict[str, tuple[str, set[str]]] = {}
         self._res_seq = 0
         self._quota_epoch = 0
         with self._lock, _sqlite_write_tx(self._conn):
+            self._conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS gdpr_meta (
+                    k TEXT PRIMARY KEY,
+                    v TEXT NOT NULL
+                )
+                """
+            )
             self._conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS upload_quota_events (
@@ -622,6 +631,109 @@ class UploadRateLimiter:
         """Run an authoritative final SQLite + Kubo quota verification before committing a chunked upload."""
         return self.add_streamed_bytes(token, 0, now_ts, force_check=True)
 
+    def _release_mh_claim_locked(self, token: str | None) -> None:
+        if not token:
+            return
+        empty_mhs = []
+        for mh_key, (owner_l, tokens) in self._inflight_mh_claims.items():
+            if token in tokens:
+                tokens.discard(token)
+                if not tokens:
+                    empty_mhs.append(mh_key)
+        for mh_key in empty_mhs:
+            self._inflight_mh_claims.pop(mh_key, None)
+
+    def mark_gc_pending(self) -> None:
+        """Persist gc_pending='1' in shared SQLite gdpr_meta so reconciler sweeps any rolled-back blocks."""
+        with self._lock, _sqlite_write_tx(self._conn):
+            self._conn.execute(
+                "INSERT INTO gdpr_meta(k, v) VALUES('gc_pending', '1') ON CONFLICT(k) DO UPDATE SET v = '1'"
+            )
+
+    def try_claim_upload_provenance(
+        self,
+        token: str,
+        multihash: str,
+        caller_address: str,
+        *,
+        first_info: tuple[int, str, str] | None = None,
+        now_ts: int,
+    ) -> tuple[bool, int, str, str | None, set[str]]:
+        """
+        Atomically verify on-chain + SQLite upload provenance and acquire an in-flight per-multihash
+        claim BEFORE writing any block to Kubo. Prevents dual-200 concurrent duplicate-CID races
+        and writes zero unpinned blocks on 403 rejection.
+        Returns (allowed, http_status, reason, canonical_prov, allowed_owners).
+        """
+        mh = str(multihash or "").strip()
+        caller_l = str(caller_address or "").strip().lower()
+        if not mh:
+            return True, 200, "ok", None, set()
+
+        canonical_prov: str | None = None
+        allowed_owners: set[str] = set()
+        if first_info is not None:
+            if len(first_info) >= 3:
+                earliest_owner = str(first_info[1] or "").strip().lower()
+                earliest_creator = str(first_info[2] or "").strip().lower()
+            else:
+                earliest_owner = str(first_info[1] or "").strip().lower()
+                earliest_creator = ""
+            canonical_prov = earliest_creator or earliest_owner or None
+            allowed_owners = {a for a in (earliest_owner, earliest_creator) if a}
+
+        with self._lock:
+            if canonical_prov:
+                with _sqlite_write_tx(self._conn):
+                    self._conn.execute(
+                        """
+                        INSERT OR IGNORE INTO upload_provenance(multihash, uploader, created_at)
+                        VALUES(?, ?, ?)
+                        """,
+                        (mh, canonical_prov, float(now_ts)),
+                    )
+            row = self._conn.execute(
+                "SELECT uploader FROM upload_provenance WHERE multihash = ?",
+                (mh,),
+            ).fetchone()
+            existing_prov = str(row[0]).strip().lower() if row and row[0] else None
+
+            if first_info is not None:
+                eff_allowed = {a for a in (existing_prov, *allowed_owners) if a}
+                if eff_allowed and caller_l not in eff_allowed:
+                    return (
+                        False,
+                        403,
+                        "CID multihash is already anchored on-chain by another dataset owner (post-anchor provenance hijack rejected).",
+                        canonical_prov,
+                        eff_allowed,
+                    )
+            elif existing_prov and caller_l != existing_prov:
+                return (
+                    False,
+                    403,
+                    "CID multihash upload provenance already belongs to another authenticated uploader.",
+                    existing_prov,
+                    {existing_prov},
+                )
+
+            existing_claim = self._inflight_mh_claims.get(mh)
+            if existing_claim is not None:
+                claim_owner, claim_tokens = existing_claim
+                if claim_owner != caller_l:
+                    return (
+                        False,
+                        403,
+                        "CID multihash upload provenance is currently claimed by another concurrent uploader.",
+                        claim_owner,
+                        {claim_owner},
+                    )
+                claim_tokens.add(token)
+            else:
+                self._inflight_mh_claims[mh] = (caller_l, {token})
+
+            return True, 200, "ok", canonical_prov, allowed_owners
+
     def commit(
         self,
         token: str,
@@ -630,8 +742,13 @@ class UploadRateLimiter:
         *,
         cid: str | None = None,
         multihash: str | None = None,
-    ) -> None:
-        """Finalize an in-flight reservation into persistent SQLite quota history, tracked_pins & pending_uploads."""
+        verified_onchain_provenance: tuple[bool, str | None, set[str]] | None = None,
+    ) -> bool:
+        """
+        Finalize an in-flight reservation into persistent SQLite quota history, tracked_pins &
+        pending_uploads. Returns True when committed (including quota-only cid=None commits),
+        or False when cid provenance was rejected under SQLite BEGIN IMMEDIATE isolation.
+        """
         now = int(now_ts)
         actual = max(0, int(actual_bytes))
         cutoff = now - self._window
@@ -643,85 +760,96 @@ class UploadRateLimiter:
         canonical_prov: str | None = None
         allowed_owners: set[str] = set()
         if cid and mh:
-            can_claim_cid, canonical_prov, allowed_owners = self._resolve_onchain_provenance_for_mh(mh, addr_key)
+            if verified_onchain_provenance is not None:
+                can_claim_cid, canonical_prov, allowed_owners = verified_onchain_provenance
+            else:
+                can_claim_cid, canonical_prov, allowed_owners = self._resolve_onchain_provenance_for_mh(mh, addr_key)
 
+        cid_committed = True
         with self._lock:
-            with _sqlite_write_tx(self._conn):
-                self._prune_locked(cutoff)
-                self._conn.execute(
-                    "INSERT INTO upload_quota_events(address, size_bytes, ts) VALUES(?, ?, ?)",
-                    (addr_key, actual, now),
-                )
-                if cid:
-                    if mh and canonical_prov:
-                        self._conn.execute(
-                            """
-                            INSERT OR IGNORE INTO upload_provenance(multihash, uploader, created_at)
-                            VALUES(?, ?, ?)
-                            """,
-                            (mh, canonical_prov, float(now)),
-                        )
-                    existing_prov = None
-                    if mh:
-                        row = self._conn.execute(
-                            "SELECT uploader FROM upload_provenance WHERE multihash = ?",
-                            (mh,),
-                        ).fetchone()
-                        if row and row[0]:
-                            existing_prov = str(row[0]).strip().lower()
-                    prov_allows_caller = can_claim_cid and (
-                        existing_prov is None
-                        or existing_prov == addr_key
-                        or (bool(allowed_owners) and addr_key in allowed_owners)
+            try:
+                with _sqlite_write_tx(self._conn):
+                    self._prune_locked(cutoff)
+                    self._conn.execute(
+                        "INSERT INTO upload_quota_events(address, size_bytes, ts) VALUES(?, ?, ?)",
+                        (addr_key, actual, now),
                     )
-                    if prov_allows_caller:
-                        self._conn.execute(
-                            """
-                            INSERT INTO pending_uploads(cid, multihash, uploader, size_bytes, uploaded_at)
-                            VALUES(?, ?, ?, ?, ?)
-                            ON CONFLICT(cid) DO UPDATE SET
-                                multihash = excluded.multihash,
-                                size_bytes = excluded.size_bytes,
-                                uploaded_at = excluded.uploaded_at
-                            """,
-                            (cid, mh, addr_key, actual, now),
-                        )
-                        self._conn.execute(
-                            """
-                            INSERT INTO tracked_pins(cid, multihash, size_bytes, pinned_at)
-                            VALUES(?, ?, ?, ?)
-                            ON CONFLICT(cid) DO UPDATE SET
-                                multihash = excluded.multihash,
-                                size_bytes = excluded.size_bytes,
-                                pinned_at = excluded.pinned_at
-                            """,
-                            (cid, mh, actual, now),
-                        )
-                        if mh and addr_key and addr_key != "unknown":
+                    if cid:
+                        if mh and canonical_prov:
                             self._conn.execute(
                                 """
-                                INSERT INTO upload_provenance(multihash, uploader, created_at)
+                                INSERT OR IGNORE INTO upload_provenance(multihash, uploader, created_at)
                                 VALUES(?, ?, ?)
-                                ON CONFLICT(multihash) DO UPDATE SET
-                                    created_at = MAX(upload_provenance.created_at, excluded.created_at)
                                 """,
-                                (mh, addr_key, float(now)),
+                                (mh, canonical_prov, float(now)),
                             )
+                        existing_prov = None
                         if mh:
-                            self._conn.execute(
-                                "DELETE FROM pending_provenance_purges WHERE multihash = ?",
+                            row = self._conn.execute(
+                                "SELECT uploader FROM upload_provenance WHERE multihash = ?",
                                 (mh,),
+                            ).fetchone()
+                            if row and row[0]:
+                                existing_prov = str(row[0]).strip().lower()
+                        prov_allows_caller = can_claim_cid and (
+                            existing_prov is None
+                            or existing_prov == addr_key
+                            or (bool(allowed_owners) and addr_key in allowed_owners)
+                        )
+                        if prov_allows_caller:
+                            self._conn.execute(
+                                """
+                                INSERT INTO pending_uploads(cid, multihash, uploader, size_bytes, uploaded_at)
+                                VALUES(?, ?, ?, ?, ?)
+                                ON CONFLICT(cid) DO UPDATE SET
+                                    multihash = excluded.multihash,
+                                    size_bytes = excluded.size_bytes,
+                                    uploaded_at = excluded.uploaded_at
+                                """,
+                                (cid, mh, addr_key, actual, now),
                             )
-            self._inflight.pop(token, None)
-            self._quota_epoch += 1
-            self._repo_stat_mono = 0.0
+                            self._conn.execute(
+                                """
+                                INSERT INTO tracked_pins(cid, multihash, size_bytes, pinned_at)
+                                VALUES(?, ?, ?, ?)
+                                ON CONFLICT(cid) DO UPDATE SET
+                                    multihash = excluded.multihash,
+                                    size_bytes = excluded.size_bytes,
+                                    pinned_at = excluded.pinned_at
+                                """,
+                                (cid, mh, actual, now),
+                            )
+                            if mh and addr_key and addr_key != "unknown":
+                                self._conn.execute(
+                                    """
+                                    INSERT INTO upload_provenance(multihash, uploader, created_at)
+                                    VALUES(?, ?, ?)
+                                    ON CONFLICT(multihash) DO UPDATE SET
+                                        created_at = MAX(upload_provenance.created_at, excluded.created_at)
+                                    """,
+                                    (mh, addr_key, float(now)),
+                                )
+                            if mh:
+                                self._conn.execute(
+                                    "DELETE FROM pending_provenance_purges WHERE multihash = ?",
+                                    (mh,),
+                                )
+                        else:
+                            cid_committed = False
+            finally:
+                self._inflight.pop(token, None)
+                self._release_mh_claim_locked(token)
+                self._quota_epoch += 1
+                self._repo_stat_mono = 0.0
+        return cid_committed
 
     def release(self, token: str | None) -> None:
-        """Release an uncommitted in-flight reservation on error or abort."""
+        """Release an uncommitted in-flight reservation and any per-multihash claim on error or abort."""
         if not token:
             return
         with self._lock:
             self._inflight.pop(token, None)
+            self._release_mh_claim_locked(token)
             self._quota_epoch += 1
 
     def check_allowed(self, address: str, pending_bytes: int, now_ts: int) -> tuple[bool, str]:
@@ -1517,6 +1645,7 @@ class PublicMetadataCatalogIndex:
         *,
         force_unseen: bool = False,
         force_authoritative: bool = False,
+        bypass_failure_backoff: bool = False,
     ) -> None:
         getter = getattr(self._registry, "get_all_datasets", None)
         if not callable(getter):
@@ -1534,7 +1663,7 @@ class PublicMetadataCatalogIndex:
             now_mono = time.monotonic()
             with self._lock:
                 in_failure_backoff = (
-                    not force_authoritative
+                    not bypass_failure_backoff
                     and self._last_failed_refresh_mono > 0.0
                     and (now_mono - self._last_failed_refresh_mono) < self._min_forced_refresh
                 )
@@ -1740,8 +1869,13 @@ class PublicMetadataCatalogIndex:
         self._run_refresh_if_needed(force_unseen=False)
         with self._lock:
             entry = self._first_registrant_by_mh.get(multihash)
-            just_refreshed = self.rpc_refresh_count > prev_count and self._last_refresh_ok
-        if entry is None and not just_refreshed:
+            just_attempted_refresh = self.rpc_refresh_count > prev_count
+            in_recent_failure = (
+                not self._last_refresh_ok
+                and self._last_failed_refresh_mono > 0.0
+                and (time.monotonic() - self._last_failed_refresh_mono) < self._min_forced_refresh
+            )
+        if entry is None and not just_attempted_refresh and not in_recent_failure:
             if allow_authoritative_refresh:
                 self._run_refresh_if_needed(force_authoritative=True)
             else:
@@ -1763,8 +1897,13 @@ class PublicMetadataCatalogIndex:
         self._run_refresh_if_needed(force_unseen=False)
         with self._lock:
             entry = self._first_registrant_details_by_mh.get(multihash)
-            just_refreshed = self.rpc_refresh_count > prev_count and self._last_refresh_ok
-        if entry is None and not just_refreshed:
+            just_attempted_refresh = self.rpc_refresh_count > prev_count
+            in_recent_failure = (
+                not self._last_refresh_ok
+                and self._last_failed_refresh_mono > 0.0
+                and (time.monotonic() - self._last_failed_refresh_mono) < self._min_forced_refresh
+            )
+        if entry is None and not just_attempted_refresh and not in_recent_failure:
             if allow_authoritative_refresh:
                 self._run_refresh_if_needed(force_authoritative=True)
             else:
@@ -1778,7 +1917,7 @@ class PublicMetadataCatalogIndex:
             return bool(self._last_refresh_ok)
 
     def refresh_now(self) -> bool:
-        self._run_refresh_if_needed(force_authoritative=True)
+        self._run_refresh_if_needed(force_authoritative=True, bypass_failure_backoff=True)
         return self.last_refresh_succeeded()
 
     def is_known_dataset_owner(self, address: str) -> bool:
@@ -1926,11 +2065,12 @@ class KuboHttpAdapter:
         *,
         cid_version: int = 1,
         pin: bool = True,
+        only_hash: bool = False,
         timeout_sec: float = 300.0,
     ) -> dict:
         """
         Stream-upload a bounded file object to private Kubo /api/v0/add?pin=<bool>&cid-version=1
-        in 64 KiB chunks (never buffering the entire file in RAM).
+        (or only-hash=true for zero-block-write CID precomputation) in 64 KiB chunks.
         """
         safe_name = sanitize_upload_filename(filename)
         if content_length < 0 or content_length > MAX_UPLOAD_BYTES:
@@ -1949,7 +2089,13 @@ class KuboHttpAdapter:
         total_body_len = len(prefix) + int(content_length) + len(suffix)
 
         base_path = parsed.path.rstrip("/")
-        q = urllib.parse.urlencode({"pin": "true" if pin else "false", "cid-version": str(int(cid_version))})
+        params = {
+            "pin": "true" if (pin and not only_hash) else "false",
+            "cid-version": str(int(cid_version)),
+        }
+        if only_hash:
+            params["only-hash"] = "true"
+        q = urllib.parse.urlencode(params)
         target_path = f"{base_path}/api/v0/add?{q}"
 
         conn_cls = http.client.HTTPSConnection if parsed.scheme == "https" else http.client.HTTPConnection
@@ -2733,6 +2879,14 @@ class GdprErasureReconciler:
 
         orphan_unpinned = self.reconcile_orphan_uploads()
 
+        if not self._gc_pending:
+            with self._lock:
+                gc_row = self._conn.execute(
+                    "SELECT v FROM gdpr_meta WHERE k = 'gc_pending'"
+                ).fetchone()
+                if gc_row and str(gc_row[0]) == "1":
+                    self._gc_pending = True
+
         gc_ran = False
         if unpinned_now or orphan_unpinned or self._gc_pending:
             try:
@@ -2740,8 +2894,15 @@ class GdprErasureReconciler:
             except Exception:
                 gc_ran = False
             if gc_ran:
-                self._flush_pending_provenance_purges()
                 self._gc_pending = False
+
+        # L3-03: Always flush queued provenance purges when GC is NOT pending so a transient RPC
+        # failure after run_gc() retries automatically on subsequent healthy cycles (while still
+        # preserving L3-L1 by never flushing while self._gc_pending is True).
+        flushed_provenance = 0
+        if not self._gc_pending:
+            flushed_provenance = self._flush_pending_provenance_purges()
+
         self.last_block = tip
         self._persist_state()
         return {
@@ -2754,6 +2915,7 @@ class GdprErasureReconciler:
             "skippedSharedCids": skipped_shared,
             "gcRan": gc_ran,
             "gcPending": self._gc_pending,
+            "flushedProvenancePurges": flushed_provenance,
         }
 
     def close(self) -> None:
@@ -3292,35 +3454,82 @@ def create_gateway_server(
                 spool.seek(0)
                 add_fn = getattr(kubo_adapter, "add_stream", None)
                 pin_fn = getattr(kubo_adapter, "pin_cid", None)
+                unpin_fn = getattr(kubo_adapter, "unpin_cid", None)
                 if not callable(add_fn):
                     self._send_json(501, {"error": "Configured Kubo adapter does not support streaming uploads."})
                     return
+
+                # F-03 / L3-01: Pre-compute CIDv1 via only-hash=true FIRST so rejected 403/502 uploads
+                # write ZERO unpinned blocks to Kubo's blockstore (with safe fallbacks for test doubles).
+                only_hash_mode = False
                 staged_unpinned = False
+                already_pinned = False
                 try:
-                    if callable(pin_fn):
-                        try:
-                            pin_res = add_fn(spool, filename, content_length, cid_version=1, pin=False)
-                            staged_unpinned = True
-                        except TypeError:
-                            spool.seek(0)
-                            pin_res = add_fn(spool, filename, content_length, cid_version=1)
-                    else:
-                        pin_res = add_fn(spool, filename, content_length, cid_version=1)
+                    try:
+                        pre_res = add_fn(
+                            spool, filename, content_length, cid_version=1, pin=False, only_hash=True
+                        )
+                        only_hash_mode = True
+                    except TypeError:
+                        spool.seek(0)
+                        if callable(pin_fn):
+                            try:
+                                pre_res = add_fn(spool, filename, content_length, cid_version=1, pin=False)
+                                staged_unpinned = True
+                            except TypeError:
+                                spool.seek(0)
+                                pre_res = add_fn(spool, filename, content_length, cid_version=1)
+                                already_pinned = True
+                        else:
+                            pre_res = add_fn(spool, filename, content_length, cid_version=1)
+                            already_pinned = True
                 except Exception as exc:
                     self._send_json(502, {"error": f"Private Kubo upload failed: {exc}"})
                     return
 
-                pin_mh = _try_canonical_multihash(pin_res["cid"])
+                def _rollback_kubo_block(cid_to_undo: str | None) -> None:
+                    if not cid_to_undo:
+                        return
+                    if callable(unpin_fn):
+                        try:
+                            unpin_fn(cid_to_undo)
+                        except Exception:
+                            pass
+                    try:
+                        upload_limiter.mark_gc_pending()
+                    except Exception:
+                        pass
+
+                pin_res = pre_res
+                pin_mh = _try_canonical_multihash(pre_res["cid"])
+                canonical_prov: str | None = None
+                allowed_owners: set[str] = set()
                 if pin_mh:
-                    existing_prov = upload_limiter.get_upload_provenance(pin_mh)
-                    first_info = catalog_index.get_first_registrant_info(
-                        pin_mh, allow_authoritative_refresh=True
-                    )
+                    # F-01: Single-RPC on-chain provenance check (no 2nd RPC inside commit()).
+                    has_catalog_getter = callable(getattr(registry_adapter, "get_all_datasets", None))
+                    onchain_ok = True
+                    try:
+                        first_info = catalog_index.get_first_registrant_info(
+                            pin_mh, allow_authoritative_refresh=True
+                        )
+                    except Exception:
+                        first_info = None
+                        onchain_ok = False
                     if (
-                        first_info is None
-                        and callable(getattr(registry_adapter, "get_all_datasets", None))
-                        and not catalog_index.last_refresh_succeeded()
+                        not onchain_ok
+                        or (
+                            first_info is None
+                            and has_catalog_getter
+                            and not catalog_index.last_refresh_succeeded()
+                        )
                     ):
+                        if already_pinned:
+                            _rollback_kubo_block(pre_res["cid"])
+                        elif staged_unpinned:
+                            try:
+                                upload_limiter.mark_gc_pending()
+                            except Exception:
+                                pass
                         upload_limiter.commit(res_token, content_length, now_val, cid=None, multihash=None)
                         committed = True
                         with metrics_lock:
@@ -3331,62 +3540,94 @@ def create_gateway_server(
                         )
                         return
 
-                    caller_l = recovered_addr.lower()
-                    if first_info is not None:
-                        _, earliest_owner, earliest_creator = first_info
-                        canonical_prov = earliest_creator or earliest_owner
-                        if canonical_prov:
-                            upload_limiter.record_upload_provenance(
-                                pin_mh, canonical_prov, created_at=float(now_val)
-                            )
-                        eff_prov = upload_limiter.get_upload_provenance(pin_mh) or canonical_prov
-                        allowed_uploaders = {
-                            a for a in (eff_prov, earliest_owner, earliest_creator) if a
-                        }
-                        if allowed_uploaders and caller_l not in allowed_uploaders:
-                            upload_limiter.commit(res_token, content_length, now_val, cid=None, multihash=None)
-                            committed = True
-                            with metrics_lock:
-                                metrics["requestsDenied"] += 1
-                            self._send_json(
-                                403,
-                                {
-                                    "error": "CID multihash is already anchored on-chain by another dataset owner (post-anchor provenance hijack rejected)."
-                                },
-                            )
-                            return
-                    elif existing_prov and caller_l != existing_prov:
+                    # F-01: Atomic per-multihash claim under UploadRateLimiter._lock BEFORE writing to Kubo!
+                    claim_ok, claim_status, claim_err, canonical_prov, allowed_owners = (
+                        upload_limiter.try_claim_upload_provenance(
+                            res_token,
+                            pin_mh,
+                            recovered_addr,
+                            first_info=first_info,
+                            now_ts=now_val,
+                        )
+                    )
+                    if not claim_ok:
+                        if staged_unpinned:
+                            try:
+                                upload_limiter.mark_gc_pending()
+                            except Exception:
+                                pass
                         upload_limiter.commit(res_token, content_length, now_val, cid=None, multihash=None)
                         committed = True
                         with metrics_lock:
                             metrics["requestsDenied"] += 1
-                        self._send_json(
-                            403,
-                            {
-                                "error": "CID multihash upload provenance already belongs to another authenticated uploader."
-                            },
-                        )
+                        self._send_json(claim_status, {"error": claim_err})
                         return
 
-                if staged_unpinned and callable(pin_fn):
+                # Write & pin to Kubo strictly AFTER on-chain provenance + atomic claim succeed!
+                wrote_or_pinned = already_pinned or staged_unpinned
+                if only_hash_mode:
                     try:
-                        pin_fn(pin_res["cid"])
+                        spool.seek(0)
+                        pin_res = add_fn(spool, filename, content_length, cid_version=1, pin=True)
+                        wrote_or_pinned = True
+                    except Exception as exc:
+                        self._send_json(502, {"error": f"Private Kubo pin failed: {exc}"})
+                        return
+                    if pin_mh and _try_canonical_multihash(pin_res.get("cid")) != pin_mh:
+                        _rollback_kubo_block(pin_res.get("cid"))
+                        with metrics_lock:
+                            metrics["requestsDenied"] += 1
+                        self._send_json(502, {"error": "Kubo CID mismatch between only-hash precheck and pin."})
+                        return
+                elif staged_unpinned and callable(pin_fn):
+                    try:
+                        pin_fn(pre_res["cid"])
                     except Exception:
                         try:
                             spool.seek(0)
                             pin_res = add_fn(spool, filename, content_length, cid_version=1, pin=True)
                         except Exception as exc:
+                            _rollback_kubo_block(pre_res["cid"])
                             self._send_json(502, {"error": f"Private Kubo pin failed: {exc}"})
                             return
 
-                upload_limiter.commit(
-                    res_token,
-                    content_length,
-                    now_val,
-                    cid=pin_res["cid"],
-                    multihash=pin_mh,
-                )
-                committed = True
+                # F-01: Atomic SQLite commit reusing verified on-chain provenance (0 extra RPC calls).
+                # Fail closed on ANY rejection or SQLite failure (never return 200 without tracking!).
+                try:
+                    commit_ok = upload_limiter.commit(
+                        res_token,
+                        content_length,
+                        now_val,
+                        cid=pin_res["cid"],
+                        multihash=pin_mh,
+                        verified_onchain_provenance=(True, canonical_prov, allowed_owners),
+                    )
+                    committed = True
+                except Exception as exc:
+                    if wrote_or_pinned:
+                        try:
+                            cur_owner = upload_limiter.get_upload_provenance(pin_mh) if pin_mh else None
+                        except Exception:
+                            cur_owner = None
+                        if cur_owner in (None, recovered_addr.lower()):
+                            _rollback_kubo_block(pin_res["cid"])
+                    with metrics_lock:
+                        metrics["requestsDenied"] += 1
+                    self._send_json(502, {"error": f"Gateway provenance commit failed: {exc}"})
+                    return
+
+                if not commit_ok:
+                    # Provenance belongs to another uploader (e.g. cross-process race): do NOT unpin their pin,
+                    # simply fail closed 403 and never return 200 without tracking.
+                    with metrics_lock:
+                        metrics["requestsDenied"] += 1
+                    self._send_json(
+                        403,
+                        {
+                            "error": "CID multihash upload provenance conflict during commit (rejected)."
+                        },
+                    )
+                    return
             finally:
                 if not committed:
                     upload_limiter.release(res_token)
@@ -3395,7 +3636,6 @@ def create_gateway_server(
                 except Exception:
                     pass
 
-            catalog_index.invalidate()
             with metrics_lock:
                 metrics["uploadsAllowed"] += 1
             self._send_json(

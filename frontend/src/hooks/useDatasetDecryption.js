@@ -81,6 +81,7 @@ export function useDatasetDecryption({
         }
 
         let decryptedPdfBytes = null;
+        const partialWarnings = [];
         if (ds.summaryCid) {
           showToast(
             lang === "vi"
@@ -107,10 +108,10 @@ export function useDatasetDecryption({
               throw e;
             }
             console.warn("PDF summary report decryption warning:", e);
-            showToast(
-              lang === "vi" ? `Lỗi báo cáo PDF: ${e.message}` : `PDF summary report error: ${e.message}`,
-              "error"
-            );
+            const pdfWarnMsg =
+              lang === "vi" ? `Lỗi báo cáo PDF: ${e.message}` : `PDF summary report error: ${e.message}`;
+            partialWarnings.push(pdfWarnMsg);
+            showToast(pdfWarnMsg, "warning");
           }
         }
 
@@ -145,10 +146,10 @@ export function useDatasetDecryption({
               throw e;
             }
             console.warn("Phenopacket metadata fetch warning:", e);
-            showToast(
-              lang === "vi" ? `Lỗi siêu dữ liệu Phenopacket: ${e.message}` : `Phenopacket metadata error: ${e.message}`,
-              "error"
-            );
+            const metaWarnMsg =
+              lang === "vi" ? `Lỗi siêu dữ liệu Phenopacket: ${e.message}` : `Phenopacket metadata error: ${e.message}`;
+            partialWarnings.push(metaWarnMsg);
+            showToast(metaWarnMsg, "warning");
           }
         }
 
@@ -157,6 +158,8 @@ export function useDatasetDecryption({
           if (decryptedPdfBytes instanceof Uint8Array) decryptedPdfBytes.fill(0);
           return;
         }
+
+        const partialWarning = partialWarnings.length > 0 ? partialWarnings.join(" | ") : null;
 
         if (setPurchasedData) {
           const prevEntry = decryptedBuffersRef.current.get(dataId);
@@ -179,7 +182,8 @@ export function useDatasetDecryption({
                     ...p,
                     decryptedContent: decryptedPlaintext,
                     decryptedPdfBytes: decryptedPdfBytes,
-                    phenopacketJson: phenopacketJson
+                    phenopacketJson: phenopacketJson,
+                    partialWarning
                   }
                 : p
             )
@@ -189,11 +193,20 @@ export function useDatasetDecryption({
         const verifiedParts = [lang === "vi" ? "Chuỗi gốc" : "Raw Sequence"];
         if (decryptedPdfBytes) verifiedParts.push("PDF");
         if (phenopacketJson) verifiedParts.push("Phenopacket");
-        showToast(
-          lang === "vi"
-            ? `Đã giải mã & đối soát khớp SHA-256 (${verifiedParts.join(", ")}).`
-            : `Decrypted & SHA-256 verified (${verifiedParts.join(", ")}).`
-        );
+        if (partialWarning) {
+          showToast(
+            lang === "vi"
+              ? `Đã giải mã (${verifiedParts.join(", ")}) nhưng thiếu tệp phụ: ${partialWarning}`
+              : `Decrypted (${verifiedParts.join(", ")}) with partial artifact warning: ${partialWarning}`,
+            "warning"
+          );
+        } else {
+          showToast(
+            lang === "vi"
+              ? `Đã giải mã & đối soát khớp SHA-256 (${verifiedParts.join(", ")}).`
+              : `Decrypted & SHA-256 verified (${verifiedParts.join(", ")}).`
+          );
+        }
       } catch (err) {
         if (!isStale()) {
           showToast((lang === "vi" ? "Lỗi giải mã: " : "Decryption error: ") + err.message, "error");
@@ -293,7 +306,8 @@ export function useDatasetDecryption({
               ...p,
               decryptedContent: null,
               decryptedPdfBytes: null,
-              phenopacketJson: null
+              phenopacketJson: null,
+              partialWarning: null
             };
           }
           return p;

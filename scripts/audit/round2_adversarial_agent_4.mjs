@@ -53,6 +53,7 @@ async function runAdversarialAgent4Suite() {
   }
 
   function recordFinding(defCode, title, detail) {
+    totalTests++;
     findings.push({ defCode, title, detail });
     console.log(`  [AUDIT DEFECT VERIFIED] ${defCode}: ${title}`);
     console.log(`         ↳ ${detail}`);
@@ -436,7 +437,7 @@ async function runAdversarialAgent4Suite() {
   });
   console.log("================================================================================\n");
 
-  return findings;
+  return { findings, passedTests, totalTests };
 }
 
 function assert(condition, message) {
@@ -446,7 +447,15 @@ function assert(condition, message) {
 }
 
 runAdversarialAgent4Suite()
-  .then((findings) => process.exit(findings.length > 0 ? 1 : 0))
+  .then(({ findings, passedTests, totalTests }) => {
+    if (findings.length > 0 || totalTests === 0 || passedTests !== totalTests) {
+      console.error(
+        `[FAIL] Agent 4 exit check failed: findings=${findings.length}, passedTests=${passedTests}/${totalTests}`
+      );
+      process.exit(1);
+    }
+    process.exit(0);
+  })
   .catch((err) => {
     console.error("Adversarial suite failure:", err);
     process.exit(1);

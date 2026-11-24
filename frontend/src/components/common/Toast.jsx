@@ -8,16 +8,25 @@ export default function Toast() {
   const { t } = useLanguage();
   if (!toast) return null;
 
+  const toastClass =
+    toast.type === "error"
+      ? "toast-error"
+      : toast.type === "warning"
+        ? "toast-warning"
+        : toast.type === "info"
+          ? "toast-info"
+          : "toast-success";
+
   return (
     <div
-      className={`terminal-toast ${
-        toast.type === "error" ? "toast-error" : toast.type === "info" ? "toast-info" : "toast-success"
-      }`}
+      className={`terminal-toast ${toastClass}`}
       role="status"
       aria-live="polite"
     >
       {toast.type === "error" ? (
         <AlertTriangleIcon size={14} color="#ef4444" />
+      ) : toast.type === "warning" ? (
+        <AlertTriangleIcon size={14} color="var(--accent-amber-text)" />
       ) : toast.type === "info" ? (
         <RefreshSpinIcon size={14} color="#0284c7" className="spin" />
       ) : (

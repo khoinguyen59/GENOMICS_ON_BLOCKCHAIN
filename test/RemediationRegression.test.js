@@ -2436,16 +2436,402 @@ print("PHASE5_GATEWAY_REMEDIATION_OK")
     expect(await loadBuyerCapsulePersistent(CID_B, null)).to.equal(null);
     expect(await getAllBuyerCapsulesPersistent(null)).to.deep.equal([]);
 
-    // Verify L4-L1 focus ring tokens, L4-L3 modal guard on '/', and REV-I06 pure setPurchasedData updater + unmount scrub
+    // Verify L4-L1 focus ring tokens, L4-03 --bg-elevated, F-02 global '/' guard in Navbar, L4-04 toast-warning, L4-F3 partialWarning, and REV-I06 pure setPurchasedData updater + unmount scrub
     const tokensCss = fs.readFileSync(path.resolve("frontend/src/styles/tokens.css"), "utf8");
     expect(tokensCss).to.include("--focus-ring-color: #005fcc;");
     expect(tokensCss).to.include("--focus-ring-color: #38bdf8;");
+    expect(tokensCss).to.include("--bg-elevated: var(--bg-surface-elevated);");
     const baseCss = fs.readFileSync(path.resolve("frontend/src/styles/base.css"), "utf8");
     expect(baseCss).to.include("var(--focus-ring-color");
+    const navbarSrc = fs.readFileSync(path.resolve("frontend/src/components/common/Navbar.jsx"), "utf8");
+    expect(navbarSrc).to.include('[role="dialog"][aria-modal="true"]');
+    expect(navbarSrc).to.include('getElementById("nav-search-input")');
+    expect(navbarSrc).to.include('aria-label={t("ariaClearSearch")}');
     const filterBarSrc = fs.readFileSync(path.resolve("frontend/src/features/researcher/GenomicFilterBar.jsx"), "utf8");
-    expect(filterBarSrc).to.include('[role="dialog"][aria-modal="true"]');
+    expect(filterBarSrc).to.not.include('getElementById("input-filter-search")');
+    const toastSrc = fs.readFileSync(path.resolve("frontend/src/components/common/Toast.jsx"), "utf8");
+    expect(toastSrc).to.include("toast-warning");
+    const modalsCss = fs.readFileSync(path.resolve("frontend/src/styles/components/modals.css"), "utf8");
+    expect(modalsCss).to.include(".toast-warning");
     const decHookSrc = fs.readFileSync(path.resolve("frontend/src/hooks/useDatasetDecryption.js"), "utf8");
     expect(decHookSrc).to.not.include("p.decryptedPdfBytes.fill(0)");
     expect(decHookSrc).to.include("useEffect(() =>");
+    expect(decHookSrc).to.include("partialWarning");
+  });
+
+  // =========================================================================
+  // R18-06l: Phase 6 Gateway Pre-Hash (F-03), Single-RPC Atomic Claim & Concurrency (F-01), Delayed Purge Retry (L3-03) & Dispatcher Missing-Key Queue (L3-02)
+  // =========================================================================
+  it("R18-06l: enforces only-hash=true zero-write 403/502 (F-03), single-RPC atomic concurrent duplicate-CID claim & fail-closed commit (F-01), post-GC purge retry (L3-03) & dispatcher missing_seed_key queue (L3-02)", async function () {
+    const pyPhase6 = `
+import hashlib, http.server, json, os, sqlite3, tempfile, threading, time, urllib.error, urllib.request
+from eth_account import Account
+from eth_account.messages import encode_defunct
+import deploy.ipfs_access_gateway as gw
+
+CHAIN_ID = 31337
+REGISTRY = "0x1111111111111111111111111111111111111111"
+ALICE = Account.from_key("0x" + "11" * 32)
+BOB = Account.from_key("0x" + "22" * 32)
+CHARLIE = Account.from_key("0x" + "33" * 32)
+
+CID_ANCHORED   = "bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi"
+CID_FRESH_1    = "bafybeihdwdcefgh4dqkjv67uzcmw7ojee6xedzdetojuzjevtenxquvyku"
+CID_RACE_DUP   = "bafybeibml5uieyxa5tufngvg7fgwbkwvlsuntwbxgtskoqynbt7wlchmfm"
+CID_OUTAGE     = "bafybeiczsscdsbs7ffqz55asqdf3smv6klcw3gofszvwlyarci47bgf354"
+CID_COMMIT_ERR = "bafybeiemxf5abjwjbikoz4mc3a3dla6ual3jsgpdr4cjr3oz3evfyavhwq"
+CID_COMMIT_CON = "bafybeigvgzoolc3drupxhlevdp2ugqcrbcsqfmcek2zxiw5wctk3xjpjwy"
+CID_PURGE      = "bafybeifx7yeb55armcsxwwitkymga5xf53dxiarykms3ygqic223w5sk3m"
+CID_REVOKED    = "bafybeihkoviema7g3gxyt6la7vd5ho32ictqbilu3wnlo3rs7ewhnp7lly"
+
+ANCHORED_BYTES = b"PHASE6_ANCHORED_OWNER_BYTES"
+FRESH1_BYTES   = b"PHASE6_FRESH_SINGLE_RPC_BYTES"
+RACE_BYTES     = b"PHASE6_CONCURRENT_RACE_DUP_BYTES"
+OUTAGE_BYTES   = b"PHASE6_OUTAGE_ZERO_WRITE_BYTES"
+ERR_BYTES      = b"PHASE6_COMMIT_SQLITE_ERR_BYTES"
+CON_BYTES      = b"PHASE6_COMMIT_CONFLICT_BYTES"
+PURGE_BYTES    = b"PHASE6_POST_GC_PURGE_RETRY_BYTES"
+REVOKED_BYTES  = b"PHASE6_GDPR_REVOKED_REUPLOAD_BYTES"
+
+BYTES_TO_CID = {
+    ANCHORED_BYTES: CID_ANCHORED,
+    FRESH1_BYTES: CID_FRESH_1,
+    RACE_BYTES: CID_RACE_DUP,
+    OUTAGE_BYTES: CID_OUTAGE,
+    ERR_BYTES: CID_COMMIT_ERR,
+    CON_BYTES: CID_COMMIT_CON,
+    PURGE_BYTES: CID_PURGE,
+    REVOKED_BYTES: CID_REVOKED,
+}
+
+def sign_upload(acct, payload_bytes, ts, nonce):
+    sha = hashlib.sha256(payload_bytes).hexdigest()
+    msg = gw.build_siwe_upload_message(CHAIN_ID, REGISTRY, sha, acct.address, ts, nonce)
+    sig = acct.sign_message(encode_defunct(text=msg)).signature.hex()
+    return {
+        "Content-Type": "application/octet-stream",
+        "X-GenoChain-Address": acct.address,
+        "X-GenoChain-Timestamp": str(ts),
+        "X-GenoChain-Nonce": nonce,
+        "X-GenoChain-Signature": sig if sig.startswith("0x") else "0x" + sig,
+        "X-GenoChain-Content-Sha256": sha,
+    }
+
+# 0. Verify KuboHttpAdapter.add_stream(..., only_hash=True) transmits only-hash=true&pin=false over HTTP
+seen_kubo_paths = []
+class MockKuboRpcHandler(http.server.BaseHTTPRequestHandler):
+    def log_message(self, *a): return
+    def do_POST(self):
+        seen_kubo_paths.append(self.path)
+        cl = int(self.headers.get("Content-Length", "0"))
+        if cl > 0:
+            self.rfile.read(cl)
+        body = json.dumps({"Name": "f.enc", "Hash": CID_FRESH_1, "Size": str(len(FRESH1_BYTES))}).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+mock_kubo_srv = http.server.HTTPServer(("127.0.0.1", 0), MockKuboRpcHandler)
+threading.Thread(target=mock_kubo_srv.serve_forever, daemon=True).start()
+try:
+    import io
+    adapter = gw.KuboHttpAdapter(rpc_url=f"http://127.0.0.1:{mock_kubo_srv.server_address[1]}")
+    r_oh = adapter.add_stream(io.BytesIO(FRESH1_BYTES), "f.enc", len(FRESH1_BYTES), cid_version=1, pin=True, only_hash=True)
+    assert r_oh["cid"] == CID_FRESH_1
+    assert any("only-hash=true" in p and "pin=false" in p for p in seen_kubo_paths), f"only-hash=true missing in Kubo URL: {seen_kubo_paths}"
+finally:
+    mock_kubo_srv.shutdown(); mock_kubo_srv.server_close()
+
+class Phase6Reg:
+    def __init__(self):
+        self.datasets = []
+        self.events = []
+        self.fail_catalog_rpc = False
+        self.fail_after_n = None
+        self.rpc_calls = 0
+    def is_connected(self): return not self.fail_catalog_rpc
+    def get_block_number(self): return 100
+    def get_all_datasets(self):
+        self.rpc_calls += 1
+        if self.fail_catalog_rpc:
+            raise RuntimeError("Simulated RPC outage")
+        if self.fail_after_n is not None and self.rpc_calls >= self.fail_after_n:
+            raise RuntimeError("Simulated transient RPC failure")
+        return list(self.datasets)
+    def get_genomic_data(self, d):
+        for ds in self.datasets:
+            if ds["dataId"] == int(d): return ds
+        raise KeyError("DataNotFound")
+    def has_active_access(self, d, buyer): return False
+    def get_status_updated_events(self, a, b): return list(self.events)
+
+class Phase6Kubo:
+    def __init__(self):
+        self.written_blocks = {}
+        self.pins = {}
+        self.only_hash_calls = 0
+        self.write_calls = 0
+        self.delay_on_write_sec = 0.0
+        self.gc_runs = 0
+    def health_check(self): return True
+    def add_stream(self, stream, filename, content_length, cid_version=1, pin=True, only_hash=False):
+        data = stream.read(content_length)
+        cid = BYTES_TO_CID[data]
+        if only_hash:
+            self.only_hash_calls += 1
+            return {"cid": cid, "size": len(data)}
+        if self.delay_on_write_sec > 0:
+            time.sleep(self.delay_on_write_sec)
+        self.write_calls += 1
+        self.written_blocks[cid] = data
+        if pin:
+            self.pins[cid] = len(data)
+        return {"cid": cid, "size": len(data)}
+    def pin_cid(self, cid):
+        if cid not in self.written_blocks:
+            raise FileNotFoundError(cid)
+        self.pins[cid] = len(self.written_blocks[cid])
+        return True
+    def unpin_cid(self, cid):
+        return self.pins.pop(cid, None) is not None
+    def list_recursive_pins(self): return list(self.pins.keys())
+    def cat_cid(self, cid):
+        if cid not in self.written_blocks:
+            raise FileNotFoundError(cid)
+        return self.written_blocks[cid]
+    def run_gc(self):
+        self.gc_runs += 1
+        for c in list(self.written_blocks.keys()):
+            if c not in self.pins:
+                self.written_blocks.pop(c, None)
+        return True
+
+with tempfile.TemporaryDirectory() as td:
+    db_path = os.path.join(td, "phase6_gateway.sqlite")
+    reg = Phase6Reg()
+    kubo = Phase6Kubo()
+    now_ts = int(time.time())
+    reg.datasets = [
+        {
+            "dataId": 1, "tokenId": 1,
+            "currentOwner": ALICE.address, "originalCreator": ALICE.address,
+            "rawCid": CID_ANCHORED, "summaryCid": "", "metadataCid": "", "status": 0,
+        },
+        {
+            "dataId": 2, "tokenId": 2,
+            "currentOwner": ALICE.address, "originalCreator": ALICE.address,
+            "rawCid": CID_REVOKED, "summaryCid": "", "metadataCid": "", "status": 2,
+        },
+    ]
+
+    srv = gw.create_gateway_server(
+        host="127.0.0.1", port=0, chain_id=CHAIN_ID, registry_address=REGISTRY,
+        registry_adapter=reg, kubo_adapter=kubo, state_db_path=db_path,
+        upload_policy="open-dev", now_fn=lambda: now_ts, min_forced_refresh_sec=5.0,
+    )
+    port = srv.server_address[1]
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        # ------------------------------------------------------------------
+        # F-01A: Normal upload performs at most 1 catalog RPC scan (no redundant 2nd RPC, no post-upload invalidate!)
+        # ------------------------------------------------------------------
+        reg.rpc_calls = 0
+        req_ok = urllib.request.Request(
+            f"http://127.0.0.1:{port}/api/v0/upload",
+            data=FRESH1_BYTES,
+            headers=sign_upload(ALICE, FRESH1_BYTES, now_ts, "p6-f01a-normal-000001"),
+            method="POST",
+        )
+        with urllib.request.urlopen(req_ok, timeout=5) as resp_ok:
+            assert resp_ok.status == 200
+        assert reg.rpc_calls <= 1, f"F-01A expected <=1 catalog RPC on normal upload, got {reg.rpc_calls}"
+        assert CID_FRESH_1 in kubo.pins and CID_FRESH_1 in kubo.written_blocks
+
+        # ------------------------------------------------------------------
+        # F-03: Rejected 403 (anchored owner mismatch AND GDPR-revoked ciphertext re-upload) write ZERO blocks to Kubo!
+        # ------------------------------------------------------------------
+        writes_before = kubo.write_calls
+        for label, payload, cid_target, nonce_val in (
+            ("anchored-403", ANCHORED_BYTES, CID_ANCHORED, "p6-f03-anchored-403-1"),
+            ("revoked-403", REVOKED_BYTES, CID_REVOKED, "p6-f03-revoked-403-01"),
+        ):
+            req_403 = urllib.request.Request(
+                f"http://127.0.0.1:{port}/api/v0/upload",
+                data=payload,
+                headers=sign_upload(BOB, payload, now_ts, nonce_val),
+                method="POST",
+            )
+            st_403 = None
+            try:
+                urllib.request.urlopen(req_403, timeout=5)
+            except urllib.error.HTTPError as e:
+                st_403 = e.code
+            assert st_403 == 403, f"F-03 {label} expected 403, got {st_403}"
+            assert cid_target not in kubo.written_blocks, f"F-03 {label} wrote unpinned block to Kubo!"
+            assert cid_target not in kubo.pins, f"F-03 {label} pinned rejected CID!"
+        assert kubo.write_calls == writes_before, f"F-03 403 rejections invoked write_calls: {kubo.write_calls} vs {writes_before}"
+
+        # ------------------------------------------------------------------
+        # F-01D + F-03: Catalog RPC outage returns 502 with rpc_calls == 1 (no 2x amplification) AND 0 Kubo block writes!
+        # ------------------------------------------------------------------
+        reg.fail_catalog_rpc = True
+        srv.gateway_catalog_index.invalidate()
+        reg.rpc_calls = 0
+        writes_before_502 = kubo.write_calls
+        try:
+            req_502 = urllib.request.Request(
+                f"http://127.0.0.1:{port}/api/v0/upload",
+                data=OUTAGE_BYTES,
+                headers=sign_upload(ALICE, OUTAGE_BYTES, now_ts, "p6-f01d-outage-502-01"),
+                method="POST",
+            )
+            st_502 = None
+            try:
+                urllib.request.urlopen(req_502, timeout=5)
+            except urllib.error.HTTPError as e:
+                st_502 = e.code
+            assert st_502 == 502, f"F-01D expected 502, got {st_502}"
+            assert reg.rpc_calls == 1, f"F-01D expected exactly 1 RPC call on 502 outage, got {reg.rpc_calls}"
+            assert CID_OUTAGE not in kubo.written_blocks and CID_OUTAGE not in kubo.pins
+            assert kubo.write_calls == writes_before_502, "F-03 502 outage wrote block to Kubo!"
+        finally:
+            reg.fail_catalog_rpc = False
+            srv.gateway_catalog_index.invalidate()
+
+        # ------------------------------------------------------------------
+        # F-01C: Live 2-thread threading.Barrier(2) concurrent Alice/Bob duplicate-CID race -> STRICTLY 1x200 + 1x403!
+        # ------------------------------------------------------------------
+        kubo.delay_on_write_sec = 0.08
+        barrier = threading.Barrier(2)
+        race_results = {}
+        def _race_upload(name, acct, nonce_s):
+            req_r = urllib.request.Request(
+                f"http://127.0.0.1:{port}/api/v0/upload",
+                data=RACE_BYTES,
+                headers=sign_upload(acct, RACE_BYTES, now_ts, nonce_s),
+                method="POST",
+            )
+            barrier.wait()
+            try:
+                with urllib.request.urlopen(req_r, timeout=10) as resp_r:
+                    race_results[name] = resp_r.status
+            except urllib.error.HTTPError as e:
+                race_results[name] = e.code
+        t_a = threading.Thread(target=_race_upload, args=("alice", ALICE, "p6-f01c-race-alice-01"))
+        t_b = threading.Thread(target=_race_upload, args=("bob", BOB, "p6-f01c-race-bob-0001"))
+        t_a.start(); t_b.start()
+        t_a.join(); t_b.join()
+        kubo.delay_on_write_sec = 0.0
+        statuses = sorted(race_results.values())
+        assert statuses == [200, 403], f"F-01C concurrent duplicate-CID race MUST return strictly [200, 403], got {race_results}"
+        winner_addr = ALICE.address.lower() if race_results["alice"] == 200 else BOB.address.lower()
+        mh_race = gw.extract_canonical_multihash(CID_RACE_DUP)
+        assert srv.gateway_upload_limiter.get_upload_provenance(mh_race) == winner_addr
+        pending_cids = {p["cid"]: p["uploader"] for p in srv.gateway_upload_limiter.list_pending_uploads()}
+        assert pending_cids.get(CID_RACE_DUP) == winner_addr, f"F-01C winner missing from pending_uploads: {pending_cids}"
+
+        # ------------------------------------------------------------------
+        # F-01B: Commit failure / conflict MUST fail closed (NEVER return 200 without tracking/provenance!)
+        # ------------------------------------------------------------------
+        orig_commit = srv.gateway_upload_limiter.commit
+        def _failing_commit(*a, **kw):
+            if kw.get("cid") == CID_COMMIT_ERR:
+                raise sqlite3.OperationalError("Simulated SQLite write fault")
+            if kw.get("cid") == CID_COMMIT_CON:
+                # Simulate a second process winning SQLite upload_provenance 1ms before real orig_commit()
+                mh_con = gw.extract_canonical_multihash(CID_COMMIT_CON)
+                srv.gateway_upload_limiter.record_upload_provenance(mh_con, ALICE.address, created_at=float(now_ts))
+            return orig_commit(*a, **kw)
+        srv.gateway_upload_limiter.commit = _failing_commit
+        try:
+            req_err = urllib.request.Request(
+                f"http://127.0.0.1:{port}/api/v0/upload",
+                data=ERR_BYTES,
+                headers=sign_upload(CHARLIE, ERR_BYTES, now_ts, "p6-f01b-commit-err-01"),
+                method="POST",
+            )
+            st_err = None
+            try:
+                urllib.request.urlopen(req_err, timeout=5)
+            except urllib.error.HTTPError as e:
+                st_err = e.code
+            assert st_err == 502, f"F-01B SQLite commit fault expected 502, got {st_err}"
+            assert CID_COMMIT_ERR not in kubo.pins, "F-01B failed commit left CID pinned!"
+            assert srv.gateway_upload_limiter.get_upload_provenance(gw.extract_canonical_multihash(CID_COMMIT_ERR)) is None
+
+            kubo.pins[CID_COMMIT_CON] = len(CON_BYTES)  # Alice's pin in another process
+            req_con = urllib.request.Request(
+                f"http://127.0.0.1:{port}/api/v0/upload",
+                data=CON_BYTES,
+                headers=sign_upload(CHARLIE, CON_BYTES, now_ts, "p6-f01b-commit-con-01"),
+                method="POST",
+            )
+            st_con = None
+            try:
+                urllib.request.urlopen(req_con, timeout=5)
+            except urllib.error.HTTPError as e:
+                st_con = e.code
+            assert st_con == 403, f"F-01B real SQLite commit provenance conflict expected 403, got {st_con}"
+            assert CID_COMMIT_CON in kubo.pins, "F-01B cross-process conflict must NOT unpin winner's pin!"
+            assert srv.gateway_upload_limiter.get_upload_provenance(gw.extract_canonical_multihash(CID_COMMIT_CON)) == ALICE.address.lower()
+        finally:
+            srv.gateway_upload_limiter.commit = orig_commit
+
+        # ------------------------------------------------------------------
+        # L3-03: Post-GC transient RPC failure retries _flush_pending_provenance_purges() on next healthy cycle!
+        # ------------------------------------------------------------------
+        req_p = urllib.request.Request(
+            f"http://127.0.0.1:{port}/api/v0/upload",
+            data=PURGE_BYTES,
+            headers=sign_upload(ALICE, PURGE_BYTES, now_ts, "p6-l303-purge-retry-1"),
+            method="POST",
+        )
+        with urllib.request.urlopen(req_p, timeout=5) as rp:
+            assert rp.status == 200
+        mh_purge = gw.extract_canonical_multihash(CID_PURGE)
+        assert srv.gateway_upload_limiter.get_upload_provenance(mh_purge) == ALICE.address.lower()
+        reg.datasets.append({
+            "dataId": 3, "tokenId": 3,
+            "currentOwner": ALICE.address, "originalCreator": ALICE.address,
+            "rawCid": CID_PURGE, "summaryCid": "", "metadataCid": "", "status": 2,
+        })
+        reg.events.append({"dataId": 3, "newStatus": 2, "blockNumber": 99})
+        rec = gw.GdprErasureReconciler(reg, kubo, start_block=1, db_path=db_path, now_fn=lambda: now_ts + 10)
+        try:
+            # Make get_all_datasets succeed during revocation refcount + orphan checks, then fail DURING _flush_pending_provenance_purges!
+            orig_collect = rec._collect_anchored_owners_by_mh
+            fail_flush_once = [True]
+            def _flaky_collect():
+                if fail_flush_once[0] and kubo.gc_runs > 0:
+                    fail_flush_once[0] = False
+                    raise RuntimeError("Transient RPC timeout after run_gc()")
+                return orig_collect()
+            rec._collect_anchored_owners_by_mh = _flaky_collect
+            r_c1 = rec.reconcile_once()
+            assert r_c1["gcRan"] is True and r_c1["gcPending"] is False
+            assert r_c1["flushedProvenancePurges"] == 0
+            # Provenance is preserved during transient RPC outage (fail-closed)
+            assert srv.gateway_upload_limiter.get_upload_provenance(mh_purge) == ALICE.address.lower()
+            # Next healthy cycle: NO new revocations, NO new orphans, _gc_pending == False -> MUST retry & flush!
+            r_c2 = rec.reconcile_once()
+            assert r_c2["gcPending"] is False
+            assert r_c2["flushedProvenancePurges"] >= 1, f"L3-03 stranded pending_provenance_purges: {r_c2}"
+            assert srv.gateway_upload_limiter.get_upload_provenance(mh_purge) is None, "L3-03 failed to purge provenance on retry!"
+        finally:
+            rec.close()
+    finally:
+        srv.shutdown(); srv.server_close()
+
+# L3-02: Verify capsule_dispatcher.py queues missing_seed_key confirmed orders into pending_orders
+with open(os.path.join("scripts", "demo", "capsule_dispatcher.py"), "r", encoding="utf-8") as df:
+    disp_src = df.read()
+assert '"missing_seed_key"' in disp_src and "if data_id not in seed_keys:" in disp_src
+
+print("PHASE6_MICRO_POLISH_OK")
+`;
+    const out = execFileSync(resolvePythonBin(), ["-c", pyPhase6], { encoding: "utf8" });
+    expect(out).to.include("PHASE6_MICRO_POLISH_OK");
   });
 });

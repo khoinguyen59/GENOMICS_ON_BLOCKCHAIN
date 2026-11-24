@@ -56,6 +56,37 @@ export default function Navbar() {
     prevVoucherRequiredRef.current = faucetVoucherRequired;
   }, [faucetEnabled, faucetVoucherRequired, showFaucetVoucherModal, setShowFaucetVoucherModal]);
 
+  // Global '/' shortcut to focus top navbar search across Researcher, Donor, and Admin portals
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (document.querySelector('[role="dialog"][aria-modal="true"]')) return;
+      const activeEl = document.activeElement;
+      const activeTag = activeEl?.tagName;
+      if (
+        e.key === "/" &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.altKey &&
+        !["INPUT", "TEXTAREA", "SELECT"].includes(activeTag) &&
+        !activeEl?.isContentEditable
+      ) {
+        const navSearch = document.getElementById("nav-search-input");
+        if (navSearch) {
+          e.preventDefault();
+          navSearch.focus();
+          navSearch.select();
+        }
+      } else if (
+        e.key === "Escape" &&
+        (activeEl?.id === "nav-search-input" || activeEl?.id === "input-filter-search")
+      ) {
+        activeEl.blur();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
   const handleSubmitFaucetVoucher = async () => {
     setSubmittingVoucher(true);
     try {
@@ -103,7 +134,8 @@ export default function Navbar() {
               type="button"
               className="os2-search-clear"
               onClick={() => setFilterKeyword("")}
-              title={t("clearAll")}
+              title={t("ariaClearSearch")}
+              aria-label={t("ariaClearSearch")}
             >
               <CloseCrossIcon size={12} color="var(--text-muted)" />
             </button>

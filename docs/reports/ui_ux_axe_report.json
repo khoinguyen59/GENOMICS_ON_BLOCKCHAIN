@@ -13,7 +13,8 @@
       "rendered": true,
       "width": 24,
       "height": 24,
-      "meets24px": true
+      "meets24px": true,
+      "ariaLabel": "Xóa tìm kiếm"
     },
     "keyboardFocusVisible": {
       "focusedTag": "BUTTON",
@@ -21,6 +22,12 @@
       "matchesFocusVisible": true,
       "outlineStyle": "solid",
       "outlineWidth": "2px",
+      "passed": true
+    },
+    "globalSlashHotkey": {
+      "researcher": true,
+      "donor": true,
+      "admin": true,
       "passed": true
     }
   },

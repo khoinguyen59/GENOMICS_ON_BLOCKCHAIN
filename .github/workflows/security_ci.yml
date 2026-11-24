@@ -160,6 +160,7 @@ jobs:
           bash -n scripts/audit/swarm_baseline_gate.sh
           python -c "import py_compile, subprocess; files = subprocess.check_output(['git', 'ls-files', '*.py'], text=True).splitlines(); [py_compile.compile(f, doraise=True) for f in files if f.strip()]; print(f'py_compile OK: {len(files)} tracked .py files')"
           python scripts/audit/academic_hygiene_toolkit.py --selftest
+          python scripts/audit/verify_evidence_stream_b.py
 
       - name: Run Web3.py Contract ABI Verification
         run: python scripts/demo/web3_demo.py --offline-demo

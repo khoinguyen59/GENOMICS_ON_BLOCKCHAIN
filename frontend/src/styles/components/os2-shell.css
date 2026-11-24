@@ -295,8 +295,10 @@
 }
 
 .os2-top-search-box:focus-within {
-  border-color: #0086ff;
-  box-shadow: 0 0 0 2px rgba(0, 134, 255, 0.12);
+  border-color: var(--focus-ring-color);
+  outline: 2px solid var(--focus-ring-color);
+  outline-offset: 1px;
+  box-shadow: 0 0 0 3px var(--accent-blue-glow);
 }
 
 .os2-search-icon {
@@ -354,7 +356,7 @@
 [data-theme="light"] .os2-search-kbd {
   background: #f3f4f6;
   border-color: #e5e7eb;
-  color: #6b7280;
+  color: #4b5563;
 }
 
 .os2-top-right {

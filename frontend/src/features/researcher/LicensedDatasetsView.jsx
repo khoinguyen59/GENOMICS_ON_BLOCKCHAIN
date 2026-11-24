@@ -723,6 +723,27 @@ export default function LicensedDatasetsView({
                         {t("shaAnchorVerified")} ({item.rawDataHash ? item.rawDataHash.substring(0, 10) : ""}...)
                       </div>
 
+                      {item.partialWarning && (
+                        <div
+                          role="status"
+                          style={{
+                            marginBottom: "8px",
+                            padding: "8px 10px",
+                            borderRadius: "var(--radius-xs)",
+                            background: "var(--accent-amber-subtle)",
+                            border: "1px solid var(--accent-amber)",
+                            color: "var(--accent-amber-text)",
+                            fontSize: "11.5px",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "6px"
+                          }}
+                        >
+                          <AlertTriangleIcon size={13} color="var(--accent-amber-text)" />
+                          <span>{item.partialWarning}</span>
+                        </div>
+                      )}
+
                       {/* Preview Switcher */}
                       <div
                         style={{

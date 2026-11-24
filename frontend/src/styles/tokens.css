@@ -17,6 +17,7 @@
   --bg-surface: #ffffff;
   --bg-surface-solid: #ffffff;
   --bg-surface-elevated: #f1f5f9;
+  --bg-elevated: var(--bg-surface-elevated);
   --bg-surface-hover: #f1f5f9;
   --bg-input: #ffffff;
   --bg-input-focus: #ffffff;
@@ -113,6 +114,7 @@
   --bg-surface: rgba(11, 17, 32, 0.85);
   --bg-surface-solid: #0b1120;
   --bg-surface-elevated: rgba(19, 28, 49, 0.85);
+  --bg-elevated: var(--bg-surface-elevated);
   --bg-surface-hover: rgba(28, 41, 71, 0.9);
   --bg-input: rgba(6, 10, 20, 0.7);
   --bg-input-focus: rgba(8, 14, 28, 0.95);

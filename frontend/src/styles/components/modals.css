@@ -677,6 +677,12 @@
   box-shadow: 0 12px 30px rgba(0, 0, 0, 0.6), 0 0 16px rgba(16, 185, 129, 0.2);
 }
 
+.toast-warning {
+  border-color: rgba(245, 158, 11, 0.55);
+  color: #fcd34d;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.6), 0 0 16px rgba(245, 158, 11, 0.25);
+}
+
 /* ─── Light Mode Theme (OpenSea OS2 / Lovable Clean White) ─── */
 [data-theme="light"] .terminal-modal-backdrop {
   background: rgba(15, 23, 42, 0.45);
@@ -721,7 +727,7 @@
 }
 
 [data-theme="light"] .opensea-trait-type {
-  color: #0284c7;
+  color: #0369a1;
 }
 
 [data-theme="light"] .opensea-trait-val {
@@ -740,6 +746,10 @@
 
 [data-theme="light"] .opensea-crypto-proof-box {
   background: #f1f5f9;
+}
+
+[data-theme="light"] .opensea-full-hash {
+  color: #475569;
 }
 
 [data-theme="light"] .btn-opensea-large {
@@ -774,6 +784,12 @@
 [data-theme="light"] .toast-error {
   border-color: #fca5a5;
   color: #991b1b;
+}
+
+[data-theme="light"] .toast-warning {
+  border-color: #f59e0b;
+  background: #fffbeb;
+  color: #92400e;
 }
 
 @media (max-width: 768px) {

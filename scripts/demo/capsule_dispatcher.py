@@ -1475,6 +1475,31 @@ def main():
                 buyer = task["buyer"]
 
                 if data_id not in seed_keys:
+                    if task["confirmedOrder"] and order_key not in dispatched_keys and order_key not in quarantined:
+                        # L3-02: Persist confirmed orders whose dataset AES key is not yet in seed_keys
+                        # so hot-reloading seed_vault_file delivers them even after >5 blocks elapse.
+                        keep_missing_key = True
+                        try:
+                            di = registry.functions.getGenomicData(data_id).call()
+                            df = unpack_abi_outputs(registry_abi, "getGenomicData", di)
+                            st_val = int(df.get("status", di[9]))
+                            if st_val == 2:
+                                prune_order_state(pending_orders, dispatched_keys, quarantined, order_key)
+                                keep_missing_key = False
+                        except Exception as mk_err:
+                            if decode_custom_error(mk_err, error_selector_map) == "DataNotFound":
+                                prune_order_state(pending_orders, dispatched_keys, quarantined, order_key)
+                                keep_missing_key = False
+                        if keep_missing_key:
+                            mark_pending_order(
+                                pending_orders,
+                                order_key,
+                                data_id,
+                                buyer,
+                                task["isEscrow"],
+                                "missing_seed_key",
+                            )
+                    skipped_count += 1
                     continue
 
                 try:

@@ -255,7 +255,7 @@ input.terminal-input[id*="salt"] {
 .mint-action-btn {
   width: 100%;
   height: 48px;
-  background: linear-gradient(135deg, #0284c7 0%, #2563eb 50%, #4f46e5 100%);
+  background: linear-gradient(135deg, #0369a1 0%, #2563eb 50%, #4f46e5 100%);
   color: #ffffff;
   border: 1px solid rgba(255, 255, 255, 0.2);
   border-radius: var(--radius-md);

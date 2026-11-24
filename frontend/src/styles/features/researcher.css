@@ -760,13 +760,18 @@
 }
 
 .filter-count-badge {
-  background: var(--accent-cyan);
+  background: #38bdf8;
   color: #040711;
   font-size: 11.5px;
   font-family: var(--font-mono);
   font-weight: 800;
   padding: 2px 7px;
   border-radius: var(--radius-full);
+}
+
+[data-theme="light"] .filter-count-badge {
+  background: #0369a1;
+  color: #ffffff;
 }
 
 /* Toolbar Integrated Search Field */
@@ -1880,21 +1885,21 @@
 }
 
 [data-theme="light"] .nft-gene-badge {
-  background: rgba(255, 255, 255, 0.92);
+  background: rgba(255, 255, 255, 0.96);
   border-color: #e2e8f0;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
 }
 
 [data-theme="light"] .nft-gene-badge .gene-name {
-  color: #0284c7;
+  color: #0369a1;
 }
 
 [data-theme="light"] .nft-gene-badge .gene-chrom {
-  color: #64748b;
+  color: #475569;
 }
 
 [data-theme="light"] .nft-format-badge {
-  background: rgba(255, 255, 255, 0.92);
+  background: rgba(255, 255, 255, 0.96);
   border-color: #e2e8f0;
   color: #334155;
 }
@@ -1905,9 +1910,9 @@
 }
 
 [data-theme="light"] .spotlight-floating-badge {
-  background: rgba(255, 255, 255, 0.92);
+  background: rgba(255, 255, 255, 0.96);
   border-color: #e2e8f0;
-  color: #0284c7;
+  color: #0369a1;
 }
 
 [data-theme="light"] .spotlight-format-badge {

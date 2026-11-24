@@ -15,6 +15,7 @@
 
 import { ethers } from "ethers";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import {
   encryptGenomicData,
@@ -347,6 +348,9 @@ async function main() {
     attackerPriceBlocked = true;
     console.log(`    ✔ Attacker updateDataPrice correctly rejected: ${err.message.split("\n")[0]}`);
   }
+  if (!attackerPriceBlocked) {
+    throw new Error("SECURITY VIOLATION: Unauthorized attacker was able to update dataset price!");
+  }
 
   // --------------------------------------------------------------------------
   // STEP 9b: 3-ARTIFACT HASH ANCHORING, BLINDED SEARCH & 5% STUDY REUSE FEE
@@ -384,7 +388,11 @@ async function main() {
   const studyCommit = ethers.keccak256(ethers.toUtf8Bytes(`LIVE_E2E_STUDY_REUSE_${Date.now()}`));
   await trackTx(
     "recordStudyReuse (5% Fee + EIP-2981 Royalty)",
-    registryContract.connect(researcher).recordStudyReuse(currentDataId, studyCommit)
+    registryContract.connect(researcher)["recordStudyReuse(uint256,bytes32,uint256)"](
+      currentDataId,
+      studyCommit,
+      reuseFeeWei
+    )
   );
   const receiptOk = await registryContract.studyReuseReceipts(currentDataId, studyCommit);
   const reuseCnt = await registryContract.datasetReuseCount(currentDataId);
@@ -396,7 +404,7 @@ async function main() {
   // --------------------------------------------------------------------------
   // STEP 10: METRICS COMPILATION
   // --------------------------------------------------------------------------
-  const summaryFilePath = path.resolve(".agents/teamwork/worker_r8_live_exec/live_execution_summary.md");
+  const summaryFilePath = path.join(os.tmpdir(), "genochain_live_execution_summary.md");
   fs.mkdirSync(path.dirname(summaryFilePath), { recursive: true });
   let mdSummary = `# GenoChain Live Execution & Empirical Verification Summary\n\n`;
   mdSummary += `**Execution Timestamp**: \`${results.executionTimestamp}\`  \n`;

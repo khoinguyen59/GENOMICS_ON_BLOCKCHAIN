@@ -525,10 +525,12 @@ class UploadRateLimiter:
                 CREATE TABLE IF NOT EXISTS gdpr_erased_shas (
                     sha256 TEXT PRIMARY KEY,
                     canonical_owner TEXT NOT NULL,
-                    erased_at INTEGER NOT NULL
+                    erased_at INTEGER NOT NULL,
+                    erasure_rev INTEGER NOT NULL DEFAULT 1
                 )
                 """
             )
+            _ensure_column(self._conn, "gdpr_erased_shas", "erasure_rev", "INTEGER NOT NULL DEFAULT 1")
 
     def _prune_locked(self, cutoff: int) -> None:
         self._conn.execute("DELETE FROM upload_quota_events WHERE ts < ?", (int(cutoff),))
@@ -958,10 +960,11 @@ class UploadRateLimiter:
             # (blocks dag-pb CIDv0 <-> raw-leaves CIDv1 bypass, V2B unverified backfill poisoning,
             #  and post-GC front-runner resurrection)
             pre_stream_erased_at: int | None = None
+            pre_stream_erasure_rev: int | None = None
             earliest_verified_sha_owner: str | None = None
             if sha:
                 erased_row = self._conn.execute(
-                    "SELECT canonical_owner, erased_at FROM gdpr_erased_shas WHERE sha256 = ?",
+                    "SELECT canonical_owner, erased_at, erasure_rev FROM gdpr_erased_shas WHERE sha256 = ?",
                     (sha,),
                 ).fetchone()
                 if erased_row is not None:
@@ -980,6 +983,7 @@ class UploadRateLimiter:
                             set(),
                         )
                     pre_stream_erased_at = int(erased_row[1]) if erased_row[1] is not None else 0
+                    pre_stream_erasure_rev = int(erased_row[2]) if len(erased_row) > 2 and erased_row[2] is not None else 1
                 # BOOST-H01 defense: ONLY consult cryptographically gateway-verified (sha_verified = 1)
                 # rows ordered earliest-first; NEVER union unverified on-chain backfills into eff_sha_allowed!
                 sha_rows = self._conn.execute(
@@ -1104,6 +1108,7 @@ class UploadRateLimiter:
                 cur_info["is_new_pin_claim"] = is_new_pin_claim
                 cur_info["content_sha256"] = sha
                 cur_info["pre_stream_erased_at"] = pre_stream_erased_at
+                cur_info["pre_stream_erasure_rev"] = pre_stream_erasure_rev
 
             return True, 200, "ok", eff_canonical_prov, eff_allowed_owners
 
@@ -1135,6 +1140,7 @@ class UploadRateLimiter:
                 content_sha256 if content_sha256 is not None else (info.get("content_sha256") if info else "")
             )
             pre_stream_erased_at = info.get("pre_stream_erased_at") if isinstance(info, dict) else None
+            pre_stream_erasure_rev = info.get("pre_stream_erasure_rev") if isinstance(info, dict) else None
             sha_rev_lookup = self._is_sha_revoked_fn
         mh = (multihash or (_try_canonical_multihash(cid) if cid else "") or "").strip()
         can_claim_cid = True
@@ -1183,15 +1189,21 @@ class UploadRateLimiter:
                             verified_sha_owners = [str(r[0]).strip().lower() for r in s_rows if r and r[0]]
                             earliest_verified_sha = verified_sha_owners[0] if verified_sha_owners else None
                             er_row = self._conn.execute(
-                                "SELECT canonical_owner, erased_at FROM gdpr_erased_shas WHERE sha256 = ?",
+                                "SELECT canonical_owner, erased_at, erasure_rev FROM gdpr_erased_shas WHERE sha256 = ?",
                                 (sha,),
                             ).fetchone()
                             if sha_revoked_midstream:
                                 sha_erased_blocked = True
                             elif er_row is not None:
                                 cur_erased_at = int(er_row[1]) if er_row[1] is not None else 0
-                                # Never bypass a newly recorded mid-stream GDPR tombstone with stale pre-stream allowed_owners!
-                                if pre_stream_erased_at is None or cur_erased_at > int(pre_stream_erased_at):
+                                cur_erasure_rev = int(er_row[2]) if len(er_row) > 2 and er_row[2] is not None else 1
+                                # Never bypass a newly recorded mid-stream GDPR tombstone (even in the same wall-clock second!)
+                                if (
+                                    pre_stream_erased_at is None
+                                    or cur_erased_at > int(pre_stream_erased_at)
+                                    or pre_stream_erasure_rev is None
+                                    or cur_erasure_rev > int(pre_stream_erasure_rev)
+                                ):
                                     sha_erased_blocked = True
                         sha_allows_caller = (
                             (not sha_erased_blocked)
@@ -3290,10 +3302,12 @@ class GdprErasureReconciler:
                     CREATE TABLE IF NOT EXISTS gdpr_erased_shas (
                         sha256 TEXT PRIMARY KEY,
                         canonical_owner TEXT NOT NULL,
-                        erased_at INTEGER NOT NULL
+                        erased_at INTEGER NOT NULL,
+                        erasure_rev INTEGER NOT NULL DEFAULT 1
                     )
                     """
                 )
+                _ensure_column(self._conn, "gdpr_erased_shas", "erasure_rev", "INTEGER NOT NULL DEFAULT 1")
             meta = dict(self._conn.execute("SELECT k, v FROM gdpr_meta").fetchall())
             if "last_block" in meta:
                 self.last_block = max(self.deployed_block, int(meta["last_block"]))
@@ -3425,10 +3439,11 @@ class GdprErasureReconciler:
         self,
         excluding_data_id: int,
         revoked_owner_lower: str,
+        revoked_creator_lower: str = "",
     ) -> set[str]:
         """
         Collect canonical multihashes referenced by other non-revoked (status != 2) datasets
-        scoped to the SAME dataset owner, an earlier dataId, OR the recorded upload_provenance
+        scoped to the SAME dataset owner/creator, an earlier dataId, OR the recorded upload_provenance
         uploader (protecting legitimate owners from front-runner GDPR erasure attacks while
         still preventing third-party pin-lock griefing).
         """
@@ -3436,6 +3451,7 @@ class GdprErasureReconciler:
         if not callable(getter):
             return set()
         datasets = getter() or []
+        revoked_idents = {a for a in (revoked_owner_lower, revoked_creator_lower) if a}
         all_other_mhs: set[str] = set()
         for ds in datasets:
             if not isinstance(ds, dict):
@@ -3459,7 +3475,8 @@ class GdprErasureReconciler:
                 continue
             other_owner = str(ds.get("currentOwner") or "").strip().lower()
             other_creator = _resolve_item_original_creator(self.registry_adapter, ds)
-            is_same_owner = other_owner == revoked_owner_lower
+            other_idents = {a for a in (other_owner, other_creator) if a}
+            is_same_owner = bool(revoked_idents and (other_idents & revoked_idents))
             is_earlier_dataset = ds_id > 0 and ds_id < excluding_data_id
             for field in ("rawCid", "summaryCid", "metadataCid"):
                 mh = _try_canonical_multihash(ds.get(field))
@@ -3525,12 +3542,14 @@ class GdprErasureReconciler:
         """
         Cryptographically verify whether Kubo's content for `cid` hashes to `expected_sha`.
         Returns True/False when kubo_adapter supports streaming/cat, or None for minimal test doubles.
+        Missing-CID errors return False; transient Kubo transport/5xx errors propagate so
+        reconcile_once() marks reconcile_incomplete = True and retries safely.
         """
         open_stream_fn = getattr(self.kubo_adapter, "open_cid_stream", None)
         if callable(open_stream_fn):
             try:
                 resp = open_stream_fn(cid)
-            except Exception:
+            except (FileNotFoundError, KeyError, ValueError):
                 return False
             try:
                 h = hashlib.sha256()
@@ -3544,8 +3563,6 @@ class GdprErasureReconciler:
                         return False
                     h.update(chunk)
                 return h.hexdigest() == expected_sha
-            except Exception:
-                return False
             finally:
                 try:
                     resp.close()
@@ -3555,12 +3572,54 @@ class GdprErasureReconciler:
         if callable(cat_fn):
             try:
                 data = cat_fn(cid)
-                if data is None or len(data) > MAX_STREAM_BYTES:
-                    return False
-                return hashlib.sha256(bytes(data)).hexdigest() == expected_sha
-            except Exception:
+            except (FileNotFoundError, KeyError, ValueError):
                 return False
+            if data is None or len(data) > MAX_STREAM_BYTES:
+                return False
+            return hashlib.sha256(bytes(data)).hexdigest() == expected_sha
         return None
+
+    def _verify_onchain_sha_cid_for_erasure(
+        self,
+        cid_str: str,
+        mh: str,
+        expected_sha: str,
+        *,
+        same_owner_active_mhs: set[str],
+        other_owner_active_mhs: set[str],
+        first_mh_owners: dict[str, set[str]],
+        canonical_owners: set[str],
+    ) -> bool:
+        """
+        Verify whether an UNVERIFIED on-chain dataset reference `(expected_sha, cid_str)` from
+        `catalog_index.get_datasets_by_sha` or `other_ds` actually contains content matching
+        `expected_sha` before allowing GDPR erasure to unpin `cid_str`.
+        Blocks cross-dataset arbitrary active-pin destruction & booby-trap attacks where an
+        attacker pairs `summaryHash = H_att` (or `H_alice`) with `summaryCid = VictimActiveCid`.
+        """
+        if not mh or mh in same_owner_active_mhs:
+            return False
+        prov_det = self._get_upload_provenance_details(mh)
+        if prov_det is not None and prov_det[2] == 1:
+            # Cryptographically gateway-hashed provenance exists for mh:
+            # ONLY erase if its verified SHA-256 genuinely equals expected_sha!
+            return prov_det[1] == expected_sha
+        # No sha_verified=1 row in SQLite: verify live Kubo content directly when supported
+        kubo_match = self._verify_kubo_cid_sha256(cid_str, expected_sha)
+        if kubo_match is True:
+            return True
+        if kubo_match is False:
+            return False
+        # Minimal test double without open_cid_stream/cat_cid:
+        # Fail closed if another active owner, provenance row, or first-registrant owns mh!
+        if mh in other_owner_active_mhs:
+            return False
+        if prov_det is not None and prov_det[0] and canonical_owners and prov_det[0] not in canonical_owners:
+            return False
+        first_m_owners = first_mh_owners.get(mh)
+        if first_m_owners and canonical_owners and not (first_m_owners & canonical_owners):
+            return False
+        return True
 
     def _verify_dataset_cids_back_sha(
         self,
@@ -3622,14 +3681,15 @@ class GdprErasureReconciler:
         with self._lock, _sqlite_write_tx(self._conn):
             self._conn.executemany(
                 """
-                INSERT INTO gdpr_erased_shas(sha256, canonical_owner, erased_at)
-                VALUES(?, ?, ?)
+                INSERT INTO gdpr_erased_shas(sha256, canonical_owner, erased_at, erasure_rev)
+                VALUES(?, ?, ?, 1)
                 ON CONFLICT(sha256) DO UPDATE SET
                     canonical_owner = CASE
                         WHEN gdpr_erased_shas.canonical_owner = '' AND excluded.canonical_owner != '' THEN excluded.canonical_owner
                         ELSE gdpr_erased_shas.canonical_owner
                     END,
-                    erased_at = MAX(gdpr_erased_shas.erased_at, excluded.erased_at)
+                    erased_at = MAX(gdpr_erased_shas.erased_at, excluded.erased_at),
+                    erasure_rev = gdpr_erased_shas.erasure_rev + 1
                 """,
                 [(s, owner_l, now_i) for s in shas],
             )
@@ -3642,6 +3702,7 @@ class GdprErasureReconciler:
         candidate_shas: set[str],
         *,
         get_recursive_pins=None,
+        out_context: dict | None = None,
     ) -> tuple[set[str], set[str], list[dict]]:
         """
         Determine which candidate content SHA-256 digests of `excluding_data_id` are BOTH:
@@ -3719,9 +3780,20 @@ class GdprErasureReconciler:
             ds_meta.append((ds_id, st, idents, shas_here, mhs_here, paired_cids_by_sha))
 
         same_owner_active_mhs: set[str] = set()
+        other_owner_active_mhs: set[str] = set()
         for ds_id, st, idents, _, mhs_here, _ in ds_meta:
-            if ds_id != excluding_data_id and st != 2 and (idents & revoked_identities):
-                same_owner_active_mhs.update(mhs_here)
+            if ds_id != excluding_data_id and st != 2:
+                if idents & revoked_identities:
+                    same_owner_active_mhs.update(mhs_here)
+                else:
+                    other_owner_active_mhs.update(mhs_here)
+
+        canonical_owners_by_sha: dict[str, set[str]] = {}
+        if isinstance(out_context, dict):
+            out_context["other_owner_active_mhs"] = other_owner_active_mhs
+            out_context["first_mh_owners"] = first_mh_owners
+            out_context["canonical_owners_by_sha"] = canonical_owners_by_sha
+            out_context["ds_meta"] = ds_meta
 
         if not candidate_shas:
             return set(), same_owner_active_mhs, sorted_ds
@@ -3783,11 +3855,12 @@ class GdprErasureReconciler:
             )
             if not shared_by_active_auth:
                 erasable_shas.add(sha_val)
+                canonical_owners_by_sha[sha_val] = auth_group
 
         return erasable_shas, same_owner_active_mhs, sorted_ds
 
     def _collect_cross_codec_pins_for_shas(self, shas: set[str]) -> tuple[list[str], set[str]]:
-        """Lookup tracked_pins, pending_uploads, and upload_provenance rows matching any target content SHA-256."""
+        """Lookup gateway-verified tracked_pins, pending_uploads, and sha_verified=1 upload_provenance rows."""
         if not shas:
             return [], set()
         found_cids: list[str] = []
@@ -3806,7 +3879,7 @@ class GdprErasureReconciler:
                         if m_s:
                             found_mhs.add(m_s)
                 for (mh_val,) in self._conn.execute(
-                    "SELECT multihash FROM upload_provenance WHERE sha256 = ?",
+                    "SELECT multihash FROM upload_provenance WHERE sha256 = ? AND sha_verified = 1",
                     (sha,),
                 ).fetchall():
                     m_s = str(mh_val or "").strip()
@@ -4003,6 +4076,7 @@ class GdprErasureReconciler:
                 except Exception:
                     # Fail closed on RPC outage: never unpin an upload we cannot verify is unanchored
                     continue
+                anchored_owners_by_mh = fresh_anchored_pre
                 if mh_s and expected_uploaders and (fresh_anchored_pre.get(mh_s, set()) & expected_uploaders):
                     done_anchored_rows.append((cid_s, obs_ts))
                     continue
@@ -4021,7 +4095,7 @@ class GdprErasureReconciler:
                             unpinned_here.append(target_c)
                     # L3-L2 + L3-01 post-unpin TOCTOU recovery: if an identical-CID re-upload OR an
                     # on-chain registerGenomicData anchor landed during the Kubo unpin HTTP call,
-                    # restore the pin immediately and skip tracked_pins deletion / provenance purge!
+                    # restore EVERY unpinned alias immediately and skip tracked_pins deletion / provenance purge!
                     with self._lock:
                         post_pending = self._conn.execute(
                             "SELECT uploaded_at FROM pending_uploads WHERE cid = ?",
@@ -4040,6 +4114,7 @@ class GdprErasureReconciler:
                     if not concurrently_refreshed and mh_s and expected_uploaders:
                         try:
                             fresh_anchored_post = self._collect_anchored_owners_by_mh()
+                            anchored_owners_by_mh = fresh_anchored_post
                             concurrently_anchored = bool(
                                 fresh_anchored_post.get(mh_s, set()) & expected_uploaders
                             )
@@ -4047,12 +4122,18 @@ class GdprErasureReconciler:
                             post_anchor_check_failed = True
                     if concurrently_refreshed or concurrently_anchored or post_anchor_check_failed:
                         pin_fn = getattr(self.kubo_adapter, "pin_cid", None)
+                        repin_targets = list(unpinned_here) if unpinned_here else [cid_s]
+                        repin_ok = True
                         if callable(pin_fn):
-                            try:
-                                pin_fn(cid_s)
-                            except Exception:
-                                pass
-                        if concurrently_anchored:
+                            for rep_c in repin_targets:
+                                try:
+                                    if pin_fn(rep_c) is False:
+                                        repin_ok = False
+                                except Exception:
+                                    repin_ok = False
+                        elif unpinned_here:
+                            repin_ok = False
+                        if concurrently_anchored and repin_ok:
                             done_anchored_rows.append((cid_s, obs_ts))
                         continue
                     for target_c in unpinned_here:
@@ -4121,7 +4202,9 @@ class GdprErasureReconciler:
                 c = str(item.get(field) or "").strip()
                 if c and c not in cids:
                     cids.append(c)
-            shared_mhs = self._collect_owner_scoped_referenced_mhs(data_id, revoked_owner_l)
+            shared_mhs = self._collect_owner_scoped_referenced_mhs(
+                data_id, revoked_owner_l, revoked_creator_l
+            )
             candidate_mhs: set[str] = set()
             for c in cids:
                 mh_c = _try_canonical_multihash(c)
@@ -4179,6 +4262,7 @@ class GdprErasureReconciler:
                     pins_cache_box["loaded"] = True
                 return pins_cache_box["val"]
 
+            sha_ctx: dict = {}
             try:
                 target_shas, same_owner_active_mhs, all_ds = self._resolve_authorized_erasable_shas(
                     data_id,
@@ -4186,11 +4270,16 @@ class GdprErasureReconciler:
                     revoked_creator_l,
                     candidate_shas,
                     get_recursive_pins=_get_recursive_pins_once,
+                    out_context=sha_ctx,
                 )
             except Exception:
                 reconcile_incomplete = True
                 continue
             if target_shas:
+                other_owner_active_mhs = sha_ctx.get("other_owner_active_mhs") or set()
+                first_mh_owners = sha_ctx.get("first_mh_owners") or {}
+                canonical_owners_by_sha = sha_ctx.get("canonical_owners_by_sha") or {}
+                ds_meta_rows = sha_ctx.get("ds_meta") or []
                 sha_cids, sha_mhs = self._collect_cross_codec_pins_for_shas(target_shas)
                 for sc in sha_cids:
                     try:
@@ -4206,6 +4295,11 @@ class GdprErasureReconciler:
                 for smh in sha_mhs:
                     if smh and smh not in same_owner_active_mhs:
                         target_mhs.add(smh)
+                # Collect unverified on-chain (sha, cid) pairings from catalog_index & ds_meta,
+                # then verify EACH candidate cryptographically (sha_verified=1 or live Kubo SHA-256)
+                # before allowing erasure — closing arbitrary cross-dataset active-pin destruction & booby-traps!
+                unverified_sha_candidates: list[tuple[str, str, str]] = []
+                seen_cand_pairs: set[tuple[str, str]] = set()
                 if self.catalog_index is not None:
                     for t_sha in target_shas:
                         for ent in self.catalog_index.get_datasets_by_sha(t_sha):
@@ -4217,32 +4311,43 @@ class GdprErasureReconciler:
                                 emh = extract_canonical_multihash(ec)
                             except ValueError:
                                 continue
-                            if emh not in same_owner_active_mhs:
-                                target_mhs.add(emh)
-                                if ec not in cids_to_unpin:
-                                    cids_to_unpin.append(ec)
-                for other_ds in all_ds:
-                    if int(other_ds.get("dataId", 0)) == data_id:
+                            key_p = (t_sha, ec)
+                            if key_p not in seen_cand_pairs:
+                                seen_cand_pairs.add(key_p)
+                                unverified_sha_candidates.append((t_sha, ec, emh))
+                for ds_id_m, _, _, _, _, paired_map_m in ds_meta_rows:
+                    if ds_id_m == data_id:
                         continue
-                    for h_field, c_field in (
-                        ("rawDataHash", "rawCid"),
-                        ("summaryHash", "summaryCid"),
-                        ("summaryDataHash", "summaryCid"),
-                        ("metadataHash", "metadataCid"),
-                    ):
-                        oh = _normalize_sha256_hex(other_ds.get(h_field))
-                        if oh and oh in target_shas:
-                            oc = str(other_ds.get(c_field) or "").strip()
-                            if oc:
-                                try:
-                                    validate_cid(oc)
-                                    omh = extract_canonical_multihash(oc)
-                                except ValueError:
-                                    continue
-                                if omh not in same_owner_active_mhs:
-                                    target_mhs.add(omh)
-                                    if oc not in cids_to_unpin:
-                                        cids_to_unpin.append(oc)
+                    for t_sha in target_shas:
+                        for oc in paired_map_m.get(t_sha, []):
+                            if not oc:
+                                continue
+                            try:
+                                validate_cid(oc)
+                                omh = extract_canonical_multihash(oc)
+                            except ValueError:
+                                continue
+                            key_p = (t_sha, oc)
+                            if key_p not in seen_cand_pairs:
+                                seen_cand_pairs.add(key_p)
+                                unverified_sha_candidates.append((t_sha, oc, omh))
+                try:
+                    for t_sha, cand_cid, cand_mh in unverified_sha_candidates:
+                        if self._verify_onchain_sha_cid_for_erasure(
+                            cand_cid,
+                            cand_mh,
+                            t_sha,
+                            same_owner_active_mhs=same_owner_active_mhs,
+                            other_owner_active_mhs=other_owner_active_mhs,
+                            first_mh_owners=first_mh_owners,
+                            canonical_owners=canonical_owners_by_sha.get(t_sha, set()),
+                        ):
+                            target_mhs.add(cand_mh)
+                            if cand_cid not in cids_to_unpin:
+                                cids_to_unpin.append(cand_cid)
+                except Exception:
+                    reconcile_incomplete = True
+                    continue
 
             # Also unpin ANY pinned CIDv0/CIDv1 alias in Kubo sharing the exact canonical multihash.
             # NEVER silently swallow transient /api/v0/pin/ls errors: retry on next cycle instead of marking erased!
@@ -4552,6 +4657,7 @@ def create_gateway_server(
             Drain a bounded (<= EARLY_ABORT_DRAIN_MAX_BYTES) fixed-length POST body before sending
             an early-abort JSON rejection so synchronous HTTP clients (e.g. urllib/http.client on
             Windows loopback) finish sendall() cleanly without a kernel TCP RST (WinError 10053).
+            Enforces a strict total wall-clock monotonic deadline (anti-slowloris) via read1().
             Returns True if the request body was fully drained, False otherwise.
             """
             unread = getattr(self, "_post_unread_cl", None)
@@ -4560,14 +4666,22 @@ def create_gateway_server(
             if not isinstance(unread, int) or unread < 0 or unread > EARLY_ABORT_DRAIN_MAX_BYTES:
                 return False
             prev_timeout = None
+            has_timeout_api = False
             sock = getattr(self, "connection", None)
+            read_fn = getattr(self.rfile, "read1", self.rfile.read)
+            deadline = time.monotonic() + EARLY_ABORT_DRAIN_TIMEOUT_SEC
             try:
                 if sock is not None and hasattr(sock, "gettimeout") and hasattr(sock, "settimeout"):
                     prev_timeout = sock.gettimeout()
-                    sock.settimeout(EARLY_ABORT_DRAIN_TIMEOUT_SEC)
+                    has_timeout_api = True
                 remaining = unread
                 while remaining > 0:
-                    chunk = self.rfile.read(min(STREAM_CHUNK_BYTES, remaining))
+                    time_left = deadline - time.monotonic()
+                    if time_left <= 0.0:
+                        return False
+                    if has_timeout_api:
+                        sock.settimeout(max(0.05, time_left))
+                    chunk = read_fn(min(STREAM_CHUNK_BYTES, remaining))
                     if not chunk:
                         return False
                     remaining -= len(chunk)
@@ -4576,7 +4690,7 @@ def create_gateway_server(
             except Exception:
                 return False
             finally:
-                if sock is not None and prev_timeout is not None and hasattr(sock, "settimeout"):
+                if has_timeout_api and sock is not None:
                     try:
                         sock.settimeout(prev_timeout)
                     except Exception:
@@ -4595,19 +4709,21 @@ def create_gateway_server(
                 self.close_connection = True
                 drained_cleanly = self._drain_bounded_unread_post_body()
             body = json.dumps(payload).encode("utf-8")
-            self.send_response(status)
-            self._send_common_headers()
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(body)))
-            if early_abort_post or self.close_connection:
-                self.send_header("Connection", "close")
-            self.end_headers()
-            if send_body:
-                self.wfile.write(body)
             try:
+                self.send_response(status)
+                self._send_common_headers()
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                if early_abort_post or self.close_connection:
+                    self.send_header("Connection", "close")
+                self.end_headers()
+                if send_body:
+                    self.wfile.write(body)
                 self.wfile.flush()
-            except Exception:
-                pass
+            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError):
+                if not early_abort_post:
+                    raise
+                return
             if early_abort_post and not drained_cleanly:
                 sock = getattr(self, "connection", None)
                 if sock is not None and hasattr(sock, "shutdown"):
@@ -4924,6 +5040,7 @@ def create_gateway_server(
                     while remaining > 0:
                         chunk = self.rfile.read(min(STREAM_CHUNK_BYTES, remaining))
                         if not chunk:
+                            self._post_unread_cl = 0
                             with metrics_lock:
                                 metrics["requestsDenied"] += 1
                             self._send_json(

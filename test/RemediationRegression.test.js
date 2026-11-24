@@ -3916,7 +3916,7 @@ print("R18_06P_PHASE7_GATEWAY_INVARIANTS_OK")
     expect(seedCidV0).to.not.equal(seedCidV1);
 
     const pyPhase8Gateway = `
-import hashlib, http.client, io, json, os, sqlite3, sys, tempfile, threading, time, urllib.error, urllib.request
+import hashlib, http.client, io, json, os, socket, sqlite3, sys, tempfile, threading, time, urllib.error, urllib.request
 from eth_account import Account
 from eth_account.messages import encode_defunct
 import deploy.ipfs_access_gateway as gw
@@ -4325,6 +4325,148 @@ with tempfile.TemporaryDirectory() as td:
         assert CID_ORPH2 not in unp_list and CID_ORPH2 in kubo.pins, f"L3-01 post-unpin anchor recovery failed: {unp_list}"
         assert srv.gateway_upload_limiter.get_upload_provenance(gw.extract_canonical_multihash(CID_ORPH1)) == VICTIM.address.lower()
         assert srv.gateway_upload_limiter.get_upload_provenance(gw.extract_canonical_multihash(CID_ORPH2)) == VICTIM.address.lower()
+
+        # ------------------------------------------------------------------
+        # 7. Cross-Dataset Arbitrary Active-Pin Destruction & Booby-Trap Defense
+        #    (Attacker pairs summaryHash=H_ATK_D with summaryCid=SEED_CID_V0 / CID_V1 and revokes;
+        #     AND plants summaryHash=V2A_SHA with summaryCid=SEED_CID_V0 so Victim revoking #19
+        #     cannot booby-trap ALICE's active Seed #1 pin — tested warm AND cold minimal!)
+        # ------------------------------------------------------------------
+        # Ensure Victim's pending CID_V1 and Attacker's CID_ATK_D are freshly pinned after Step 6's +4000s orphan GC
+        st_x_v, _ = post_upload(VICTIM, V1_BYTES, "p8-xds-victim-pend-0001")
+        st_x_a, _ = post_upload(ATTACKER, ATK_D_BYTES, "p8-xds-atk-dummy-00001")
+        assert st_x_v == 200 and st_x_a == 200
+        assert SEED_CID_V0 in kubo.pins and CID_V1 in kubo.pins and CID_ATK_D in kubo.pins
+        reg.datasets.extend([
+            {
+                "dataId": 40, "tokenId": 40, "currentOwner": ATTACKER.address, "originalCreator": ATTACKER.address,
+                "rawDataHash": "0x" + ATK_D_SHA, "summaryHash": "", "metadataHash": "",
+                "rawCid": CID_ATK_D, "summaryCid": "", "metadataCid": "", "status": 2,
+            },
+            {
+                "dataId": 41, "tokenId": 41, "currentOwner": ATTACKER.address, "originalCreator": ATTACKER.address,
+                "rawDataHash": "0x" + "91" * 32, "summaryHash": "0x" + ATK_D_SHA, "metadataHash": "0x" + ATK_D_SHA,
+                "rawCid": CID_DUMMY_UNP, "summaryCid": SEED_CID_V0, "metadataCid": CID_V1, "status": 2,
+            },
+            {
+                "dataId": 42, "tokenId": 42, "currentOwner": ATTACKER.address, "originalCreator": ATTACKER.address,
+                "rawDataHash": "0x" + "92" * 32, "summaryHash": "0x" + V2A_SHA, "metadataHash": "",
+                "rawCid": CID_DUMMY_UNP, "summaryCid": SEED_CID_V0, "metadataCid": "", "status": 0,
+            },
+        ])
+        reg.events.extend([
+            {"dataId": 40, "newStatus": 2, "blockNumber": 299},
+            {"dataId": 41, "newStatus": 2, "blockNumber": 299},
+        ])
+        srv.gateway_catalog_index.refresh_now()
+        rec_xds = gw.GdprErasureReconciler(
+            reg, kubo, start_block=299, db_path=db_path, catalog_index=srv.gateway_catalog_index
+        )
+        try:
+            rec_xds.reconcile_once()
+        finally:
+            rec_xds.close()
+        assert CID_ATK_D not in kubo.pins, "Attacker's own revoked dataId=40 pin was not erased!"
+        assert SEED_CID_V0 in kubo.pins, "Cross-dataset summaryHash/summaryCid attack destroyed ALICE's active Seed #1 pin!"
+        assert CID_V1 in kubo.pins, "Cross-dataset metadataHash/metadataCid attack destroyed Victim's pending pin!"
+
+        # Booby-trap check: Victim now legitimately revokes dataId=19 (V2A_SHA) -> CID_V2A erased, ALICE's Seed #1 MUST survive!
+        for ds in reg.datasets:
+            if ds["dataId"] == 19:
+                ds["status"] = 2
+        reg.events.append({"dataId": 19, "newStatus": 2, "blockNumber": 300})
+        srv.gateway_catalog_index.refresh_now()
+        rec_bt = gw.GdprErasureReconciler(
+            reg, kubo, start_block=300, db_path=db_path, catalog_index=srv.gateway_catalog_index
+        )
+        try:
+            rec_bt.reconcile_once()
+        finally:
+            rec_bt.close()
+        assert CID_V2A not in kubo.pins, "Legitimate revocation of dataId=19 failed to erase CID_V2A!"
+        assert SEED_CID_V0 in kubo.pins, "Booby-trap dataId=42 destroyed ALICE's active Seed #1 pin when Victim revoked dataId=19!"
+
+        # Cold-SQLite minimal-Kubo (no cat_cid/open_cid_stream) defense for cross-dataset attack
+        class MinKubo:
+            def __init__(self, pins):
+                self.pins = dict(pins)
+            def health_check(self): return True
+            def list_recursive_pins(self): return list(self.pins.keys())
+            def unpin_cid(self, cid): return self.pins.pop(cid, None) is not None
+            def run_gc(self): return True
+        min_k = MinKubo({SEED_CID_V0: 100, CID_ATK_D: 10, CID_V2A: 10})
+        rec_min = gw.GdprErasureReconciler(reg, min_k, start_block=299, db_path=os.path.join(td, "cold_xds_min.sqlite"))
+        try:
+            rec_min.reconcile_once()
+        finally:
+            rec_min.close()
+        assert SEED_CID_V0 in min_k.pins, "Cold minimal-Kubo cross-dataset/booby-trap attack destroyed ALICE's active Seed #1 pin!"
+
+        # ------------------------------------------------------------------
+        # 8. Same-Second erasure_rev Monotonic Mid-Stream commit() GDPR Guard
+        # ------------------------------------------------------------------
+        lim_ss = gw.UploadRateLimiter(db_path=os.path.join(td, "same_sec.sqlite"))
+        try:
+            T_SS = 1732450123
+            mh_ss = gw.extract_canonical_multihash(CID_ATK_D)
+            with lim_ss._lock, gw._sqlite_write_tx(lim_ss._conn):
+                lim_ss._conn.execute(
+                    "INSERT INTO gdpr_erased_shas(sha256, canonical_owner, erased_at, erasure_rev) VALUES(?, ?, ?, 1)",
+                    (ATK_D_SHA, ALICE.address.lower(), T_SS),
+                )
+            ok_rs, _, tok_ss = lim_ss.reserve(ALICE.address, len(ATK_D_BYTES), T_SS)
+            assert ok_rs
+            ok_cs, _, _, canon_ss, allow_ss = lim_ss.try_claim_upload_provenance(
+                tok_ss, mh_ss, ALICE.address,
+                content_sha256=ATK_D_SHA, first_sha_info=(2, ALICE.address.lower(), ALICE.address.lower(), 0), now_ts=T_SS,
+            )
+            assert ok_cs
+            rec_ss = gw.GdprErasureReconciler(P8Reg(), MinKubo({}), start_block=0, db_path=os.path.join(td, "same_sec.sqlite"), now_fn=lambda: T_SS)
+            try:
+                rec_ss._record_erased_shas({ATK_D_SHA}, ALICE.address.lower())
+            finally:
+                rec_ss.close()
+            comm_ss = lim_ss.commit(
+                tok_ss, len(ATK_D_BYTES), T_SS,
+                cid=CID_ATK_D, multihash=mh_ss, content_sha256=ATK_D_SHA,
+                verified_onchain_provenance=(True, canon_ss, allow_ss),
+            )
+            assert comm_ss is False and lim_ss.pop_commit_reject_reason(tok_ss) == "gdpr_erased", "Same-second erasure_rev bypass in commit()!"
+            lim_ss.release_rollback_guard(tok_ss)
+        finally:
+            lim_ss.close()
+
+        # ------------------------------------------------------------------
+        # 9. Anti-Slowloris Total Wall-Clock Deadline on Early-Abort POST Drain
+        # ------------------------------------------------------------------
+        s_slow = socket.create_connection(("127.0.0.1", port), timeout=10)
+        try:
+            s_slow.sendall(
+                b"POST /api/v0/upload HTTP/1.1\\r\\nHost: 127.0.0.1\\r\\n"
+                b"Content-Length: 500000\\r\\nX-GenoChain-Timestamp: bad\\r\\n\\r\\n"
+            )
+            t0_slow = time.monotonic()
+            resp_slow = b""
+            s_slow.setblocking(False)
+            for _ in range(12):
+                time.sleep(0.5)
+                try:
+                    c_slow = s_slow.recv(4096)
+                    if c_slow:
+                        resp_slow += c_slow
+                        break
+                except BlockingIOError:
+                    pass
+                try:
+                    s_slow.sendall(b"A")
+                except OSError:
+                    break
+            elapsed_slow = time.monotonic() - t0_slow
+            assert b"401" in resp_slow and elapsed_slow <= gw.EARLY_ABORT_DRAIN_TIMEOUT_SEC + 1.5, (
+                f"Slowloris drain exceeded total deadline: elapsed={elapsed_slow:.2f}s resp={resp_slow[:80]}"
+            )
+        finally:
+            s_slow.close()
     finally:
         srv.shutdown(); srv.server_close()
 

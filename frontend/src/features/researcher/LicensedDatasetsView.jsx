@@ -126,6 +126,9 @@ export default function LicensedDatasetsView({
     setReuseInputs({});
     setBusyReuseId(null);
     setBusyEscrowId(null);
+  }, [account]);
+
+  useEffect(() => {
     if (account && fetchOnChainDatasets) {
       fetchOnChainDatasets(account);
     }

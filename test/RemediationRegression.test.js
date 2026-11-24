@@ -2972,7 +2972,7 @@ try:
     c1 = "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG"
     c2 = "QmZ4tDuvesekSs4qM5ZBKpXiZGun7S2CYtEZRB3DYXkjGx"
     c3 = "QmPZ9qBzzyAtRaQQQUZr6xHS6wVfETRR249s63UME18znJ"
-    for idx, dur in ((1, 86400), (2, 86400), (3, 86400), (4, 3600), (5, 86400), (6, 86400), (7, 86400)):
+    for idx, dur in ((1, 86400), (2, 86400), (3, 86400), (4, 3600), (5, 86400), (6, 86400), (7, 86400), (8, 3600)):
         w3.eth.wait_for_transaction_receipt(
             reg.functions.registerGenomicData(Web3.keccak(text=f"disp-l302-{idx}"), c1, c2, c3, "ipfs://" + c3, 100 * 10**18, dur, 1000).transact({"from": provider})
         )
@@ -2980,6 +2980,7 @@ try:
     # ds5: fulfilled sovereign escrow (provider delivers capsule directly, NOT opted out, NOT in seed_keys)
     # ds6: fulfilled sovereign direct grant (provider delivers capsule directly, NOT opted out, NOT in seed_keys)
     # ds7: revoked dataset with pre-seeded stale dispatchedKeys/quarantined checkpoint entries
+    # ds8: prior fulfilled direct grant that expires, followed by a NEW unfulfilled escrow (capsuleDelivered=False) -> MUST NOT be dropped!
     w3.eth.wait_for_transaction_receipt(reg.functions.setDispatcherOptOut(2, True).transact({"from": provider}))
     w3.eth.wait_for_transaction_receipt(reg.functions.grantAccessWithEscrow(1, 7200).transact({"from": buyer}))
     w3.eth.wait_for_transaction_receipt(reg.functions.grantAccessWithEscrow(2, 7200).transact({"from": buyer}))
@@ -2988,8 +2989,9 @@ try:
     w3.eth.wait_for_transaction_receipt(reg.functions.grantAccessWithEscrow(5, 7200).transact({"from": buyer}))
     w3.eth.wait_for_transaction_receipt(reg.functions.grantAccess(6).transact({"from": buyer}))
     w3.eth.wait_for_transaction_receipt(reg.functions.grantAccess(7).transact({"from": buyer}))
+    w3.eth.wait_for_transaction_receipt(reg.functions.grantAccess(8).transact({"from": buyer}))
 
-    # Provider (sovereign donor) directly delivers valid RSA-OAEP JSON capsules for ds5 & ds6
+    # Provider (sovereign donor) directly delivers valid RSA-OAEP JSON capsules for ds5, ds6 & initial ds8 grant
     sov_ct = priv.public_key().encrypt(
         secrets.token_bytes(32),
         padding.OAEP(mgf=padding.MGF1(algorithm=hashes.SHA256()), algorithm=hashes.SHA256(), label=None),
@@ -2997,11 +2999,14 @@ try:
     sov_cap = json.dumps({"alg": "RSA-OAEP-2048", "keyCipher": sov_ct})
     w3.eth.wait_for_transaction_receipt(reg.functions.storeTransformedCapsule(5, buyer, sov_cap).transact({"from": provider}))
     w3.eth.wait_for_transaction_receipt(reg.functions.storeTransformedCapsule(6, buyer, sov_cap).transact({"from": provider}))
+    w3.eth.wait_for_transaction_receipt(reg.functions.storeTransformedCapsule(8, buyer, sov_cap).transact({"from": provider}))
     w3.eth.wait_for_transaction_receipt(reg.functions.updateDataStatus(7, 2).transact({"from": provider}))
 
     w3.provider.make_request("evm_increaseTime", [4000])
     w3.provider.make_request("evm_mine", [])
     w3.eth.wait_for_transaction_receipt(reg.functions.claimEscrowRefund(3).transact({"from": buyer}))
+    # Buyer's initial ds8 grant has now expired (dur=3600 < 4000); buyer opens a brand-new escrow on ds8 (capsuleDelivered=False)!
+    w3.eth.wait_for_transaction_receipt(reg.functions.grantAccessWithEscrow(8, 7200).transact({"from": buyer}))
 
     with tempfile.TemporaryDirectory() as td:
         vault_file = os.path.join(td, "vault.json")
@@ -3036,31 +3041,46 @@ try:
             )
             assert r.returncode == 0, f"capsule_dispatcher failed: rc={r.returncode}\\n{r.stderr}"
 
-        # Cycle 1: vault empty -> ONLY ds1 queued as missing_seed_key; opted-out ds2, refunded ds3, expired ds4,
-        # fulfilled sovereign escrow ds5, fulfilled sovereign direct-grant ds6, AND revoked ds7 all excluded/pruned!
+        # Cycle 1: vault empty -> ONLY ds1 AND renewed unfulfilled escrow ds8 queued as missing_seed_key;
+        # opted-out ds2, refunded ds3, expired ds4, fulfilled sovereign escrow ds5, fulfilled sovereign direct-grant ds6,
+        # AND revoked ds7 are all excluded/pruned!
         run_disp()
         cp1 = json.load(open(cp_file, encoding="utf-8"))
         k1 = f"1:{buyer.lower()}"
-        assert list(cp1["pendingOrders"].keys()) == [k1], f"Unexpected pendingOrders: {cp1['pendingOrders']}"
+        k8 = f"8:{buyer.lower()}"
+        assert sorted(cp1["pendingOrders"].keys()) == sorted([k1, k8]), f"Unexpected pendingOrders: {cp1['pendingOrders']}"
         assert cp1["pendingOrders"][k1]["reason"] == "missing_seed_key"
+        assert cp1["pendingOrders"][k8]["reason"] == "missing_seed_key"
         assert k5 not in cp1["pendingOrders"] and k6 not in cp1["pendingOrders"], f"Fulfilled sovereign orders leaked into pendingOrders: {cp1['pendingOrders']}"
         assert k7 not in cp1.get("dispatchedKeys", {}), f"Stale revoked missing-key dispatchedKeys entry not pruned: {cp1}"
         assert k4 not in cp1.get("quarantined", {}), f"Stale expired missing-key quarantined entry not pruned: {cp1}"
 
-        # Advance 10 blocks (> 5-block recheck window), then hot-reload vault with ds1 AES-256-GCM key envelope
+        # Advance 10 blocks (> 5-block recheck window), then hot-reload vault with ds1 & ds8 AES-256-GCM key envelopes
         for _ in range(10):
             w3.provider.make_request("evm_mine", [])
         aes_raw = secrets.token_bytes(32)
         iv = secrets.token_bytes(12)
         env_hex = (iv + AESGCM(bytes.fromhex(vault_key_hex)).encrypt(iv, aes_raw, None)).hex()
         with open(vault_file, "w", encoding="utf-8") as vf:
-            json.dump({"seeds": [{"dataId": 1, "encryptedKeyEnvelopeHex": env_hex}]}, vf)
+            json.dump({"seeds": [
+                {"dataId": 1, "encryptedKeyEnvelopeHex": env_hex},
+                {"dataId": 8, "encryptedKeyEnvelopeHex": env_hex},
+            ]}, vf)
 
-        # Cycle 2: delivers ds1 from pendingOrders and empties pendingOrders completely!
+        # Cycle 2: delivers BOTH ds1 and renewed escrow ds8 from pendingOrders and empties pendingOrders completely!
         run_disp()
         cp2 = json.load(open(cp_file, encoding="utf-8"))
         assert cp2["pendingOrders"] == {}, f"Stale pendingOrders remained: {cp2['pendingOrders']}"
-        assert k1 in cp2["dispatchedKeys"]
+        assert k1 in cp2["dispatchedKeys"] and k8 in cp2["dispatchedKeys"]
+        # escrowDeposits tuple: [0]=buyer, [1]=released, [2]=refunded, [3]=capsuleDelivered, ...
+        assert reg.functions.escrowDeposits(8, buyer).call()[3] is True, "Renewed escrow ds8 capsuleDelivered not set!"
+        cap8 = reg.functions.buyerCapsules(8, buyer).call()
+        assert cap8, "Renewed escrow ds8 capsule not delivered after hot-reload!"
+        dec8 = priv.decrypt(
+            bytes.fromhex(json.loads(cap8)["keyCipher"]),
+            padding.OAEP(mgf=padding.MGF1(algorithm=hashes.SHA256()), algorithm=hashes.SHA256(), label=None),
+        )
+        assert dec8 == aes_raw, "Decrypted AES key mismatch for renewed escrow ds8!"
         cap1 = reg.functions.buyerCapsules(1, buyer).call()
         assert cap1, "Capsule not delivered after vault hot-reload!"
         dec = priv.decrypt(
@@ -3254,10 +3274,23 @@ with tempfile.TemporaryDirectory() as td:
             assert r_ok.status == 200
         assert SMALL_CID_V1 in kubo.pins
 
-        # 4. ALICE revokes Seed #1 (GDPR Art. 17 status=2) -> reconciler MUST unpin BOTH CIDv0 AND cross-codec CIDv1 alias pin!
+        # 4. ALICE revokes Seed #1 (GDPR Art. 17 status=2) -> even WITHOUT catalog_index.invalidate() (warm 60s TTL!),
+        #    re-upload MUST reject 403 via authoritative refresh, and reconciler MUST unpin BOTH CIDv0 AND cross-codec CIDv1!
         reg.datasets[0]["status"] = 2
+        writes_before_stale = kubo.write_calls
+        req_stale = urllib.request.Request(
+            f"http://127.0.0.1:{port}/api/v0/upload",
+            data=SMALL_BYTES, headers=sign_upload(ALICE, SMALL_BYTES, now_ts, "r1806n-alice-stale-01"), method="POST",
+        )
+        st_stale = None
+        try:
+            urllib.request.urlopen(req_stale, timeout=5)
+        except urllib.error.HTTPError as e:
+            st_stale = e.code
+        assert st_stale == 403, f"Warm-cache post-GDPR upload expected 403 without invalidate(), got {st_stale}"
+        assert kubo.write_calls == writes_before_stale, "Warm-cache post-GDPR upload wrote to Kubo!"
+
         reg.events.append({"dataId": 1, "newStatus": 2, "blockNumber": 119})
-        srv.gateway_catalog_index.invalidate()
         rec = gw.GdprErasureReconciler(
             reg, kubo, start_block=115, db_path=db_path, catalog_index=srv.gateway_catalog_index,
         )
@@ -3284,6 +3317,89 @@ with tempfile.TemporaryDirectory() as td:
             assert st_rev == 403, f"Post-GDPR cross-codec upload expected 403, got {st_rev}"
         assert kubo.write_calls == writes_pre_rev, "Post-GDPR cross-codec upload wrote to Kubo!"
         assert srv.gateway_upload_limiter.get_upload_provenance(gw.extract_canonical_multihash(SMALL_CID_V1)) is None
+
+        # 6. Cross-owner rawDataHash GDPR sabotage defense: BOB copies ALICE's active Seed #2 rawDataHash into dummy #3 & revokes #3!
+        #    ALICE's cross-codec LARGE_CID_V1 pin AND tracked_pins row MUST survive 100% intact!
+        req_alice_l = urllib.request.Request(
+            f"http://127.0.0.1:{port}/api/v0/upload",
+            data=LARGE_BYTES, headers=sign_upload(ALICE, LARGE_BYTES, now_ts, "r1806n-alice-large-01"), method="POST",
+        )
+        with urllib.request.urlopen(req_alice_l, timeout=5) as r_al:
+            assert r_al.status == 200
+        assert LARGE_CID_V1 in kubo.pins
+        reg.datasets.append({
+            "dataId": 3, "tokenId": 3, "currentOwner": BOB.address, "originalCreator": BOB.address,
+            "rawDataHash": "0x" + LARGE_SHA, "summaryHash": "", "metadataHash": "",
+            "rawCid": SUM_CID_V0, "summaryCid": "", "metadataCid": "", "status": 2,
+        })
+        reg.events.append({"dataId": 3, "newStatus": 2, "blockNumber": 120})
+        rec_sab = gw.GdprErasureReconciler(
+            reg, kubo, start_block=120, db_path=db_path, catalog_index=srv.gateway_catalog_index,
+        )
+        try:
+            rec_sab.reconcile_once()
+        finally:
+            rec_sab.close()
+        assert LARGE_CID_V0 in kubo.pins and LARGE_CID_V1 in kubo.pins, "Attacker dummy rawDataHash revoke wiped Alice's active pins!"
+        chk_conn = sqlite3.connect(db_path)
+        tp_cnt = chk_conn.execute("SELECT COUNT(*) FROM tracked_pins WHERE sha256 = ?", (LARGE_SHA,)).fetchone()[0]
+        chk_conn.close()
+        assert tp_cnt >= 1, "Attacker dummy rawDataHash revoke wiped Alice's tracked_pins accounting!"
+
+        # 7. Pre-existing unauthorized attacker cross-codec alias anchored at #14 MUST be unpinned when ALICE revokes Seed #2!
+        #    AND even if an attacker front-ran dataId=0/earlier active dataset with the same rawDataHash, gdpr_erased_shas
+        #    tombstone keeps sha_revoked=True after upload_provenance flush!
+        db_alias = os.path.join(td, "preexisting_alias.sqlite")
+        kubo_al = CrossCodecKubo()
+        kubo_al.pins = {SMALL_CID_V0: len(SMALL_BYTES), SMALL_CID_V1: len(SMALL_BYTES)}
+        lim_al = gw.UploadRateLimiter(db_path=db_alias)
+        try:
+            lim_al.record_pending_upload(SMALL_CID_V1, BOB.address, len(SMALL_BYTES), now_ts, content_sha256=SMALL_SHA)
+            reg_al = CrossCodecReg()
+            reg_al.datasets = [
+                {
+                    "dataId": 1, "tokenId": 1, "currentOwner": ALICE.address, "originalCreator": ALICE.address,
+                    "rawDataHash": "0x" + SMALL_SHA, "summaryHash": "", "metadataHash": "",
+                    "rawCid": SMALL_CID_V0, "summaryCid": "", "metadataCid": "", "status": 2,
+                },
+                {
+                    "dataId": 14, "tokenId": 14, "currentOwner": BOB.address, "originalCreator": BOB.address,
+                    "rawDataHash": "0x" + "cd" * 32, "summaryHash": "", "metadataHash": "",
+                    "rawCid": SMALL_CID_V1, "summaryCid": "", "metadataCid": "", "status": 0,
+                },
+            ]
+            reg_al.events = [{"dataId": 1, "newStatus": 2, "blockNumber": 119}]
+            rec_al = gw.GdprErasureReconciler(reg_al, kubo_al, start_block=115, db_path=db_alias)
+            try:
+                rec_al.reconcile_once()
+            finally:
+                rec_al.close()
+            assert SMALL_CID_V0 not in kubo_al.pins and SMALL_CID_V1 not in kubo_al.pins, "Pre-existing attacker cross-codec alias survived Victim GDPR revoke!"
+            assert lim_al.get_upload_provenance(gw.extract_canonical_multihash(SMALL_CID_V1)) is None, "Unauthorized attacker cross-codec provenance survived GDPR repo/gc!"
+            assert lim_al.get_erased_sha_owner(SMALL_SHA) == ALICE.address.lower()
+            # Even if attacker had front-run an earlier active dataset with SMALL_SHA, tombstone keeps it revoked!
+            reg_al.datasets = [
+                {
+                    "dataId": 1, "tokenId": 1, "currentOwner": BOB.address, "originalCreator": BOB.address,
+                    "rawDataHash": "0x" + SMALL_SHA, "summaryHash": "", "metadataHash": "",
+                    "rawCid": SUM_CID_V0, "summaryCid": "", "metadataCid": "", "status": 0,
+                },
+                {
+                    "dataId": 2, "tokenId": 2, "currentOwner": ALICE.address, "originalCreator": ALICE.address,
+                    "rawDataHash": "0x" + SMALL_SHA, "summaryHash": "", "metadataHash": "",
+                    "rawCid": SMALL_CID_V0, "summaryCid": "", "metadataCid": "", "status": 2,
+                },
+            ]
+            cat_al = gw.PublicMetadataCatalogIndex(
+                reg_al,
+                provenance_lookup=lim_al.get_upload_provenance,
+                sha_provenance_lookup=lim_al.get_upload_provenance_by_sha,
+                erased_sha_lookup=lim_al.get_erased_sha_owner,
+            )
+            cat_al.refresh_now()
+            assert cat_al.is_revoked_sha(SMALL_SHA) is True, "Front-runner hijacked revoked_shas after GDPR provenance flush!"
+        finally:
+            lim_al.close()
     finally:
         srv.shutdown(); srv.server_close()
 
@@ -3336,6 +3452,18 @@ print("R18_06N_CROSS_CODEC_PROVENANCE_AND_GDPR_OK")
           headers: { "Content-Type": "application/json" },
         });
       }
+      if (gatewayMode === "malformed_200") {
+        return new Response("<html>502 Bad Gateway proxy page</html>", {
+          status: 200,
+          headers: { "Content-Type": "text/html" },
+        });
+      }
+      if (gatewayMode === "missing_cid_200") {
+        return new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
       return new Response(JSON.stringify({ cid: CID_A, size: 12 }), {
         status: 200,
         headers: { "Content-Type": "application/json" },
@@ -3362,8 +3490,8 @@ print("R18_06N_CROSS_CODEC_PROVENANCE_AND_GDPR_OK")
       expect(observedUrls.length).to.equal(3);
       expect(observedUrls.every((u) => u === `${mockPrivateGw}/api/v0/upload`)).to.be.true;
 
-      // 2. Fail-closed on 502, 403, AND network errors even when BOTH VITE_KUBO_RPC/IPFS_RPC & Pinata JWT are set!
-      for (const mode of ["502", "403", "network_error"]) {
+      // 2. Fail-closed on 502, 403, network error, malformed 200 HTML, AND 200 JSON missing cid even when BOTH VITE_KUBO_RPC/IPFS_RPC & Pinata JWT are set!
+      for (const mode of ["502", "403", "network_error", "malformed_200", "missing_cid_200"]) {
         gatewayMode = mode;
         for (const fn of [
           () => uploadEncryptedRawData(sampleBytes, "raw", "explicit-jwt", authOpts),
@@ -3617,9 +3745,10 @@ with tempfile.TemporaryDirectory() as td:
             st_rep = e.code
         assert st_rep == 401, f"Evicted download nonce replayed with {st_rep} instead of 401!"
 
-        # 4. 502 catalog RPC outage MUST preserve BOTH upload nonce AND byte quota (8000 B vs 10000 B/hr cap)!
+        # 4. 502 catalog RPC outage MUST preserve BOTH upload nonce AND byte quota (8000 B vs 10000 B/hr cap),
+        #    EVEN when catalog_index already holds a warm pre-outage cache!
+        srv.gateway_catalog_index.refresh_now()
         reg.fail_catalog = True
-        srv.gateway_catalog_index.invalidate()
         outage_nonce = "p7-502-preserved-nonce1"
         req_502 = urllib.request.Request(
             f"http://127.0.0.1:{port}/api/v0/upload",
@@ -3630,7 +3759,7 @@ with tempfile.TemporaryDirectory() as td:
             urllib.request.urlopen(req_502, timeout=5)
         except urllib.error.HTTPError as e:
             st_502 = e.code
-        assert st_502 == 502, f"Expected 502 on catalog outage, got {st_502}"
+        assert st_502 == 502, f"Expected 502 on warm-cache catalog outage, got {st_502}"
         assert nonces.is_used(ALICE.address, outage_nonce, now_ts=now_ts, namespace="upload") is False, "502 outage burned upload nonce!"
         # Recover RPC and retry the EXACT SAME signed request (same nonce, 8000 B) -> MUST return 200 (proves nonce + quota preserved!)
         reg.fail_catalog = False
@@ -3642,46 +3771,56 @@ with tempfile.TemporaryDirectory() as td:
         with urllib.request.urlopen(req_retry, timeout=5) as resp_retry:
             assert resp_retry.status == 200, f"Retry after 502 failed: {resp_retry.status}"
 
-        # 5a. Atomic rollback TOCTOU elimination: concurrent same-owner join right before commit() SQLite fault -> NOT unpinned!
+        # 5a. Atomic rollback TOCTOU elimination via REAL SQLite BEFORE INSERT fault inside UploadRateLimiter.commit():
+        #     concurrent same-owner join right before commit() SQLite fault -> verdict=False (NOT unpinned!)
         limiter = srv.gateway_upload_limiter
         mh_race = gw.extract_canonical_multihash(CID_RB_RACE)
-        ok_r1, _, tok1 = limiter.reserve(ALICE.address, len(B_RB_RACE), now_ts)
-        ok_r2, _, tok2 = limiter.reserve(ALICE.address, len(B_RB_RACE), now_ts)
-        assert ok_r1 and ok_r2
-        c1 = limiter.try_claim_upload_provenance(tok1, mh_race, ALICE.address, now_ts=now_ts)
-        assert c1[0] and limiter.is_new_unshared_claim(tok1, mh_race) is True
-        # Second same-owner request joins claim BEFORE tok1 commits -> atomically revokes tok1 rollback eligibility!
-        c2 = limiter.try_claim_upload_provenance(tok2, mh_race, ALICE.address, now_ts=now_ts)
-        assert c2[0] and limiter.is_new_unshared_claim(tok1, mh_race) is False
-        # Simulate real SQLite fault inside commit() -> acquire_rollback_eligibility MUST return False!
-        orig_exec = limiter._conn.execute
-        # Trigger real OperationalError inside commit via bad table lock/wrapped helper? Verify via real commit_rollback_verdict path:
-        with limiter._lock:
-            limiter._inflight[tok1]["is_new_pin_claim"] = False
-        can_rb_shared = limiter.acquire_rollback_eligibility(tok1, mh_race)
-        assert can_rb_shared is False, "Shared concurrent claim wrongly permitted rollback!"
-        limiter.release_rollback_guard(tok1)
-        limiter.release(tok2)
-
-        # 5b. Rollback guard stays active DURING _rollback_kubo_block() (blocking concurrent claims with 503 until unpin finishes!)
-        #     AND fail-closed 'is False' on has_persisted_provenance_or_pin() == None (never unpins on SQLite read fault!)
-        concurrent_during_unpin = []
-        mh_grd = gw.extract_canonical_multihash(CID_RB_GRD)
-        def _on_unpin_check(cid_u):
-            if cid_u == CID_RB_GRD:
-                ok_rt, _, tok_c = limiter.reserve(ALICE.address, len(B_RB_GRD), now_ts)
-                if ok_rt and tok_c:
-                    try:
-                        res_c = limiter.try_claim_upload_provenance(tok_c, mh_grd, ALICE.address, now_ts=now_ts)
-                        concurrent_during_unpin.append(res_c[1])
-                    finally:
-                        limiter.release(tok_c)
-        kubo.on_unpin = _on_unpin_check
-        orig_commit = limiter.commit
-        def _fault_commit(*a, **kw):
-            raise sqlite3.OperationalError("simulated write fault")
-        limiter.commit = _fault_commit
+        with limiter._lock, gw._sqlite_write_tx(limiter._conn):
+            limiter._conn.execute(
+                "CREATE TRIGGER fail_tracked_pins_insert BEFORE INSERT ON tracked_pins "
+                "BEGIN SELECT RAISE(ABORT, 'simulated sqlite write fault'); END"
+            )
         try:
+            ok_r1, _, tok1 = limiter.reserve(ALICE.address, len(B_RB_RACE), now_ts)
+            ok_r2, _, tok2 = limiter.reserve(ALICE.address, len(B_RB_RACE), now_ts)
+            assert ok_r1 and ok_r2
+            c1 = limiter.try_claim_upload_provenance(tok1, mh_race, ALICE.address, now_ts=now_ts)
+            assert c1[0] and limiter.is_new_unshared_claim(tok1, mh_race) is True
+            # Second same-owner request joins claim BEFORE tok1 commits -> atomically revokes tok1 rollback eligibility!
+            c2 = limiter.try_claim_upload_provenance(tok2, mh_race, ALICE.address, now_ts=now_ts)
+            assert c2[0] and limiter.is_new_unshared_claim(tok1, mh_race) is False
+            raised_in_commit = False
+            try:
+                limiter.commit(
+                    tok1, len(B_RB_RACE), now_ts,
+                    cid=CID_RB_RACE, multihash=mh_race, content_sha256=hashlib.sha256(B_RB_RACE).hexdigest(),
+                    verified_onchain_provenance=(True, None, set()),
+                )
+            except sqlite3.IntegrityError:
+                raised_in_commit = True
+            assert raised_in_commit, "Expected real SQLite trigger ABORT inside UploadRateLimiter.commit()!"
+            can_rb_shared = limiter.acquire_rollback_eligibility(tok1, mh_race)
+            assert can_rb_shared is False, "Shared concurrent claim wrongly permitted rollback inside real commit() fault!"
+            limiter.release_rollback_guard(tok1)
+            limiter.release(tok2)
+
+            # 5b. Real SQLite commit() fault during HTTP upload: rollback guard stays active DURING _rollback_kubo_block()
+            #     (blocking concurrent claims with 503 until unpin finishes!) AND fail-closed 'is False' on None!
+            concurrent_during_unpin = []
+            mh_grd = gw.extract_canonical_multihash(CID_RB_GRD)
+            def _on_unpin_check(cid_u):
+                if cid_u == CID_RB_GRD:
+                    ok_rt, _, tok_c = limiter.reserve(ALICE.address, len(B_RB_GRD), now_ts)
+                    if ok_rt and tok_c:
+                        try:
+                            res_c = limiter.try_claim_upload_provenance(
+                                tok_c, mh_grd, ALICE.address,
+                                content_sha256=hashlib.sha256(B_RB_GRD).hexdigest(), now_ts=now_ts,
+                            )
+                            concurrent_during_unpin.append(res_c[1])
+                        finally:
+                            limiter.release(tok_c)
+            kubo.on_unpin = _on_unpin_check
             req_grd = urllib.request.Request(
                 f"http://127.0.0.1:{port}/api/v0/upload",
                 data=B_RB_GRD, headers=sign_upload(ALICE, B_RB_GRD, now_ts, "p7-rb-guard-00000001"), method="POST",
@@ -3709,8 +3848,9 @@ with tempfile.TemporaryDirectory() as td:
             finally:
                 limiter.has_persisted_provenance_or_pin = orig_has_pers
         finally:
-            limiter.commit = orig_commit
             kubo.on_unpin = None
+            with limiter._lock, gw._sqlite_write_tx(limiter._conn):
+                limiter._conn.execute("DROP TRIGGER IF EXISTS fail_tracked_pins_insert")
 
         # 6. GDPR list_recursive_pins() exception retry + GC generation race preservation
         CID_GDPR_UNIQ = "QmZ4tDuvesekSs4qM5ZBKpXiZGun7S2CYtEZRB3DYXkjGx"

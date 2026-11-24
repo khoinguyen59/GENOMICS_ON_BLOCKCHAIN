@@ -292,9 +292,9 @@ async function runRound3Audit() {
 
   assertTest(
     !evidenceReadmeRefersToOld6Datasets,
-    "INVARIANT-12: docs/evidence/README.md catalog description must match the active 10 molecular seed datasets",
+    `INVARIANT-12: docs/evidence/README.md catalog description must match the active ${seedCount} molecular seed datasets`,
     evidenceReadmeRefersToOld6Datasets
-      ? "docs/evidence/README.md refers to obsolete '6 tập dữ liệu gen chuẩn' and 'BRCA1 rs80357906', whereas seedMetadata.json has 10 pure molecular datasets"
+      ? `docs/evidence/README.md refers to obsolete '6 tập dữ liệu gen chuẩn' and 'BRCA1 rs80357906', whereas seedMetadata.json has ${seedCount} pure molecular datasets`
       : "docs/evidence/README.md is fully synchronized with seedMetadata.json",
     "DEF3-5-06",
     {
@@ -302,7 +302,7 @@ async function runRound3Audit() {
       line: 37,
       severity: "Low",
       type: "Documentation Cross-Validation / INVARIANT-12",
-      description: "Evidence README documentation describes legacy 6-dataset catalog with BRCA1 instead of current 10-dataset catalog"
+      description: `Evidence README documentation describes legacy 6-dataset catalog with BRCA1 instead of current ${seedCount}-dataset catalog`
     }
   );
 

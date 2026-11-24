@@ -706,7 +706,18 @@ export async function uploadToPrivateGateway(
     throw failErr;
   }
   if (res.ok) {
-    const json = await res.json();
+    let json = null;
+    try {
+      json = await res.json();
+    } catch (parseErr) {
+      const parseFail = new Error(
+        `Private IPFS Gateway returned malformed JSON on HTTP ${res.status} (${parseErr?.message || String(parseErr)}); fallback to unauthenticated Kubo RPC or Pinata is strictly disabled.`
+      );
+      parseFail.status = res.status;
+      parseFail.privateGatewayFailClosed = true;
+      parseFail.cause = parseErr;
+      throw parseFail;
+    }
     if (json && typeof json.cid === "string" && json.cid.length > 0) {
       clearKuboLocalRefsCache();
       return {
@@ -715,6 +726,12 @@ export async function uploadToPrivateGateway(
         pinnedOn: "private-gateway",
       };
     }
+    const missingCidErr = new Error(
+      `Private IPFS Gateway returned HTTP ${res.status} without a valid CID; fallback to unauthenticated Kubo RPC or Pinata is strictly disabled.`
+    );
+    missingCidErr.status = res.status;
+    missingCidErr.privateGatewayFailClosed = true;
+    throw missingCidErr;
   }
   let errDetail = `HTTP ${res.status}`;
   try {

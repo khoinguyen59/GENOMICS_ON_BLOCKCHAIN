@@ -1523,25 +1523,21 @@ def main():
                                     mk_ref = bool(dep_mk["refunded"])
                                     mk_deliv = bool(dep_mk["capsuleDelivered"])
                                     mk_pending_escrow = mk_amt > 0 and (not mk_rel) and (not mk_ref)
-                                    mk_already_delivered = mk_deliv or (order_key in latest_delivered_pos)
-                                    if not mk_already_delivered and st_val == 0:
-                                        try:
-                                            mk_existing_cap = str(
-                                                registry.functions.buyerCapsules(data_id, buyer).call(
-                                                    {"from": worker_account}
-                                                )
-                                                or ""
-                                            ).strip()
-                                            if mk_existing_cap:
-                                                mk_already_delivered = True
-                                        except Exception:
-                                            pass
                                     if mk_pending_escrow:
                                         mk_is_escrow = True
-                                        if mk_already_delivered:
-                                            keep_missing_key = False
-                                            mk_should_prune_all = True
-                                        elif latest_ts_mk >= int(dep_mk["depositTime"]) + int(dep_mk["disputeWindow"]):
+                                        # For an active escrow, dep_mk["capsuleDelivered"] is the sole authoritative
+                                        # per-escrow delivery flag (never let a prior grant's buyerCapsules drop a new escrow).
+                                        mk_lock_dl = 0
+                                        if hasattr(registry.functions, "getEscrowLockDeadline"):
+                                            try:
+                                                mk_lock_dl = int(
+                                                    registry.functions.getEscrowLockDeadline(data_id, buyer).call()
+                                                )
+                                            except Exception:
+                                                mk_lock_dl = 0
+                                        if mk_lock_dl <= 0:
+                                            mk_lock_dl = int(dep_mk["depositTime"]) + int(dep_mk["disputeWindow"])
+                                        if mk_deliv or latest_ts_mk >= mk_lock_dl:
                                             keep_missing_key = False
                                             mk_should_prune_all = True
                                     else:
@@ -1553,6 +1549,19 @@ def main():
                                         g_exp = int(
                                             grant_mk.get("expiresAt", grant_mk_raw[2] if len(grant_mk_raw) > 2 else 0)
                                         )
+                                        mk_already_delivered = mk_deliv or (order_key in latest_delivered_pos)
+                                        if not mk_already_delivered and st_val == 0 and g_granted and g_exp > latest_ts_mk:
+                                            try:
+                                                mk_existing_cap = str(
+                                                    registry.functions.buyerCapsules(data_id, buyer).call(
+                                                        {"from": worker_account}
+                                                    )
+                                                    or ""
+                                                ).strip()
+                                                if mk_existing_cap:
+                                                    mk_already_delivered = True
+                                            except Exception:
+                                                pass
                                         if (not g_granted) or (g_exp <= latest_ts_mk) or mk_already_delivered:
                                             keep_missing_key = False
                                             mk_should_prune_all = True
@@ -1821,7 +1830,9 @@ def main():
 
                     prev_disp = dispatched_keys.get(order_key)
                     is_key_rotation = False
-                    if existing_capsule and len(existing_capsule) > 0:
+                    # Never let a stale buyerCapsules entry from an earlier expired grant skip delivery
+                    # for a brand-new unfulfilled escrow (is_pending_escrow and not escrow_delivered).
+                    if existing_capsule and len(existing_capsule) > 0 and not (is_pending_escrow and not escrow_delivered):
                         if prev_disp and prev_disp.get("pubkeyHash") == pubkey_hash:
                             pending_orders.pop(order_key, None)
                             skipped_count += 1

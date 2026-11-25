@@ -326,4 +326,173 @@ describe("Assignment 06 Rubric & Security Audit Suite", function () {
       expect(await token.balanceOf(registry.target)).to.equal(0n);
     });
   });
+
+  // =========================================================================
+  // Group 4: Tokenomics ($GENO), GenomicNFT & EIP-2981 Royalty (Criterion 4)
+  // =========================================================================
+  describe("Group 4: GenomicToken ($GENO), GenomicNFT & EIP-2981 Royalty (Criterion 4)", function () {
+    it("enforces MAX_TOTAL_SUPPLY, burn(), 1h faucet cooldown, and signed voucher faucet mode", async function () {
+      const maxSupply = await token.MAX_TOTAL_SUPPLY();
+      const currentSupply = await token.totalSupply();
+      const remaining = maxSupply - currentSupply;
+
+      await expect(
+        token.connect(deployer).mint(deployer.address, remaining + 1n)
+      ).to.be.revertedWithCustomError(token, "MaxSupplyExceeded");
+
+      // Burn reduces totalSupply & holder balance
+      const burnAmount = ethers.parseEther("50");
+      const beforeBurnSupply = await token.totalSupply();
+      await (await token.connect(buyer).burn(burnAmount)).wait();
+      expect(await token.totalSupply()).to.equal(beforeBurnSupply - burnAmount);
+
+      // Open faucet: dispenses 1,000 GENO, blocks immediate repeat (1h cooldown), allows after 1h
+      const faucetAmount = await token.FAUCET_AMOUNT();
+      await (await token.connect(stranger).faucet(stranger.address)).wait();
+      expect(await token.balanceOf(stranger.address)).to.equal(faucetAmount);
+
+      await expect(
+        token.connect(stranger).faucet(stranger.address)
+      ).to.be.revertedWithCustomError(token, "FaucetCooldownActive");
+
+      await advanceTime(3601);
+      await (await token.connect(stranger).faucet(stranger.address)).wait();
+      expect(await token.balanceOf(stranger.address)).to.equal(faucetAmount * 2n);
+
+      // Production voucher mode: blocks open faucet, verifies ECDSA voucher + prevents nonce replay
+      await (await token.connect(deployer).setFaucetConfig(true, true, deployer.address)).wait();
+      await expect(
+        token.connect(newOwner).faucet(newOwner.address)
+      ).to.be.revertedWithCustomError(token, "FaucetVoucherRequired");
+
+      const net = await ethers.provider.getNetwork();
+      const nonce = 777n;
+      const latestBlock = await ethers.provider.getBlock("latest");
+      const deadline = BigInt(latestBlock.timestamp) + 3600n;
+      const encoded = ethers.AbiCoder.defaultAbiCoder().encode(
+        ["string", "uint256", "address", "address", "uint256", "uint256"],
+        ["GENOCHAIN_FAUCET_VOUCHER_V1", net.chainId, token.target, newOwner.address, nonce, deadline]
+      );
+      const signature = await deployer.signMessage(ethers.getBytes(ethers.keccak256(encoded)));
+
+      await (await token.connect(newOwner).claimFaucetWithVoucher(newOwner.address, nonce, deadline, signature)).wait();
+      expect(await token.balanceOf(newOwner.address)).to.equal(faucetAmount);
+
+      await expect(
+        token.connect(newOwner).claimFaucetWithVoucher(newOwner.address, nonce, deadline, signature)
+      ).to.be.revertedWithCustomError(token, "FaucetVoucherUsed");
+    });
+
+    it("restricts GenomicNFT.mintGenomicNFT to registry and validates CIDs and capsules", async function () {
+      const dummyHash = ethers.keccak256(ethers.toUtf8Bytes("nft-direct-mint"));
+      await expect(
+        nft
+          .connect(stranger)
+          .mintGenomicNFT(stranger.address, TOKEN_URI, dummyHash, CID_RAW, CID_SUMMARY, CID_METADATA, 1000)
+      ).to.be.revertedWithCustomError(nft, "OnlyRegistry");
+
+      expect(await nft.validateCid(CID_RAW)).to.equal(true);
+      expect(await nft.validateCid("invalid-cid")).to.equal(false);
+
+      const { capsule } = await makeAuthenticCapsule(buyer, creator.address);
+      expect(await nft.validateCapsule(capsule)).to.equal(true);
+      expect(await nft.validateCapsule("not-a-json-capsule")).to.equal(false);
+    });
+
+    it("splits secondary access & 5% recordStudyReuse() fees 90% owner / 10% creator with slippage & replay guards", async function () {
+      const { dataId, tokenId } = await registerSampleDataset(creator, "royalty-split-1");
+
+      // Transfer GenomicNFT from creator to newOwner -> creator stays EIP-2981 royaltyReceiver (10%)
+      await (await nft.connect(creator).transferFrom(creator.address, newOwner.address, tokenId)).wait();
+
+      const [receiver, royaltyDue] = await nft.royaltyInfo(tokenId, PRICE);
+      expect(receiver).to.equal(creator.address);
+      expect(royaltyDue).to.equal(PRICE / 10n); // 10% = 10 GENO
+
+      // Secondary access purchase splits 90% to newOwner and 10% to original creator
+      await (await token.connect(buyer).approve(registry.target, ethers.parseEther("500"))).wait();
+      await (await registry.connect(buyer)["grantAccess(uint256)"](dataId)).wait();
+
+      expect(await token.balanceOf(creator.address)).to.equal(PRICE / 10n);
+      expect(await token.balanceOf(newOwner.address)).to.equal((PRICE * 9n) / 10n);
+
+      // Follow-on study reuse fee = 5% of PRICE = 5 GENO (split 10% creator = 0.5 GENO, 90% newOwner = 4.5 GENO)
+      const expectedReuseFee = (PRICE * 500n) / 10_000n;
+      expect(await registry.quoteReuseFee(dataId)).to.equal(expectedReuseFee);
+
+      const studyCommitment = ethers.keccak256(ethers.toUtf8Bytes("study:gwas-2026-01"));
+
+      // MEV slippage guard rejects if maxFee < reuseFee
+      await expect(
+        registry.connect(buyer)["recordStudyReuse(uint256,bytes32,uint256)"](dataId, studyCommitment, expectedReuseFee - 1n)
+      ).to.be.revertedWithCustomError(registry, "PriceExceedsMax");
+
+      const creatorBeforeReuse = await token.balanceOf(creator.address);
+      const ownerBeforeReuse = await token.balanceOf(newOwner.address);
+      await (
+        await registry.connect(buyer)["recordStudyReuse(uint256,bytes32,uint256)"](dataId, studyCommitment, expectedReuseFee)
+      ).wait();
+
+      expect(await token.balanceOf(creator.address) - creatorBeforeReuse).to.equal(expectedReuseFee / 10n);
+      expect(await token.balanceOf(newOwner.address) - ownerBeforeReuse).to.equal((expectedReuseFee * 9n) / 10n);
+
+      // Duplicate study receipt replay is blocked
+      await expect(
+        registry.connect(buyer)["recordStudyReuse(uint256,bytes32)"](dataId, studyCommitment)
+      ).to.be.revertedWithCustomError(registry, "StudyReuseAlreadyRecorded");
+    });
+  });
+
+  // =========================================================================
+  // Group 5: Reentrancy Defense Verification (EIP-1153 + ERC-721 Hook)
+  // =========================================================================
+  describe("Group 5: Reentrancy Protection (EIP-1153 Transient Lock)", function () {
+    it("blocks ERC-20 transferFrom callback reentrancy into GenomicsRegistry.grantAccess()", async function () {
+      const MalTokenF = await ethers.getContractFactory("MaliciousReentrantToken");
+      const malToken = await MalTokenF.deploy(buyer.address);
+      await malToken.waitForDeployment();
+
+      const NftF = await ethers.getContractFactory("GenomicNFT");
+      const malNft = await NftF.deploy(deployer.address, DEFAULT_ROYALTY_BPS);
+      await malNft.waitForDeployment();
+
+      const RegF = await ethers.getContractFactory("GenomicsRegistry");
+      const malRegistry = await RegF.deploy(malToken.target, malNft.target, deployer.address);
+      await malRegistry.waitForDeployment();
+      await (await malNft.connect(deployer).setRegistryContract(malRegistry.target)).wait();
+
+      const rawHash = ethers.keccak256(ethers.toUtf8Bytes("mal-token-dataset"));
+      await (
+        await malRegistry
+          .connect(creator)
+          .registerGenomicData(rawHash, CID_RAW, CID_SUMMARY, CID_METADATA, TOKEN_URI, PRICE, DURATION, DEFAULT_ROYALTY_BPS)
+      ).wait();
+
+      await (await malToken.setRegistryAndTarget(malRegistry.target, 1n)).wait();
+      await (await malToken.connect(buyer).approve(malRegistry.target, PRICE * 2n)).wait();
+      await (await malRegistry.connect(buyer)["grantAccess(uint256)"](1n)).wait();
+
+      expect(await malToken.attackInitiated()).to.equal(true);
+      expect(await malToken.attackSucceeded()).to.equal(false);
+      expect(await malToken.lastErrorMessage()).to.equal("ReentrancyGuardReentrantCall()");
+    });
+
+    it("blocks ERC-721 onERC721Received callback reentrancy into registerGenomicData()", async function () {
+      const MalReceiverF = await ethers.getContractFactory("MaliciousReentrantReceiver");
+      const malReceiver = await MalReceiverF.deploy(registry.target);
+      await malReceiver.waitForDeployment();
+
+      const rawHash = ethers.keccak256(ethers.toUtf8Bytes("mal-receiver-dataset"));
+      await (
+        await malReceiver
+          .connect(stranger)
+          .registerWithRegistry(rawHash, CID_RAW, CID_SUMMARY, CID_METADATA, TOKEN_URI, PRICE, DURATION, DEFAULT_ROYALTY_BPS)
+      ).wait();
+
+      expect(await malReceiver.attackInitiated()).to.equal(true);
+      expect(await malReceiver.attackSucceeded()).to.equal(false);
+      expect(await malReceiver.lastErrorMessage()).to.equal("ReentrancyGuardReentrantCall()");
+      expect(await registry.dataCount()).to.equal(1n);
+    });
+  });
 });

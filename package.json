@@ -9,6 +9,7 @@
     "build": "hardhat build",
     "lint:sol": "npx solhint \"contracts/**/*.sol\" -f unix --max-warnings 0",
     "deploy:localhost": "hardhat run scripts/deploy/deploy.js --network localhost",
+    "verify:deploy": "hardhat run scripts/deploy/verify_deployment.js --network localhost",
     "demo:web3": "python scripts/demo/web3_demo.py --offline-demo",
     "audit:hygiene": "python scripts/audit/academic_hygiene_toolkit.py --selftest",
     "audit:chain": "python scripts/audit/live_chain_audit.py",

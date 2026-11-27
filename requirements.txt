@@ -1,0 +1,6 @@
+# Thư viện Python cho scripts/demo/web3_demo.py và scripts/demo/capsule_dispatcher.py
+# Cài đặt: python -m pip install -r requirements.txt
+# Phiên bản khớp với .github/workflows/ci.yml
+web3==7.16.0
+cryptography==46.0.3
+eth-account==0.14.0

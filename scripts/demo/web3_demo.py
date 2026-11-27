@@ -150,6 +150,16 @@ def compute_raw_hash(content_bytes: bytes) -> bytes:
     """Tính mã băm SHA-256 dạng 32 bytes khớp với bytes32 trên Solidity"""
     return hashlib.sha256(content_bytes).digest()
 
+def verify_kubo_cid(label: str, kubo_cid: Optional[str], data: bytes) -> None:
+    """Đối chiếu CID do Kubo trả về với CIDv0 tính cục bộ (chứng minh compute_ipfs_cidv0 khớp Kubo)."""
+    if not kubo_cid:
+        return
+    local_cid = compute_ipfs_cidv0(data)
+    if kubo_cid == local_cid:
+        print(f"[OK] CID {label} khớp: Kubo == tính cục bộ ({kubo_cid})")
+    else:
+        print(f"[!] CID {label} KHÔNG khớp: Kubo={kubo_cid} / cục bộ={local_cid}")
+
 def fetch_from_kubo(cid: str, kubo_rpc: str = "http://127.0.0.1:5001") -> Optional[bytes]:
     """Tải dữ liệu trực tiếp từ IPFS Kubo RPC API (/api/v0/cat) với graceful fallback"""
     try:
@@ -433,6 +443,7 @@ def main():
     kubo_cid = upload_to_kubo(encrypted_payload, "khv_encrypted.enc")
     if kubo_cid:
         print(f"[IPFS] Đã ghim thành công ciphertext lên IPFS Kubo Daemon: {kubo_cid}")
+        verify_kubo_cid("VCF mã hóa", kubo_cid, encrypted_payload)
     elif offline_allowed:
         print(f"[IPFS] Kubo Daemon offline (--offline-demo): sử dụng CIDv0 chuẩn UnixFS xác định cục bộ.")
     else:
@@ -573,6 +584,8 @@ def main():
             "Khởi chạy IPFS daemon thật hoặc truyền --offline-demo / GENOCHAIN_ALLOW_OFFLINE_DEMO=1."
         )
     real_metadata_cid = metadata_kubo_cid or compute_ipfs_cidv0(sample_meta)
+    verify_kubo_cid("báo cáo PDF mã hóa", summary_kubo_cid, encrypted_summary_payload)
+    verify_kubo_cid("metadata JSON", metadata_kubo_cid, sample_meta)
     print(f"[+] Đã mã hóa AES-256-GCM báo cáo PDF phía Client trước khi băm/ghim IPFS: {real_summary_cid}")
 
     # 3. Register Genomic Data on Blockchain

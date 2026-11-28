@@ -9,6 +9,7 @@ import {
   generateAsymmetricKeyPair,
   savePersistentKeyPair,
   loadPersistentKeyPair,
+  setActiveVaultAccount,
   exportPublicKey,
   clearVaultMemoryCache,
 } from "../../../crypto/client_crypto.js";
@@ -301,6 +302,9 @@ export function Web3Provider({ children }) {
       if (connectionEpochRef.current !== myEpoch || accountRef.current.toLowerCase() !== acc.toLowerCase()) {
         return null;
       }
+      // loadPersistentKeyPair() is read-only (it no longer switches the vault scope as a side effect),
+      // so select the scope for the connected wallet explicitly, after the stale-connection guards above.
+      setActiveVaultAccount(acc);
       setResearcherKeyPair(kp);
 
       const activeContracts = contractsInstance || (await getContracts(null, null, myEpoch));

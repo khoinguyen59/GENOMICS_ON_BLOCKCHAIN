@@ -1,7 +1,17 @@
 /**
  * @file asymmetric.js
- * @description RFC 8017 / RSA-OAEP 2048-bit asymmetric keypair generation, JWK serialization, and key encapsulation.
+ * @description RFC 8017 / RSA-OAEP 2048-bit asymmetric keypair generation, JWK serialization,
+ *              and key encapsulation for the GenoChain Sovereign Key Vault.
  * @module crypto/core/asymmetric
+ *
+ * SECURITY MODEL:
+ *   - Private keys are non-extractable by default (isExtractable=false) to prevent
+ *     exfiltration via XSS or memory inspection.
+ *   - RSA-OAEP minimum modulus enforced at 2048 bits; 4096-bit keys are preferred for
+ *     long-lived genomic data (data may be accessed decades from now).
+ *   - Capsule integrity depends on the correctness of the recipient's registered public key.
+ *     Access revocation is enforced at the gateway (SIWE) layer, NOT cryptographically:
+ *     a recipient who already holds the decrypted DEK cannot be cryptographically revoked.
  */
 
 import { importKeyFromHex } from "./symmetric.js";
@@ -16,9 +26,13 @@ if (!cryptoObj || !cryptoObj.subtle) {
 }
 
 /**
- * Generate an RSA-OAEP 2048-bit asymmetric keypair for Researcher access control
- * By default, private key is NON-EXTRACTABLE for maximum browser security!
- * @param {boolean} [isExtractable=false] Whether private key can be exported
+ * Generate an RSA-OAEP 2048-bit asymmetric keypair for Researcher access control.
+ * Private key is NON-EXTRACTABLE by default (isExtractable=false) for maximum security.
+ *
+ * NOTE ON KEY SIZE: 2048-bit provides ~112 bits of security (NIST until 2030).
+ * For genomic data with multi-decade sensitivity, prefer 4096-bit keys.
+ * @param {boolean} [isExtractable=false] Whether private key can be exported.
+ *   Set true ONLY for wallet backup flows that need to persist the private JWK.
  * @returns {Promise<CryptoKeyPair>}
  */
 export async function generateAsymmetricKeyPair(isExtractable = false) {
@@ -195,13 +209,19 @@ export async function importPrivateKey(jwkData) {
 }
 
 /**
- * Package an Ephemeral Key Capsule by ACTUALLY encrypting the AES key with the recipient's public key!
+ * Package an Ephemeral Key Capsule by encrypting the AES-256-GCM DEK with the recipient's RSA-OAEP public key.
+ *
+ * REVOCATION NOTE: Once a recipient has successfully called decryptKeyCapsule and obtained keyHex,
+ * the DEK is in their possession. Revoking on-chain access (SIWE session, registry state) prevents
+ * FUTURE capsule delivery but does NOT cryptographically revoke existing DEK copies.
+ * This is a known design constraint of the encrypt-then-publish-to-IPFS model.
+ *
  * @param {string|CryptoKey} aesKey Symmetric AES key (hex string or CryptoKey)
  * @param {CryptoKey|string} recipientPublicKey Researcher's RSA-OAEP public key
  * @param {string} recipientAddress Recipient Ethereum wallet address
  * @param {string} dataOwnerAddress Data Owner Ethereum wallet address
  * @param {Object|null} [extraOptions=null] Optional extra keys to encapsulate (e.g., { summaryKeyHex })
- * @returns {Promise<string>} Serialized JSON Capsule containing real asymmetric ciphertext
+ * @returns {Promise<string>} Serialized JSON Capsule containing RSA-OAEP ciphertext
  */
 export async function packageKeyCapsule(
   aesKey,

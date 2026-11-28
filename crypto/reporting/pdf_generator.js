@@ -55,62 +55,191 @@ export function encodeWinAnsiBytes(str) {
 }
 
 /**
- * Generate a valid, renderable PDF 1.4 clinical genomic summary report
+ * Helvetica advance widths in 1/1000 em for WinAnsi codes 32..255 (codes 127..159 are unused and default to 278).
+ * Source: the standard Adobe Helvetica AFM metrics (extracted via ReportLab and cross-checked against pdfminer).
+ * Used only to wrap text inside the page margins; the PDF itself references the non-embedded Type1 base font.
+ */
+const HELVETICA_WIDTHS = [
+  278, 278, 355, 556, 556, 889, 667, 191, 333, 333, 389, 584, 278, 333, 278, 278,
+  556, 556, 556, 556, 556, 556, 556, 556, 556, 556, 278, 278, 584, 584, 584, 556,
+  1015, 667, 667, 722, 722, 667, 611, 778, 722, 278, 500, 667, 556, 833, 722, 778,
+  667, 778, 722, 667, 611, 722, 667, 944, 667, 667, 611, 278, 278, 278, 469, 556,
+  333, 556, 556, 500, 556, 556, 278, 556, 556, 222, 222, 500, 222, 833, 556, 556,
+  556, 556, 333, 500, 278, 556, 500, 722, 500, 500, 500, 334, 260, 334, 584, 278,
+  278, 278, 278, 278, 278, 278, 278, 278, 278, 278, 278, 278, 278, 278, 278, 278,
+  278, 278, 278, 278, 278, 278, 278, 278, 278, 278, 278, 278, 278, 278, 278, 278,
+  278, 333, 556, 556, 556, 556, 260, 556, 333, 737, 370, 556, 584, 333, 737, 333,
+  400, 584, 333, 333, 333, 556, 537, 278, 333, 333, 365, 556, 834, 834, 834, 611,
+  667, 667, 667, 667, 667, 667, 1000, 722, 667, 667, 667, 667, 278, 278, 278, 278,
+  722, 722, 778, 778, 778, 778, 778, 584, 778, 722, 722, 722, 722, 667, 667, 611,
+  556, 556, 556, 556, 556, 556, 889, 500, 556, 556, 556, 556, 278, 278, 278, 278,
+  556, 556, 556, 556, 556, 556, 556, 584, 611, 556, 556, 556, 556, 500, 556, 500,
+];
+
+const PAGE_WIDTH_PT = 612;
+const PAGE_MARGIN_X_PT = 50;
+const PAGE_TOP_Y_PT = 740;
+const PAGE_BOTTOM_Y_PT = 50;
+const USABLE_WIDTH_PT = PAGE_WIDTH_PT - 2 * PAGE_MARGIN_X_PT;
+const MAX_ANNOTATIONS = 4;
+
+export const DEFAULT_REPORT_DISCLAIMER =
+  "Research use only. This summary is not a clinical diagnostic report; annotations are not independently validated.";
+
+/** Returns a (text, fontSize) => width-in-points function for the chosen base font. */
+function createTextMeasurer(fontName) {
+  const isHelvetica = /^Helvetica/i.test(fontName);
+  const boldFactor = /bold/i.test(fontName) ? 1.12 : 1;
+  return (text, fontSize) => {
+    let units = 0;
+    for (let i = 0; i < text.length; i++) {
+      const code = text.charCodeAt(i);
+      units += isHelvetica
+        ? (code >= 32 && code <= 255 ? HELVETICA_WIDTHS[code - 32] : 556) * boldFactor
+        : 600; // conservative (Courier-wide) fallback for any other base font
+    }
+    return (units * fontSize) / 1000;
+  };
+}
+
+/** Same character folding that escapePdfLiteral() applies, without the PDF escaping (needed before measuring). */
+function toPdfPlainText(str) {
+  return normalizeVietnameseText(String(str ?? "").replace(/\u2014/g, "--").replace(/\u2013/g, "-"));
+}
+
+/**
+ * Greedy word wrap on ALREADY-NORMALIZED text. A single token wider than the line is hard-split; when the text needs
+ * more than `maxLines` lines the last line is truncated with "...".
+ * @param {string} text
+ * @param {(text: string) => number} measure width in points of a string at the target font size
+ * @param {number} maxWidth available width in points
+ * @param {number} [maxLines=Infinity]
+ * @returns {string[]} at least one line
+ */
+export function wrapPdfText(text, measure, maxWidth, maxLines = Infinity) {
+  const words = String(text ?? "").split(/\s+/).filter(Boolean);
+  let lines = [];
+  let line = "";
+  const flush = () => { lines.push(line); line = ""; };
+  for (let word of words) {
+    while (measure(word) > maxWidth && word.length > 1) {
+      let cut = 1;
+      while (cut < word.length - 1 && measure(word.slice(0, cut + 1)) <= maxWidth) cut++;
+      if (line) flush();
+      lines.push(word.slice(0, cut));
+      word = word.slice(cut);
+    }
+    const candidate = line ? `${line} ${word}` : word;
+    if (line && measure(candidate) > maxWidth) {
+      flush();
+      line = word;
+    } else {
+      line = candidate;
+    }
+  }
+  if (line) flush();
+  if (lines.length === 0) lines = [""];
+  if (lines.length > maxLines) {
+    lines = lines.slice(0, maxLines);
+    let last = lines[maxLines - 1];
+    while (last.length > 0 && measure(`${last}...`) > maxWidth) last = last.slice(0, -1);
+    lines[maxLines - 1] = `${last}...`;
+  }
+  return lines;
+}
+
+const orNotSpecified = (value) =>
+  value === undefined || value === null || String(value).trim() === "" ? "Not specified" : value;
+
+/**
+ * Generate a valid, renderable PDF 1.4 genomic summary report (research use).
+ * Long values are wrapped inside the page margins (never clipped); nothing in the report is hard-coded to a particular gene.
  * @param {Object} params
- * @param {string} [params.subjectId="1000G_KHV_01"] Patient pseudonym
- * @param {string} [params.disease="1000 Genomes Project - Population Genomic Variation (KHV Cohort)"] Indication or condition
- * @param {string} [params.gene="ALDH2"] Analyzed gene
- * @param {string} [params.variant="rs671 (c.1510G>A, p.Glu504Lys)"] Benign/functional variant notation
- * @param {string} [params.date] Report issue date
+ * @param {string} [params.subjectId] Patient pseudonym ("Not specified" when empty)
+ * @param {string} [params.disease] Indication / cohort / trait ("Not specified" when empty)
+ * @param {string} [params.gene] Analyzed gene ("Not specified" when empty)
+ * @param {string} [params.variant] Variant notation ("Not specified" when empty)
+ * @param {string} [params.date] Report issue date (defaults to today, UTC)
  * @param {string} [params.fontName="Helvetica"] Base Type1 font name
+ * @param {string[]} [params.annotations] Caller-supplied interpretation lines (max 4); a neutral notice is printed when omitted
+ * @param {{rawDataHash?: string, rawCid?: string, chainId?: (string|number), txHash?: string, issuer?: string}} [params.integrity]
+ *        Optional on-chain anchor values printed in the footer so the report can be checked against the chain.
+ * @param {string} [params.disclaimer] Disclaimer line (defaults to a research-use-only notice)
  * @returns {Uint8Array} Valid ISO 32000 / PDF-1.4 binary bytes
  */
 export function generateClinicalPdfReport({
-  subjectId = "1000G_KHV_01",
-  disease = "1000 Genomes Project - Population Genomic Variation (KHV Cohort)",
-  gene = "ALDH2",
-  variant = "rs671 (c.1510G>A, p.Glu504Lys)",
+  subjectId,
+  disease,
+  gene,
+  variant,
   date = new Date().toISOString().split("T")[0],
   fontName = "Helvetica",
+  annotations = null,
+  integrity = null,
+  disclaimer = DEFAULT_REPORT_DISCLAIMER,
 } = {}) {
-  const safeSubjectId = escapePdfLiteral(subjectId);
-  const safeDisease = escapePdfLiteral(disease);
-  const safeGene = escapePdfLiteral(gene);
-  const safeVariant = escapePdfLiteral(variant);
-  const safeDate = escapePdfLiteral(date);
   const safeFontName = String(fontName || "Helvetica").replace(/[^A-Za-z0-9-]/g, "") || "Helvetica";
+  const measureText = createTextMeasurer(safeFontName);
 
-  const content = [
-    "BT",
-    "/F1 18 Tf",
-    "50 740 Td",
-    "(MOLECULAR GENOMICS & BIO-INFORMATICS SUMMARY) Tj",
-    "0 -30 Td",
-    "/F1 11 Tf",
-    `(Report Date: ${safeDate}) Tj`,
-    "0 -20 Td",
-    `(Sample Pseudonym ID: ${safeSubjectId}) Tj`,
-    "0 -20 Td",
-    `(Genomic Cohort / Trait: ${safeDisease}) Tj`,
-    "0 -20 Td",
-    `(Target Locus / Gene: ${safeGene}) Tj`,
-    "0 -20 Td",
-    `(Identified Molecular Variant: ${safeVariant}) Tj`,
-    "0 -30 Td",
-    "/F1 12 Tf",
-    "(MOLECULAR INTERPRETATION & ANNOTATION:) Tj",
-    "0 -20 Td",
-    "/F1 10 Tf",
-    "(1. Molecular variant catalogued in 1000 Genomes Project & dbSNP benchmark.) Tj",
-    "0 -18 Td",
-    "(2. Functional metabolic polymorphism associated with enzyme activity.) Tj",
-    "0 -18 Td",
-    "(3. Sequencing data is client-side encrypted with AES-256-GCM and pinned to IPFS.) Tj",
-    "0 -30 Td",
-    "/F1 9 Tf",
-    "(Integrity Verification: SHA-256 Authenticated Ciphertext on EVM Blockchain) Tj",
-    "ET",
-  ].join("\n");
+  const ops = [];
+  let y = PAGE_TOP_Y_PT;
+  // Emits one wrapped paragraph; `after` is the extra gap below its last line.
+  const block = (text, size, { after = size + 8, indent = 0, maxLines = 2 } = {}) => {
+    const lines = wrapPdfText(
+      toPdfPlainText(text),
+      (t) => measureText(t, size),
+      USABLE_WIDTH_PT - indent,
+      maxLines
+    );
+    const step = Math.round(size * 1.3);
+    lines.forEach((ln, i) => {
+      if (y >= PAGE_BOTTOM_Y_PT) {
+        ops.push("BT", `/F1 ${size} Tf`, `1 0 0 1 ${PAGE_MARGIN_X_PT + indent} ${y} Tm`, `(${escapePdfLiteral(ln)}) Tj`, "ET");
+      }
+      y -= i < lines.length - 1 ? step : after;
+    });
+  };
+
+  block("MOLECULAR GENOMICS & BIO-INFORMATICS SUMMARY", 18, { after: 30, maxLines: 2 });
+  block(`Report Date: ${orNotSpecified(date)}`, 11, { after: 20 });
+  block(`Sample Pseudonym ID: ${orNotSpecified(subjectId)}`, 11, { after: 20 });
+  block(`Genomic Cohort / Trait: ${orNotSpecified(disease)}`, 11, { after: 20 });
+  block(`Target Locus / Gene: ${orNotSpecified(gene)}`, 11, { after: 20 });
+  block(`Identified Molecular Variant: ${orNotSpecified(variant)}`, 11, { after: 30 });
+
+  block("MOLECULAR INTERPRETATION & ANNOTATION:", 12, { after: 20 });
+  const suppliedAnnotations = Array.isArray(annotations)
+    ? annotations.map((a) => String(a ?? "").trim()).filter(Boolean).slice(0, MAX_ANNOTATIONS)
+    : [];
+  const interpretation = suppliedAnnotations.length
+    ? suppliedAnnotations
+    : ["No variant-specific interpretation was supplied; this summary lists the submitted identifiers only."];
+  interpretation.push("Sequencing data is client-side encrypted with AES-256-GCM and pinned to IPFS.");
+  interpretation.forEach((text, idx) => block(`${idx + 1}. ${text}`, 10, { after: 18, indent: 0, maxLines: 2 }));
+
+  y -= 12; // extra gap before the footer
+  block(disclaimer, 9, { after: 14, maxLines: 2 });
+
+  const anchor = integrity && typeof integrity === "object" ? integrity : {};
+  const anchorRows = [
+    ["SHA-256 of encrypted package", anchor.rawDataHash],
+    ["IPFS CID", anchor.rawCid],
+    ["Chain ID", anchor.chainId],
+    ["Anchor transaction", anchor.txHash],
+    ["Issuer", anchor.issuer],
+  ].filter(([, v]) => v !== undefined && v !== null && String(v).trim() !== "");
+  if (anchorRows.length === 0) {
+    block(
+      "Integrity: a SHA-256 digest of the encrypted package is recorded on an EVM blockchain (digest not embedded in this report).",
+      8,
+      { after: 12, maxLines: 2 }
+    );
+  } else {
+    block("Integrity anchor (SHA-256 of the encrypted package is recorded on an EVM blockchain):", 8, { after: 12, maxLines: 2 });
+    anchorRows.forEach(([label, value]) => block(`${label}: ${value}`, 8, { after: 12, maxLines: 2 }));
+  }
+
+  const content = ops.join("\n");
 
   const getByteLen = (str) => encodeWinAnsiBytes(str).length;
   const streamBytes = encodeWinAnsiBytes(content);

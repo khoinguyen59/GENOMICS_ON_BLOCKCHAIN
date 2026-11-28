@@ -26,6 +26,67 @@ export const CIRCUIT_PRV_INPUTS = 2; // wires 4..5: witnessSecret, witnessSecret
 export const CIRCUIT_WIRES = 370;    // 0:ONE, 1..3:pubIn, 4..5:prvIn, 6..368:91 rounds MiMC-7, 369:domainBind
 export const CIRCUIT_CONSTRAINTS = 366; // 1 non-zero guard + 91*4 MiMC-7 gates + 1 domainBind gate
 
+/** BN254 BASE-field prime p: the coordinates of G1/G2 proof points live in Fq (not in the scalar field R_MOD). */
+export const P_MOD = 21888242871839275222246405745257275088696311157297823662689037894645226208583n;
+
+const UINT256_LIMIT = 1n << 256n;
+const INTEGER_STRING_RE = /^(?:0x[0-9a-fA-F]+|[0-9]+)$/;
+
+/**
+ * Strict conversion of a bigint | safe-integer number | decimal / 0x-hex string to BigInt.
+ * Returns null (never throws) so each caller can raise its own, readable error.
+ * Unlike Number(x), a non-numeric string can never slip through as NaN.
+ */
+function toBigIntStrict(value) {
+  if (typeof value === "bigint") return value;
+  if (typeof value === "number") return Number.isSafeInteger(value) ? BigInt(value) : null;
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return INTEGER_STRING_RE.test(trimmed) ? BigInt(trimmed) : null;
+  }
+  return null;
+}
+
+/** Validates an unsigned 256-bit integer (bountyId / chainId / vkEpoch ...) and returns it as BigInt. */
+export function toUint256(value, label = "value") {
+  const big = toBigIntStrict(value);
+  if (big === null || big < 0n || big >= UINT256_LIMIT) {
+    throw new Error(`Invalid ${label}: expected an unsigned 256-bit integer.`);
+  }
+  return big;
+}
+
+/** Validates a bounty id (integer >= 1). Rejects "abc", "1.5", NaN, negatives and unsafe floats. */
+export function parseBountyId(value) {
+  const big = toBigIntStrict(value);
+  if (big === null || big < 1n || big >= UINT256_LIMIT) {
+    throw new Error("Valid bountyId (>= 1) is required.");
+  }
+  return big;
+}
+
+/** Number when it is exactly representable, decimal string otherwise (Number() would silently round). */
+function bountyIdForReport(big) {
+  return big <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(big) : big.toString();
+}
+
+function parseBn254BaseFieldElement(value, label) {
+  const big = toBigIntStrict(value);
+  if (big === null || big < 0n || big >= P_MOD) {
+    throw new Error(`Invalid Groth16 proof: ${label} must be an integer in [0, p) of the BN254 base field.`);
+  }
+  return big.toString();
+}
+
+function parseOptionalSafeInteger(value, label, min) {
+  if (value === undefined || value === null || value === "") return null;
+  const big = toBigIntStrict(value);
+  if (big === null || big < BigInt(min) || big > BigInt(Number.MAX_SAFE_INTEGER)) {
+    throw new Error(`Invalid External Groth16 Proof JSON: ${label} must be an integer >= ${min} (and a safe integer).`);
+  }
+  return Number(big);
+}
+
 export const MIMC_ROUND_CONSTANTS = Array.from({ length: MIMC_ROUNDS }, (_, i) =>
   BigInt(ethers.keccak256(ethers.toUtf8Bytes(`GENOCHAIN_MIMC7_BN254_R${i}`))) % R_MOD
 );
@@ -129,10 +190,10 @@ export function computeDomainHash({
     [
       targetTraitId,
       ethers.getAddress(donorAddress),
-      BigInt(bountyId),
+      toUint256(bountyId, "bountyId"),
       ethers.getAddress(verifierAddress),
-      BigInt(chainId),
-      BigInt(vkEpoch),
+      toUint256(chainId, "chainId"),
+      toUint256(vkEpoch, "vkEpoch"),
     ]
   );
   return BigInt(ethers.keccak256(packed)) % R_MOD;
@@ -289,9 +350,7 @@ export function buildGenomicWitnessBinary({
   chainId = 31337,
   vkEpoch = 1,
 }) {
-  if (!bountyId || Number(bountyId) < 1) {
-    throw new Error("Valid bountyId (>= 1) is required.");
-  }
+  const bountyIdValue = parseBountyId(bountyId);
   if (!verifierAddress || !ethers.isAddress(verifierAddress)) {
     throw new Error("Valid verifierAddress is required.");
   }
@@ -314,7 +373,7 @@ export function buildGenomicWitnessBinary({
   const domainHash = computeDomainHash({
     targetTraitId,
     donorAddress,
-    bountyId,
+    bountyId: bountyIdValue,
     verifierAddress,
     chainId,
     vkEpoch,
@@ -517,7 +576,7 @@ export async function generateGroth16ProofWithZkey({
     publicSignals,
     variantCommitment: boundCommitment,
     publicSignal: publicSignal.toString(),
-    bountyId: Number(bountyId),
+    bountyId: bountyIdForReport(parseBountyId(bountyId)),
     vkEpoch: Number(vkEpoch),
     protocol: "groth16",
     curve: "bn128",
@@ -553,14 +612,15 @@ export function parseExternalGroth16Proof(explicitProofInput) {
     throw new Error("Invalid Groth16 proof structure: expected { proof: { a: [2], b: [[2],[2]], c: [2] } }.");
   }
   // snarkjs outputs G2 as [[x_re, x_im], [y_re, y_im]]; EIP-197 expects [[x_im, x_re], [y_im, y_re]]
+  const coord = (value, label) => parseBn254BaseFieldElement(value, label);
   const normalizedB = isRawSnarkjs
     ? [
-        [String(b[0][1]), String(b[0][0])],
-        [String(b[1][1]), String(b[1][0])],
+        [coord(b[0][1], "b[0][1]"), coord(b[0][0], "b[0][0]")],
+        [coord(b[1][1], "b[1][1]"), coord(b[1][0], "b[1][0]")],
       ]
     : [
-        [String(b[0][0]), String(b[0][1])],
-        [String(b[1][0]), String(b[1][1])],
+        [coord(b[0][0], "b[0][0]"), coord(b[0][1], "b[0][1]")],
+        [coord(b[1][0], "b[1][0]"), coord(b[1][1], "b[1][1]")],
       ];
   const rawComm =
     typeof rawObj.variantCommitment === "string" ? rawObj.variantCommitment.trim() : "";
@@ -582,13 +642,13 @@ export function parseExternalGroth16Proof(explicitProofInput) {
   }
   return {
     proof: {
-      a: [String(a[0]), String(a[1])],
+      a: [coord(a[0], "a[0]"), coord(a[1], "a[1]")],
       b: normalizedB,
-      c: [String(c[0]), String(c[1])],
+      c: [coord(c[0], "c[0]"), coord(c[1], "c[1]")],
     },
     variantCommitment: parsedCommitment,
-    bountyId: rawObj.bountyId !== undefined ? Number(rawObj.bountyId) : null,
-    vkEpoch: rawObj.vkEpoch !== undefined ? Number(rawObj.vkEpoch) : null,
+    bountyId: parseOptionalSafeInteger(rawObj.bountyId, "bountyId", 1),
+    vkEpoch: parseOptionalSafeInteger(rawObj.vkEpoch, "vkEpoch", 0),
     donorAddress: rawObj.donorAddress || null,
     targetTraitId: rawObj.targetTraitId || null,
   };

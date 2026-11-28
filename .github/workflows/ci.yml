@@ -63,6 +63,11 @@ jobs:
           node scripts/audit/test_diverse_datasets_e2e.mjs
           node scripts/audit/test_chunked_fuzz.mjs
 
+      - name: Crypto Review Regression Tests & zk Circuit Artifact Consistency Gate (r1cs == circom == JS witness)
+        run: |
+          npm run test:crypto
+          npm run audit:zk
+
       - name: Slither Security Scan (0 High / 0 Medium - Runs After Hardhat Tests)
         run: npm run audit:slither
 

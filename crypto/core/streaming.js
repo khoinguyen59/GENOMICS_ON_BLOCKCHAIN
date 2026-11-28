@@ -10,8 +10,6 @@
 import {
   generateSymmetricKey,
   importKeyFromHex,
-  packCiphertextPayload,
-  unpackCiphertextPayload,
   computeDataHash,
   decryptGenomicPayload,
   consumeKeyInvocationBudget,
@@ -98,6 +96,11 @@ export async function encryptGenomicDataChunked(data, options = {}) {
   } else if (data instanceof ArrayBuffer) {
     rawBytes = new Uint8Array(data);
     totalBytes = rawBytes.length;
+  } else if (ArrayBuffer.isView(data)) {
+    // DataView / Uint16Array / Float32Array ...: reinterpret the underlying bytes. Falling through to the
+    // array-like branch below would copy element VALUES (mod 256) and silently corrupt the plaintext.
+    rawBytes = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+    totalBytes = rawBytes.length;
   } else if (data && typeof data.arrayBuffer === "function") {
     rawBytes = new Uint8Array(await data.arrayBuffer());
     totalBytes = rawBytes.length;
@@ -105,8 +108,10 @@ export async function encryptGenomicDataChunked(data, options = {}) {
     rawBytes = new Uint8Array(data);
     totalBytes = rawBytes.length;
   } else {
-    rawBytes = new Uint8Array(0);
-    totalBytes = 0;
+    // Previously any other type (null, undefined, number, plain object ...) was silently encrypted as an EMPTY file.
+    throw new TypeError(
+      "encryptGenomicDataChunked: unsupported data type; expected string, Blob/File, ArrayBuffer, typed array or array-like of bytes."
+    );
   }
 
   if (totalBytes > MAX_ALLOWED_PLAIN_BYTES) {

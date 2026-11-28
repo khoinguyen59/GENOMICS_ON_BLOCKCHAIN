@@ -52,6 +52,53 @@ export function clearVaultMemoryCache() {
   activeVaultAccount = "";
 }
 
+/**
+ * Returns a trimmed, lower-cased account string, or null when `account` is not a usable string.
+ * Lets callers fail closed (instead of throwing an uncontrolled TypeError) when no wallet is connected.
+ */
+function normalizeAccountOrNull(account) {
+  if (typeof account !== "string") return null;
+  const trimmed = account.trim().toLowerCase();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+/**
+ * Explicitly selects the active vault account, i.e. the scope used when an API below is called
+ * without an `account` argument. null / "" / non-string clears it (fail-closed).
+ *
+ * This is the only way a READ-ONLY flow (e.g. a wallet connect handler) should establish the session
+ * scope: read helpers such as loadPersistentKeyPair() never mutate it.
+ */
+export function setActiveVaultAccount(account) {
+  activeVaultAccount = normalizeAccountOrNull(account) || "";
+  return activeVaultAccount;
+}
+
+/** Reads one scoped capsule from IndexedDB, falling back to the in-memory store. Returns null when absent. */
+async function readScopedCapsule(scopedKey, warnLabel) {
+  try {
+    const idb = await withStore("vault_capsules", "readonly", (s) => s.get(scopedKey));
+    if (typeof idb === "string" && idb.length > 0) return idb;
+  } catch (e) { console.warn(warnLabel, e); }
+  if (memCapsuleStore.has(scopedKey)) return memCapsuleStore.get(scopedKey);
+  return null;
+}
+
+/** True when a JSON capsule string declares `targetAccount` in its `field` ("owner" | "recipient"). */
+function capsuleDeclaresAccount(capsule, field, targetAccount) {
+  if (typeof capsule !== "string" || !capsule.startsWith("{")) return false;
+  try {
+    const parsed = JSON.parse(capsule);
+    return typeof parsed?.[field] === "string" && parsed[field].toLowerCase() === targetAccount;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * WRITE-PATH ONLY: a write that names an account makes it the active vault account (session-establishing).
+ * Read helpers must never call this; they resolve the scope locally without mutating module state.
+ */
 function resolveScopeAccount(account) {
   if (account && typeof account === "string" && account.trim().length > 0) {
     activeVaultAccount = account.trim().toLowerCase();
@@ -202,11 +249,14 @@ export async function loadOwnerCapsulePersistent(rawCid, account = null) {
       ? account.trim().toLowerCase()
       : (activeVaultAccount || "global");
   const scopedKey = `${targetAccount}:${rawCid}`;
-  try {
-    const idb = await withStore("vault_capsules", "readonly", (s) => s.get(scopedKey));
-    if (typeof idb === "string" && idb.length > 0) return idb;
-  } catch (e) { console.warn("IndexedDB capsule read error:", e); }
-  if (memCapsuleStore.has(scopedKey)) return memCapsuleStore.get(scopedKey);
+  const direct = await readScopedCapsule(scopedKey, "IndexedDB capsule read error:");
+  if (direct !== null) return direct;
+  // Stay consistent with getAllOwnerCapsulesPersistent(): a legacy record kept under the shared "global:" scope
+  // is visible to an account only when the record itself declares that account as its owner.
+  if (targetAccount !== "global") {
+    const legacy = await readScopedCapsule(`global:${rawCid}`, "IndexedDB capsule read error:");
+    if (legacy !== null && capsuleDeclaresAccount(legacy, "owner", targetAccount)) return legacy;
+  }
   return null;
 }
 
@@ -236,11 +286,16 @@ export async function loadBuyerCapsulePersistent(rawCid, account = null) {
       : activeVaultAccount;
   if (!targetAccount) return null;
   const scopedKey = `${BUYER_SCOPE_PREFIX}${targetAccount}:${rawCid}`;
-  try {
-    const idb = await withStore("vault_capsules", "readonly", (s) => s.get(scopedKey));
-    if (typeof idb === "string" && idb.length > 0) return idb;
-  } catch (e) { console.warn("IndexedDB buyer capsule read error:", e); }
-  if (memCapsuleStore.has(scopedKey)) return memCapsuleStore.get(scopedKey);
+  const direct = await readScopedCapsule(scopedKey, "IndexedDB buyer capsule read error:");
+  if (direct !== null) return direct;
+  // Mirror getAllBuyerCapsulesPersistent(): accept a legacy "buyer:global:" record only if it declares this recipient.
+  if (targetAccount !== "global") {
+    const legacy = await readScopedCapsule(
+      `${BUYER_SCOPE_PREFIX}global:${rawCid}`,
+      "IndexedDB buyer capsule read error:"
+    );
+    if (legacy !== null && capsuleDeclaresAccount(legacy, "recipient", targetAccount)) return legacy;
+  }
   return null;
 }
 
@@ -694,15 +749,22 @@ export async function importSovereignKeyVault({ signer, account, backupData, pas
   };
 }
 export async function savePersistentKeyPair(account, keyPair) {
-  const norm = account.toLowerCase();
-  activeVaultAccount = norm;
+  const norm = normalizeAccountOrNull(account);
+  if (!norm) {
+    throw new TypeError("savePersistentKeyPair: account must be a non-empty string (is the wallet connected?).");
+  }
+  if (!keyPair || typeof keyPair !== "object" || !keyPair.publicKey || !keyPair.privateKey) {
+    throw new TypeError("savePersistentKeyPair: keyPair must contain both publicKey and privateKey.");
+  }
+  activeVaultAccount = norm; // write path: explicitly makes this account the active vault scope
   await withStore("keypairs", "readwrite", (s) => s.put(keyPair, norm));
   memKeyStore.set(norm, keyPair);
   return true;
 }
 export async function loadPersistentKeyPair(account) {
-  const norm = account.toLowerCase();
-  activeVaultAccount = norm;
+  // READ PATH: must NEVER mutate module-global activeVaultAccount (use setActiveVaultAccount() to select a session).
+  const norm = normalizeAccountOrNull(account);
+  if (!norm) return null; // fail closed, like the other load* helpers
   const res = await withStore("keypairs", "readonly", (s) => s.get(norm));
   if (res && typeof res === "object" && res.publicKey && res.privateKey) return res;
   return memKeyStore.get(norm) || null;

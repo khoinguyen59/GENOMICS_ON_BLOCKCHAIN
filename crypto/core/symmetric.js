@@ -41,11 +41,13 @@ export async function exportKeyToHex(key) {
 }
 
 /**
- * Import a symmetric CryptoKey from a hexadecimal string
+ * Import a symmetric CryptoKey from a hexadecimal string.
  * @param {string} hexKey 
+ * @param {boolean} [extractable=true] Set false for session-only keys that never need re-export.
+ *   Note: consumeKeyInvocationBudget requires extractable=true to track per-key nonce budget.
  * @returns {Promise<CryptoKey>}
  */
-export async function importKeyFromHex(hexKey) {
+export async function importKeyFromHex(hexKey, extractable = true) {
   if (!hexKey || typeof hexKey !== "string") {
     throw new Error("Invalid hex key: input must be a non-empty string.");
   }
@@ -64,9 +66,19 @@ export async function importKeyFromHex(hexKey) {
     "raw",
     bytes,
     { name: "AES-GCM", length: 256 },
-    true,
+    extractable,
     ["encrypt", "decrypt"]
   );
+}
+
+/**
+ * Import a symmetric CryptoKey for one-shot decrypt only (non-extractable, session use).
+ * Use this when you will decrypt once and discard the key — provides defense in depth.
+ * @param {string} hexKey
+ * @returns {Promise<CryptoKey>}
+ */
+export async function importKeyFromHexNonExtractable(hexKey) {
+  return importKeyFromHex(hexKey, false);
 }
 
 function parseIvHex(iv) {
@@ -150,6 +162,9 @@ export async function computeDataHash(data) {
  * @returns {Promise<boolean>}
  */
 export async function verifyDataIntegrity(data, expectedHash) {
+  if (typeof expectedHash !== "string" || !expectedHash.trim()) {
+    return false;
+  }
   const actualHash = await computeDataHash(data);
   const normExpected = expectedHash.toLowerCase().startsWith("0x")
     ? expectedHash.toLowerCase()
@@ -311,4 +326,20 @@ export async function decryptGenomicData(ciphertext, iv, key, asString = true) {
 export async function decryptGenomicPayload(payloadBytes, key, asString = true) {
   const { iv, ciphertext } = unpackCiphertextPayload(payloadBytes);
   return await decryptGenomicData(ciphertext, iv, key, asString);
+}
+
+/**
+ * Zeroize a Uint8Array or ArrayBuffer to minimize plaintext residue in memory.
+ * Call after using sensitive key material or plaintext buffers.
+ * @param {Uint8Array|ArrayBuffer|null} buf
+ */
+export function zeroizeBuffer(buf) {
+  if (!buf) return;
+  if (buf instanceof Uint8Array) {
+    buf.fill(0);
+  } else if (buf instanceof ArrayBuffer) {
+    new Uint8Array(buf).fill(0);
+  } else if (ArrayBuffer.isView(buf)) {
+    new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength).fill(0);
+  }
 }

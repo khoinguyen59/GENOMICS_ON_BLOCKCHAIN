@@ -269,11 +269,20 @@ export async function publishGenomicDataset({
     encryptedRaw = await encryptGenomicData(rawFileText);
   }
 
+  // Report the variant identifier the owner actually supplied (same sources as the blinded "rsid" tag below) instead of a
+  // hard-coded "Verified ..." label: nothing in this flow independently verifies the variant, so the PDF must not claim it.
+  const pdfRsIdMatch =
+    String(geneSymbol || "").match(/\b(rs\d+)\b/i) ||
+    String(hpoCode || "").match(/\b(rs\d+)\b/i) ||
+    (typeof rawFileText === "string" ? rawFileText.match(/\b(rs\d+)\b/i) : null);
   const clinicalPdf = generateClinicalPdfReport({
     subjectId,
     disease,
     gene: geneSymbol,
-    variant: "Verified Next-Gen Sequencing Variant"
+    variant: pdfRsIdMatch ? pdfRsIdMatch[1] : "",
+    annotations: [
+      `Declared by the data owner (not independently verified): clinical significance "${clinicalSignificance}", zygosity "${zygosity}".`
+    ]
   });
   const cryptoApi = typeof window !== "undefined" && window.crypto ? window.crypto : globalThis.crypto;
   const summaryKeyBytes = new Uint8Array(32);
